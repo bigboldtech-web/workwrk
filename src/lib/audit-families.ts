@@ -26,7 +26,8 @@ export const AUDIT_FAMILY_LABELS: Record<AuditFamily, string> = {
 const FAMILY_MATCH: Record<Exclude<AuditFamily, "all">, string[]> = {
   access: [
     "access.", "org_role.", "membership.", "visibility.", "user.invited", "user_added", "user_removed",
-    "reporting_line_changed", "org.switch.", "invitation.",
+    // reporting_line_refused: a manager the identity provider asked for and this workspace did not set (src/lib/scim-manager.ts).
+    "reporting_line_changed", "reporting_line_refused", "org.switch.", "invitation.",
   ],
   security: ["security.", "login", "logout", "mfa_", "password_", "signed_out_all_devices", "auth.", "terms.", "sso.", "mcp.app."],
   data: ["data.", "csv_exported", "tenant_export", "audit.purged", "legacy_marketing_imported", "import.", "mcp.tool."],

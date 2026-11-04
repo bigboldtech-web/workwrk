@@ -14,6 +14,7 @@ import { useBoot } from "@/components/layout/os/boot-context";
 import { NEUTRAL_TILE } from "@/components/ui/entity-tile";
 import { Chip } from "@/components/ui/chip";
 import { ToneChip } from "@/components/people/person-bits";
+import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
 import Link from "next/link";
 import {
   GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
@@ -39,8 +40,20 @@ import { KpiDialog, type KpiDialogKpi } from "@/components/alignment/kpi-dialog"
 
 // ─────────────────────────── types ───────────────────────────
 type Person = { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null };
-/** A role holder + how many of the role's template KRAs they're missing. */
-type Holder = Person & { missingKras: number };
+/**
+ * A role holder + how many of the role's template KRAs they're missing.
+ * `elsewhere`: they work here from another workspace's account, so no KRA
+ * is assigned to them here (the step 5 review M1) and their row offers no
+ * Seed; what they already hold of this title's KRAs (from when their account
+ * was here) still counts, as anyone's (the fixes review, finding 8).
+ */
+type Holder = Person & { missingKras: number | null; elsewhere?: boolean };
+
+/** The People tab's words, in the drift slot, for a holder here through a membership who holds none of the title's KRAs (the final review, product L3). */
+export const KRAS_NOT_HERE = "KRAs not assigned here";
+/** In the Seed button's place, for a holder here through a membership who misses some of the title's KRAs (the fixes review, finding 8). */
+export const SEED_NOT_HERE = "Can't be seeded here";
+
 type KpiDirection = "HIGHER" | "LOWER" | "MAINTAIN";
 type Kpi = {
   id: string; name: string; description: string | null; unit: string | null; frequency: string; type: string;
@@ -219,15 +232,33 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
                 <span className="truncate text-row text-ink">{personName(p)}</span>
               </Link>
               {/* Drift is people data: the server strips it for readers. */}
-              {canEdit ? (
+              {canEdit && p.elsewhere && totalTemplates > 0 && missing >= totalTemplates ? (
+                // Someone here through a membership who holds none of them:
+                // none is assigned to them here, so their row says so rather
+                // than read as up to date by its silence
+                // (docs/plans/workspace-status-2.md, the final review,
+                // product L3).
+                <span className="text-sm text-ink-2">{KRAS_NOT_HERE}</span>
+              ) : canEdit && p.missingKras !== null ? (
                 missing > 0 ? (
                   <>
                     <ToneChip tone="warning" label={`Missing ${missing} of ${totalTemplates} KRAs`} />
-                    <button type="button" disabled={seedingId === p.id} onClick={() => void seedHolder(p)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
-                      {seedingId === p.id ? "Seeding" : "Seed"}
-                    </button>
+                    {p.elsewhere ? (
+                      // What they hold came while their account was here; no
+                      // more can be assigned to them here (the fixes review,
+                      // finding 8), so no Seed that would be refused.
+                      <span className="text-sm text-ink-2" title={ALIGNMENT_NOT_HERE}>{SEED_NOT_HERE}</span>
+                    ) : (
+                      <button type="button" disabled={seedingId === p.id} onClick={() => void seedHolder(p)} className="inline-flex h-7 items-center rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
+                        {seedingId === p.id ? "Seeding" : "Seed"}
+                      </button>
+                    )}
                   </>
                 ) : totalTemplates > 0 ? <Chip as="span">Up to date</Chip> : null
+              ) : canEdit && totalTemplates > 0 ? (
+                // A holder with no count (missingKras null): said as for
+                // someone here through a membership who holds none.
+                <span className="text-sm text-ink-2">{KRAS_NOT_HERE}</span>
               ) : null}
             </li>
           );

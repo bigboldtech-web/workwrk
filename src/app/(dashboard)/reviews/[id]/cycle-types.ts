@@ -134,7 +134,20 @@ export type LaunchPreview = {
   covers: string | null;
   /** A manager's launch: only their own reporting line is ever asked. */
   clipped: boolean;
+  /**
+   * The people here through a membership this audience would cover, who are
+   * not reviewed here (the final review of workspace-status-2, product L4).
+   * Absent from a server before it: none said.
+   */
+  notReviewedElsewhere?: number;
 };
+
+/** Who a launch leaves out, and why, after the confirm's count (the final review, product L4); empty for none. */
+export function notReviewedElsewhereText(p: Pick<LaunchPreview, "notReviewedElsewhere">): string {
+  const n = p.notReviewedElsewhere ?? 0;
+  if (n <= 0) return "";
+  return ` ${n === 1 ? "1 person who works" : `${n} people who work`} here from another workspace's account ${n === 1 ? "is" : "are"} not reviewed, since reviews are not made here for people who do.`;
+}
 
 /**
  * Who a cycle covers, in words, from its own audience rather than from who
@@ -155,7 +168,7 @@ export function audiencePhrase(p: Pick<LaunchPreview, "audienceType" | "named" |
 /** The Launch cycle confirm's body; null when nobody is covered (no Launch then). */
 export function launchConfirmText(p: LaunchPreview): string | null {
   if (p.count <= 0) return null;
-  return `This creates a review for ${peopleCount(p.count)} (${audiencePhrase(p)}) and emails each of them.`;
+  return `This creates a review for ${peopleCount(p.count)} (${audiencePhrase(p)}) and emails each of them.${notReviewedElsewhereText(p)}`;
 }
 
 /**
@@ -163,8 +176,8 @@ export function launchConfirmText(p: LaunchPreview): string | null {
  * cycle's audience is fixed once it is created, so the way on is a person
  * joining it, or Cancel cycle and a new one (never "change who it covers").
  */
-export function launchNobodyText(p: Pick<LaunchPreview, "audienceType" | "named" | "covers" | "clipped">): string {
-  return `Nobody active is covered (${audiencePhrase(p)}), so there is no one to launch it for yet. It can launch once someone active is in it, or cancel it and start a new cycle.`;
+export function launchNobodyText(p: Pick<LaunchPreview, "audienceType" | "named" | "covers" | "clipped" | "notReviewedElsewhere">): string {
+  return `Nobody active is covered (${audiencePhrase(p)}), so there is no one to launch it for yet.${notReviewedElsewhereText(p)} It can launch once someone active is in it, or cancel it and start a new cycle.`;
 }
 
 /**

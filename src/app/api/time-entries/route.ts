@@ -193,9 +193,12 @@ export async function POST(req: NextRequest) {
 
   // Upsert timesheet first so the FK is satisfied. Concurrent calls
   // for the same week will race, so the unique constraint on
-  // (userId, weekStartDate) catches it; we retry the find on conflict.
+  // (userId, organizationId, weekStartDate) catches it; we retry the find
+  // on conflict. This workspace's week only (docs/plans/workspace-status-2.md,
+  // the final review, security M1): before, a B entry landed on whichever
+  // timesheet the week already had, A's included, approved by A's manager.
   let timesheet = await prisma.timesheet.findUnique({
-    where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+    where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
   });
   if (!timesheet) {
     // The approver is their manager, never an Agent (manager-lines.ts).
@@ -211,7 +214,7 @@ export async function POST(req: NextRequest) {
       });
     } catch {
       timesheet = await prisma.timesheet.findUnique({
-        where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+        where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
       });
     }
   }

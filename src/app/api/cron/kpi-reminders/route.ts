@@ -22,16 +22,41 @@ import { cronJob } from "@/lib/cron-result";
 
 const DEDUPE_DAYS = 6;
 
+/** A record still owed: never submitted, or sent back by a manager. */
+const OPEN: Array<"PENDING" | "REJECTED"> = ["PENDING", "REJECTED"];
+
 async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
-  // Everyone who owes a score: any KPI record still PENDING or REJECTED.
-  const owed = await prisma.kPIRecord.groupBy({
-    by: ["userId"],
-    where: { status: { in: ["PENDING", "REJECTED"] } },
-    _count: { _all: true },
+  // Everyone who owes a score: any KPI record still PENDING or REJECTED, of
+  // the workspace the account is in, where the nudge's link opens
+  // (docs/plans/workspace-status-2.md, the final review, product M5): a
+  // record names no workspace of its own, and someone who joined another
+  // workspace by invitation holds its records too, which only that
+  // workspace's KRAs tab shows.
+  //
+  // Counted by the database, one row per person, as before M5 (the fixes
+  // review, finding 6: M5 read every open record with two relations into
+  // memory, every day): first the workspaces whose KPIs have an open
+  // record, one row each, then per workspace one grouped count of the open
+  // records of its KPIs held by the people anchored there. Each person's
+  // account is in one workspace, so each person is counted once, exactly
+  // as M5 counted them.
+  const workspaces = await prisma.kPI.groupBy({
+    by: ["organizationId"],
+    where: { records: { some: { status: { in: OPEN } } } },
   });
+  const owed: Array<{ userId: string; _count: { _all: number } }> = [];
+  for (const { organizationId } of workspaces) {
+    owed.push(
+      ...(await prisma.kPIRecord.groupBy({
+        by: ["userId"],
+        where: { status: { in: OPEN }, kpi: { organizationId }, user: { organizationId } },
+        _count: { _all: true },
+      })),
+    );
+  }
 
   if (owed.length === 0) {
     return Response.json({ ran: true, at: new Date().toISOString(), usersOwed: 0, nudgesCreated: 0 });

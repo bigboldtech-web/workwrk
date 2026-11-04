@@ -39,7 +39,9 @@ import {
   dataSectionSchema,
 } from "@/lib/settings/org-settings-sections";
 import {
+  IDP_SETS_REPORTS_TO,
   dataSettingsOf,
+  idpSetsReportsToOf,
   localeSettingsOf,
   normalizeDomain,
   retentionOf,
@@ -498,6 +500,26 @@ export async function PATCH(req: Request) {
             oldValue: Object.fromEntries(moved.map((k) => [k, before[k]])),
             newValue: Object.fromEntries(moved.map((k) => [k, after[k]])),
             metadata: { keys: moved },
+          });
+        }
+        // Provisioning's switch (docs/plans/workspace-status-2.md, the final
+        // review, product H1): whether the identity provider sets Reports to
+        // here. Its own row, in words, since turning it on lets the provider
+        // replace every Reports to set here at its next push of each person.
+        const idpBefore = idpSetsReportsToOf({ security: current });
+        const idpAfter = idpSetsReportsToOf({ security: next });
+        if (idpBefore !== idpAfter) {
+          logAuditEvent({
+            type: "security.provisioning.updated",
+            actorId: (session.user as SessionUser).id,
+            organizationId: orgId,
+            description: idpAfter ? "Let the identity provider set Reports to" : "Stopped the identity provider setting Reports to",
+            targetType: "Organization",
+            targetId: orgId,
+            severity: "warning",
+            oldValue: { [IDP_SETS_REPORTS_TO]: idpBefore },
+            newValue: { [IDP_SETS_REPORTS_TO]: idpAfter },
+            metadata: { keys: [IDP_SETS_REPORTS_TO] },
           });
         }
         break;

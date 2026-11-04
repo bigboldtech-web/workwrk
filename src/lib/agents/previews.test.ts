@@ -28,6 +28,9 @@ const db = vi.hoisted(() => ({
   lists: [] as Array<{ id: string; name: string; statuses: unknown; productSlug: string | null; space: { name: string } | null }>,
   contribute: new Set<string>(),
   contracts: {} as Record<string, { id: string; organizationId: string; title: string; ownerId: string | null }>,
+  /** What managerCandidateIn answers for an invitation's manager (workspace-status-2 E10), with the call's options. */
+  candidates: {} as Record<string, string>,
+  candidateCalls: [] as Array<{ org: string; id: string; live?: boolean }>,
 }));
 
 vi.mock("@/lib/item-gate", () => ({
@@ -67,6 +70,13 @@ vi.mock("@/lib/talk-gate", () => ({
 vi.mock("@/lib/doc-access", () => ({ docAccess: async () => ({ unlockedRole: "EDIT", locked: false, canManage: false }) }));
 vi.mock("@/lib/plan-limits", () => ({ checkPlanLimit: async () => ({ allowed: true }) }));
 vi.mock("@/lib/goals/goal-rights", () => ({ mayEditGoal: () => db.companyGoalOk }));
+// The invitation's manager at the seat here (manager-candidate.ts, tested there).
+vi.mock("@/lib/access/manager-candidate", () => ({
+  managerCandidateIn: async (org: string, id: string, opts: { live?: boolean } = {}) => {
+    db.candidateCalls.push({ org, id, live: opts.live });
+    return db.candidates[id] ?? "not_found";
+  },
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: {
@@ -74,6 +84,7 @@ vi.mock("@/lib/prisma", () => ({
         const e = a.where.email?.equals?.toLowerCase();
         return e ? (db.people[e] ?? null) : null;
       },
+      findUnique: async (a: { where: { id: string } }) => Object.values(db.people).find((p) => p.id === a.where.id) ?? null,
     },
     // Nobody here through a membership in this file (livePersonByEmail's
     // second half, docs/plans/workspace-status-2.md step 6).
@@ -151,6 +162,8 @@ function task(id: string, o: { personal: boolean; ownerId?: string | null; assig
 
 beforeEach(() => {
   db.accounts = {};
+  db.candidates = {};
+  db.candidateCalls = [];
   db.tasks = {};
   db.people = { [ME.email]: ME, [MAX.email]: MAX };
   db.personalBoards = new Set(["b-personal"]);
@@ -338,6 +351,32 @@ describe("the card's choices", () => {
     if (!r.ok) return;
     expect(r.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
     expect(r.input).toEqual({ email: "priya@acme.eu", ...legacyLevelRow("EMPLOYEE") });
+  });
+
+  // workspace-status-2 E4, E10 (step 4): the manager is read at the seat
+  // here (live, never an Agent here), and since the signed-in join writes
+  // it, an existing account's invitation stores and names it too.
+  it("checks the manager at the seat here, and stores and names it for someone who already uses WorkwrK", async () => {
+    db.people["max@x.com"] = MAX;
+    db.candidates = { max: "ok", rita: "inactive", ada: "agent_cannot_manage" };
+    db.candidateCalls = [];
+    const fresh = await prepareCall("invite_person_with_role", { email: "new@x.com", managerId: "max" }, ctx());
+    expect(fresh.ok && fresh.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.manager("Max Chen"), PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+    expect(db.candidateCalls).toEqual([{ org: "org", id: "max", live: true }]);
+    // Before: the manager had to be anchored here with a live account, so a
+    // manager here through a membership was "not in this workspace", and
+    // one this workspace deactivated through their membership was named.
+    for (const id of ["rita", "ada", "nobody"]) {
+      expect(await prepareCall("invite_person_with_role", { email: "new@x.com", managerId: id }, ctx()), id).toEqual({ ok: false, error: INVITE_CARD.unknown("manager") });
+    }
+    // An existing account: before, the manager was neither stored nor named.
+    db.accounts["priya@acme.eu"] = { id: "u-eu", organizationId: "org-eu" };
+    const existing = await prepareCall("invite_person_with_role", { email: "priya@acme.eu", managerId: "max", roleId: "r1" }, ctx());
+    expect(existing.ok).toBe(true);
+    if (!existing.ok) return;
+    expect(existing.preview.lines).toEqual([INVITE_CARD.level("Employee"), INVITE_CARD.manager("Max Chen"), INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending]);
+    expect(existing.input).toEqual({ email: "priya@acme.eu", ...legacyLevelRow("EMPLOYEE"), managerId: "max" });
+    expect(INVITE_CARD.existingAccount).not.toMatch(/manager/);
   });
 
   it("never offers it where a manager set the tool to ask", async () => {

@@ -19,12 +19,17 @@
 // membership person the row carries `profileHere: false`, and the job title,
 // department, office and weekly hours are the ones THIS workspace holds on
 // their membership (D18; the final review, product H1), never the
-// account's, which are the workspace it is anchored to; the drawer shows
-// them read-only. The department, office and job title filters match a
+// account's, which are the workspace it is anchored to; the drawer edits
+// them there for the people who may write them
+// (docs/plans/workspace-status-2.md E7, E8, step 5; read-only before). The
+// department, office and job title filters match a
 // membership person by those same ids (security L1). For every row,
 // anchored here or not, a job title, department or office is shown only
 // when it is one of this workspace's own, and a manager only when they hold
-// a seat here (profile-here.ts, D18). The
+// a seat here (profile-here.ts, D18): the manager their seat HERE names
+// (docs/plans/workspace-status-2.md E1, step 3), the account's line for
+// someone anchored here and the membership's own line for someone here
+// through one, never the account's line of another workspace. The
 // Owners, the Admins and the People team are counted over the same people
 // (liveAdminsOf, peopleTeamIdsFor). With membership people among the matches,
 // a sort by role, status, department, title or join date reads each one's
@@ -93,8 +98,11 @@ export interface MemberRow {
   /**
    * False for someone who works here through a membership (D11): their job
    * title, department, office and capacity are the ones their membership
-   * here holds (D18, the final review, product H1), shown read-only while
-   * they work in another workspace. True for someone anchored here.
+   * here holds (D18, the final review, product H1), edited here on that
+   * membership (workspace-status-2.md E7, step 5); their name, address,
+   * phone, photo and birthday are the account's, their sign-ins are logged
+   * where it is anchored, and Admin scopes are not held here. True for
+   * someone anchored here.
    */
   profileHere: boolean;
 }
@@ -106,7 +114,7 @@ interface MemberSeat {
   status: string;
   createdAt: Date;
   adminScopes: string[];
-  /** The manager stored on their account (one line per account, D18). */
+  /** Their manager HERE: the line their membership holds (workspace-status-2.md E1), never the account's. */
   managerId: string | null;
   /** What this workspace holds of them on the membership (D18, product H1). */
   profile: MembershipProfileHere;
@@ -116,7 +124,7 @@ interface MemberSeat {
 async function membershipSeatsHere(organizationId: string): Promise<MemberSeat[]> {
   const rows = await prisma.organizationMembership.findMany({
     where: { organizationId, ...keptSeatWhere(), user: { organizationId: { not: organizationId } } },
-    select: { userId: true, role: true, status: true, ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT, adminScopes: true, user: { select: { managerId: true, createdAt: true } } },
+    select: { userId: true, role: true, status: true, managerId: true, ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT, adminScopes: true, user: { select: { createdAt: true } } },
   });
   // Joined here as liveAdminsOf reads it (joined-here.ts, the step 4 review H1).
   return rows.map((r) => ({
@@ -125,9 +133,34 @@ async function membershipSeatsHere(organizationId: string): Promise<MemberSeat[]
     status: String(r.status),
     createdAt: joinedHere(r, { createdAt: r.user?.createdAt ?? r.createdAt }),
     adminScopes: r.adminScopes ?? [],
-    managerId: r.user?.managerId ?? null,
+    managerId: r.managerId ?? null,
     profile: { departmentId: r.departmentId, roleId: r.roleId, officeId: r.officeId, weeklyCapacityHours: r.weeklyCapacityHours, joinDate: r.joinDate },
   }));
+}
+
+/**
+ * Whether Members' No manager filter lists this membership seat: not
+ * deactivated here, and no line naming someone who holds a seat here
+ * (`shown`, managersWithSeatHere), so it reads the row's own view.
+ */
+function listedWithNoManager(m: { status: string; managerId: string | null }, shown: { has(id: string): boolean }): boolean {
+  return m.status !== "INACTIVE" && !(m.managerId && shown.has(m.managerId));
+}
+
+/**
+ * How many people here through a membership Members' No manager filter
+ * lists: the same seats (membershipSeatsHere) and the same rule
+ * (listedWithNoManager). Settings > Structure's "No manager" count adds it
+ * to the people anchored here with no line, so the count and the list it
+ * links to agree (docs/plans/workspace-status-2.md, the final review,
+ * product L5): before, it counted membership lines that were empty only,
+ * and a line to someone removed here (copied on the deploy in any state)
+ * was listed but not counted.
+ */
+export async function membershipsListedWithNoManager(organizationId: string): Promise<number> {
+  const seats = await membershipSeatsHere(organizationId);
+  const shown = await managersWithSeatHere(organizationId, seats.map((m) => m.managerId));
+  return seats.filter((m) => listedWithNoManager(m, shown)).length;
 }
 
 /**
@@ -217,12 +250,11 @@ export async function listMembers(
   }
   if (query.noManager) {
     anchored.push({ managerId: null, status: { not: "INACTIVE" } });
-    // A membership person's row names their manager only while that manager
-    // holds a seat here, so No manager reads the same view (the step 3
-    // review L3): the account's line to someone of another workspace is no
-    // manager here, and the filter tells nothing about it.
+    // A membership person's row names the manager their membership's line
+    // names, only while that manager holds a seat here, so No manager reads
+    // the same view (the step 3 review L3; workspace-status-2 E1).
     const shown = await managersWithSeatHere(organizationId, seats.map((m) => m.managerId));
-    seats = seats.filter((m) => m.status !== "INACTIVE" && !(m.managerId && shown.has(m.managerId)));
+    seats = seats.filter((m) => listedWithNoManager(m, shown));
   }
   if (query.peopleTeam) common.push({ id: { in: [...team.ids] } });
   if (query.inactive30) {
@@ -247,7 +279,9 @@ export async function listMembers(
     role: { select: { id: true, title: true, organizationId: true } },
     department: { select: { id: true, name: true, organizationId: true } },
     office: { select: { id: true, name: true, organizationId: true } },
-    manager: { select: { id: true, firstName: true, lastName: true } },
+    // The account's line: this workspace's for someone anchored here (E1); a
+    // membership person's row reads their membership's instead (lineOf).
+    managerId: true,
   } as const;
 
   let total: number;
@@ -313,19 +347,26 @@ export async function listMembers(
   const seatHere = (u: (typeof users)[number]) => (u.organizationId === organizationId ? undefined : seatOf.get(u.id));
   const levelOf = (u: (typeof users)[number]) => seatHere(u)?.role ?? String(u.accessLevel);
   const pageSeats = users.map((u) => seatHere(u)).filter((m): m is MemberSeat => !!m);
+  // The line each row's seat here holds (E1): the account's where anchored
+  // here, the membership's otherwise.
+  const lineOf = (u: (typeof users)[number]) => (seatHere(u) ? seatHere(u)!.managerId : u.managerId ?? null);
   const [logins, agentLines, managersHere, anchoredRows, placed] = await Promise.all([
     ids.length ? prisma.activityLog.groupBy({ by: ["actorId"], where: { organizationId, type: "login", actorId: { in: ids } }, _max: { createdAt: true } }) : Promise.resolve([]),
     agentsWithStoredReports(organizationId, users.filter((u) => levelOf(u) === "AGENT").map((u) => u.id)),
     // A manager is named only while they hold a seat here (deactivated or
     // not, as a record names them): never someone of another workspace,
     // whoever the row is (D18, the step 3 review H2).
-    managersWithSeatHere(organizationId, users.map((u) => u.manager?.id)),
+    managersWithSeatHere(organizationId, users.map(lineOf)),
     // When the people anchored here joined here (joined-here.ts).
     joinRowsHere(prisma, organizationId, users.filter((u) => u.organizationId === organizationId).map((u) => u.id)),
     // What this workspace holds of the membership people on the page (D18, product H1).
     placementsHere(organizationId, pageSeats.map((m) => m.profile)),
   ]);
   const lastLogin = new Map(logins.map((l) => [l.actorId, l._max.createdAt]));
+  const shownManagers = [...managersHere];
+  const managerNames = new Map(
+    (shownManagers.length ? await prisma.user.findMany({ where: { id: { in: shownManagers } }, select: { id: true, firstName: true, lastName: true } }) : []).map((m) => [m.id, m]),
+  );
 
   const rows: MemberRow[] = users.map((u) => {
     const m = seatHere(u);
@@ -336,7 +377,8 @@ export async function listMembers(
     const title = m ? (m.profile.roleId ? placed.role.get(m.profile.roleId) ?? null : null) : ownHere(u.role, organizationId);
     const dept = m ? (m.profile.departmentId ? placed.department.get(m.profile.departmentId) ?? null : null) : ownHere(u.department, organizationId);
     const office = m ? (m.profile.officeId ? placed.office.get(m.profile.officeId) ?? null : null) : ownHere(u.office, organizationId);
-    const manager = u.manager && managersHere.has(u.manager.id) ? u.manager : null;
+    const line = lineOf(u);
+    const manager = line && managersHere.has(line) ? managerNames.get(line) ?? null : null;
     return {
       id: u.id,
       name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email,

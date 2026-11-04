@@ -5,6 +5,7 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
+import { countPeopleHere } from "@/lib/access/seated-here";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
   // Get additional context from org data
   const [departments, userCount] = await Promise.all([
     prisma.department.findMany({ where: { organizationId: orgId }, select: { name: true } }),
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+    // Everyone here who is not removed, the two halves (docs/plans/workspace-status-2.md E15, step 8).
+    countPeopleHere({ organizationId: orgId, reach: "kept" }),
   ]);
 
   const deptNames = departments.map((d) => d.name).join(", ");

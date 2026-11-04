@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dottedElsewhereWords, namedHere, namedIds } from "./named-here";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { namedHere, namedIds } from "./named-here";
 
 describe("namedHere (batch 6: a person record names only this workspace's people)", () => {
   const card = {
@@ -14,7 +16,7 @@ describe("namedHere (batch 6: a person record names only this workspace's people
 
   it("leaves out a manager, dotted manager or report who holds no level here, and a removed dotted manager", () => {
     const here = new Map([["d-here", "EMPLOYEE"], ["d-removed", "EMPLOYEE"], ["r-here", "EMPLOYEE"]]);
-    expect(namedHere(card, here)).toEqual({ manager: null, managerElsewhere: false, dottedManagers: [{ id: "d-here", deletedAt: null }], dottedElsewhere: 0, directReports: [{ id: "r-here" }] });
+    expect(namedHere(card, here)).toEqual({ manager: null, dottedManagers: [{ id: "d-here", deletedAt: null }], directReports: [{ id: "r-here" }] });
   });
 
   it("names everyone who holds a level here", () => {
@@ -30,32 +32,30 @@ describe("namedHere (batch 6: a person record names only this workspace's people
     expect(namedIds({ manager: null, dottedManagers: [], directReports: [] })).toEqual([]);
   });
 
-  // Batch 7, from the batch 6 review: "Reports to: Nobody" for a manager in
-  // the person's other workspace let an Admin here pick someone, believing
-  // the line empty, and overwrite the line that workspace counts.
-  it("says a manager is in another workspace, without naming them, only when that workspace relies on the line", () => {
-    const here = new Map([["d-here", "EMPLOYEE"], ["r-here", "EMPLOYEE"]]);
-    const out = namedHere(card, here, { managerElsewhere: true });
-    expect(out.manager).toBeNull();
-    expect(out.managerElsewhere).toBe(true);
+  // workspace-status-2 E6, step 3: the record reads THIS workspace's line,
+  // dotted lines and reports, so the batch 7 answers about another
+  // workspace's line ("Reports to someone in another workspace", "N lines
+  // kept for another workspace") are gone with the line itself. Before:
+  // namedHere took the other workspace's standing and answered
+  // managerElsewhere and dottedElsewhere.
+  it("answers only who it names, never anything about another workspace's line", () => {
+    const here = new Map([["d-here", "AGENT"], ["r-here", "EMPLOYEE"]]);
+    const out = namedHere(card, here);
+    expect(Object.keys(out).sort()).toEqual(["directReports", "dottedManagers", "manager"]);
+    expect(out).toEqual({ manager: null, dottedManagers: [{ id: "d-here", deletedAt: null }], directReports: [{ id: "r-here" }] });
     expect(JSON.stringify(out)).not.toContain("Dana");
-    // Nobody relies on it: Nobody, as before.
-    expect(namedHere(card, here).managerElsewhere).toBe(false);
-    // A manager who holds a level here is named, never "elsewhere".
-    expect(namedHere(card, new Map([["m-elsewhere", "AGENT"]]), { managerElsewhere: true })).toMatchObject({ manager: { id: "m-elsewhere" }, managerElsewhere: false });
-    // No manager at all: nothing elsewhere either.
-    expect(namedHere({ ...card, manager: null }, here, { managerElsewhere: true }).managerElsewhere).toBe(false);
+    // A manager who holds a seat here, an Agent included, is named.
+    expect(namedHere(card, new Map([["m-elsewhere", "AGENT"]])).manager).toEqual({ id: "m-elsewhere", firstName: "Dana" });
   });
 
-  it("leaves out the dotted lines kept for another workspace, as the dotted-lines GET does, and counts them", () => {
-    // d-here is an Agent here and a manager in the other workspace: kept.
-    const here = new Map([["d-here", "AGENT"], ["r-here", "EMPLOYEE"]]);
-    const out = namedHere(card, here, { dottedKept: new Set(["d-here", "d-elsewhere"]) });
-    // Before: d-here was listed, the dialog let it be taken off, and the PUT kept it.
-    expect(out.dottedManagers).toEqual([]);
-    expect(out.dottedElsewhere).toBe(2);
-    expect(dottedElsewhereWords(out.dottedElsewhere, false)).toBe("2 lines kept for another workspace");
-    expect(dottedElsewhereWords(1, true)).toBe("and 1 line kept for another workspace");
-    expect(dottedElsewhereWords(0, false)).toBeNull();
+  // Step 4 (E6): the dotted-lines PUT keeps no line for another workspace,
+  // so its count and these words are gone, and no screen imports them.
+  it("has no words for lines kept for another workspace any more, and no screen asks for them", () => {
+    const root = join(__dirname, "..", "..", "..");
+    expect(readFileSync(join(root, "src/lib/people/named-here.ts"), "utf8")).not.toMatch(/export function dottedElsewhereWords/);
+    for (const f of ["src/components/people/person-record.tsx", "src/components/people/edit-details-dialog.tsx"]) {
+      const src = readFileSync(join(root, f), "utf8");
+      expect(src, f).not.toMatch(/dottedElsewhereWords|dottedElsewhere|managerElsewhere|dottedKept|keptElsewhere|replaceOtherWorkspaceLine|manager_elsewhere/);
+    }
   });
 });

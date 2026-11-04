@@ -118,13 +118,9 @@ export function liveManagerFrom(start: string | null, people: LineMap): string |
  * Without it only `agentIds` is known, and the leaver's own manager is the
  * one person asked (the batch 2 rule).
  *
- * `stays` are reports this step leaves where they are, answered apart, in
- * none of the other lists: those whose line to the leaver another workspace
- * relies on (acting-workspace.ts linesElsewhere, docs-found fixes batch 6),
- * while the leaver stays a live manager there (the Agent move, SCIM ending a
- * membership here, and, batch 8, a handover before the step that ends the
- * account, which moves them then). The step that ends the account passes the
- * other reports instead, which are the handover's to move.
+ * `managers` is THIS workspace's lines (workspace-status-2.md E1, E6): every
+ * report listed under the leaver here moves, and a line of another
+ * workspace is never in the map, so nothing is left "relied on" elsewhere.
  */
 export function planReportHandover(input: {
   leaverId: string;
@@ -136,13 +132,9 @@ export function planReportHandover(input: {
   /** Agents among the people who could take the reports (the leaver's manager). */
   agentIds: ReadonlySet<string>;
   people?: LineMap;
-  /** Reports whose line another workspace relies on: they stay where they are. */
-  stays?: ReadonlySet<string>;
-}): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null; stays: string[] } {
+}): { reportIds: string[]; toRecipient: string[]; rehome: Map<string | null, string[]>; leaverManager: string | null } {
   const { leaverId, recipientId, managers } = input;
-  const listed = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
-  const stays = listed.filter((uid) => input.stays?.has(uid));
-  const reportIds = listed.filter((uid) => !input.stays?.has(uid));
+  const reportIds = [...managers.entries()].filter(([, m]) => m === leaverId).map(([uid]) => uid);
   const recipientManagesNobody = input.recipientIsAgent || input.recipientInactive === true;
   const toRecipient = recipientManagesNobody ? [] : reportIds.filter((r) => r !== recipientId && !wouldCreateCycle(r, recipientId, managers));
   const leaverManager = managers.get(leaverId) ?? null;
@@ -155,7 +147,7 @@ export function planReportHandover(input: {
     const up = target && target !== r && target !== leaverId && !wouldCreateCycle(r, target, managers) ? target : null;
     rehome.set(up, [...(rehome.get(up) ?? []), r]);
   }
-  return { reportIds, toRecipient, rehome, leaverManager, stays };
+  return { reportIds, toRecipient, rehome, leaverManager };
 }
 
 /**
@@ -180,65 +172,12 @@ export function reportHandoverNote(
   return `${moves}, because moving ${rest === 1 ? "it" : "them"} to ${recipientName} would make a reporting loop.`;
 }
 
-/** "Ida Ray", "Ida Ray and Max Chen", "Ida Ray, Max Chen and 2 others" (pure). */
-function namesSaid(names: readonly (string | null)[]): string {
-  const said = names.map((n) => n || "Someone");
-  if (said.length <= 1) return said[0] ?? "";
-  if (said.length === 2) return `${said[0]} and ${said[1]}`;
-  if (said.length === 3) return `${said[0]}, ${said[1]} and ${said[2]}`;
-  return `${said[0]}, ${said[1]} and ${said.length - 2} others`;
-}
-
-/**
- * What moving an Agent's reports leaves where it is, and why (pure; tested;
- * docs-found fixes batch 6): the people whose line to `name` another
- * workspace relies on. They also work with `name` in that workspace, where
- * `name` is still their manager, so the line is that workspace's too and
- * this one leaves it as it is. Never names the other workspace: who else a
- * person works for is not this workspace's to know. Null when nobody stays.
- * A handover never says this (batch 7): its leaver's account ends next, in
- * every workspace, and that step moves those lines (linesAlsoElsewhereNote,
- * batch 8).
- */
-export function linesStayNote(stays: readonly { name: string | null; kind?: "solid" | "dotted" }[], name: string): string | null {
-  if (stays.length === 0) return null;
-  const solid = stays.filter((s) => s.kind !== "dotted").map((s) => s.name);
-  const dotted = stays.filter((s) => s.kind === "dotted").map((s) => s.name);
-  const parts = [
-    solid.length ? `${namesSaid(solid)} ${solid.length === 1 ? "stays" : "stay"} listed under ${name}` : null,
-    dotted.length ? `${namesSaid(dotted)} ${dotted.length === 1 ? "keeps a dotted line" : "keep dotted lines"} to ${name}` : null,
-  ].filter(Boolean).join(", and ");
-  const lines = stays.length === 1 ? "that line still counts" : "those lines still count";
-  return `${parts}. They also work with ${name} in another workspace, where ${lines}, so ${stays.length === 1 ? "it's" : "they're"} left as ${stays.length === 1 ? "it is" : "they are"}.`;
-}
-
-/**
- * What the transfer and Remove dialogs say about the reports who also report
- * to the leaver in another workspace they both work in (pure; tested; batch
- * 7). Deactivating or removing someone ends their account in every
- * workspace, so those lines move too, and the other workspace's Audit log
- * records the move. They move WITH the deactivation or the removal, never
- * with the handover before it (batch 8: that step can still be refused), so
- * before it lands the words say when: `ends` is "deactivated" or "removed"
- * (said before the dialog runs, or when the step was refused after the
- * handover), and "done" once it landed. "ended" is said before the dialog
- * runs for someone whose account has already ended (deactivated or
- * removed; batch 9): the handover moves those lines at once, so "only once
- * they are removed" was untrue for them. Never names the other workspace.
- * Null when nobody does.
- */
-export function linesAlsoElsewhereNote(people: readonly { name: string | null }[], leaverName: string, ends: "deactivated" | "removed" | "ended" | "done"): string | null {
-  if (people.length === 0) return null;
-  const one = people.length === 1;
-  const who = namesSaid(people.map((p) => p.name));
-  if (ends === "done") {
-    return `${who} also reported to ${leaverName} in another workspace. ${one ? "That line" : "Those lines"} moved too, and that workspace's Audit log records it.`;
-  }
-  if (ends === "ended") {
-    return `${who} also ${one ? "reports" : "report"} to ${leaverName} in another workspace. ${leaverName}'s account has already ended there too, so ${one ? "that line moves" : "those lines move"} with the handover, and that workspace's Audit log records it.`;
-  }
-  return `${who} also ${one ? "reports" : "report"} to ${leaverName} in another workspace. ${one ? "That line moves" : "Those lines move"} only once ${leaverName} is ${ends}, since that ends their account there too, and that workspace's Audit log records it.`;
-}
+// linesStayNote and linesAlsoElsewhereNote (the Members drawer's and the
+// transfer and Remove dialogs' words about a report whose line another
+// workspace relied on, batches 6 to 9) retired with workspace-status-2.md
+// step 4 (E6): a line is only ever one workspace's, so a handover or an
+// Agent move here moves this workspace's lines and nothing is left, or
+// moved, for another.
 
 /** What POST /api/users/[id]/handover answered it moved (its HandoverResult, as the Remove dialog reads it). */
 export interface HandoverMoved {
@@ -246,25 +185,19 @@ export interface HandoverMoved {
   containersReassigned?: number;
   reportsReassigned?: number;
   reportsRehomed?: ReadonlyArray<{ name: string | null; managerName: string | null }>;
-  reportsAlsoElsewhere?: ReadonlyArray<{ name: string | null }>;
-  reportsAtAccountEnd?: ReadonlyArray<{ name: string | null }>;
 }
 
 /**
  * The Remove dialog's error when the removal was refused after its handover
  * (pure; tested; docs-found fixes batch 9). Built from what the handover
  * answered it moved: batch 8 said "Their open work moved to Rae" whenever a
- * handover ran, though a person holding only a report whose line another
- * workspace relies on moves nothing until the account ends, and reports sent
- * up the line went to someone else. Nothing moved: only that the person is
- * still here, with the reason. Then where reports went other than the
- * person picked, the lines that moved at once for an account already ended,
- * and the lines still waiting for the removal (linesAlsoElsewhereNote).
- * `moved` is null when no handover ran.
+ * handover ran, though reports sent up the line went to someone else.
+ * Nothing moved: only that the person is still here, with the reason. Then
+ * where reports went other than the person picked. `moved` is null when no
+ * handover ran.
  */
 export function refusedRemovalWords(input: {
   firstName: string;
-  fullName: string;
   recipientName: string;
   moved: HandoverMoved | null;
   error: string | null;
@@ -290,12 +223,7 @@ export function refusedRemovalWords(input: {
       : null;
   const head = first ? `${first}, but ${input.firstName} is still here: ${why}.` : `${input.firstName} is still here: ${why}.`;
   const where = rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}.`);
-  const notes = [
-    ...where,
-    linesAlsoElsewhereNote(m.reportsAlsoElsewhere ?? [], input.fullName, "done"),
-    linesAlsoElsewhereNote(m.reportsAtAccountEnd ?? [], input.fullName, "removed"),
-  ].filter((x): x is string => !!x);
-  return [head, ...notes].join(" ");
+  return [head, ...where].join(" ");
 }
 
 /**

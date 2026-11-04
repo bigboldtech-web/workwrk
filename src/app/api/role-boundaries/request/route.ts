@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
-import { ownHere } from "@/lib/access/profile-here";
+import { peoplePlacedHere, placementHereOf, placementsHere } from "@/lib/access/profile-here";
 
 // POST /api/role-boundaries/request — raise a boundary request to an area's
 // OWNER. This is the whole point of the ownership boundary: a role that
@@ -29,19 +29,21 @@ export async function POST(req: NextRequest) {
 
   const requester = await prisma.user.findUnique({
     where: { id: userId },
-    // With its workspace: their job title named only when this one's (D18; the final review, security M1).
-    select: { firstName: true, lastName: true, email: true, role: { select: { title: true, organizationId: true } } },
+    select: { firstName: true, lastName: true, email: true },
   });
   const requesterName = [requester?.firstName, requester?.lastName].filter(Boolean).join(" ") || requester?.email || "Someone";
-  const ownRole = ownHere(requester?.role, orgId);
+  // Their job title here: the one their seat here holds, this workspace's own
+  // only (D18; docs/plans/workspace-status-2.md E15, step 8).
+  const placed = await placementHereOf(orgId, userId);
+  const ownRole = placed?.roleId ? (await placementsHere(orgId, [placed])).role.get(placed.roleId) : null;
   const requesterRole = ownRole?.title ? ` (${ownRole.title})` : "";
 
-  // The request lands with everyone CURRENTLY holding the owner role —
-  // resolved now, so a role handover automatically reroutes future requests.
-  const holders = await prisma.user.findMany({
-    where: { organizationId: orgId, roleId: area.ownerRole.id, deletedAt: null, status: "ACTIVE" },
-    select: { id: true },
-  });
+  // The request lands with everyone CURRENTLY holding the owner role,
+  // resolved now, so a role handover automatically reroutes future requests:
+  // ACTIVE at their seat here, the people anchored here by their account's
+  // job title and the people here through a membership by the one their
+  // membership holds (E15, step 8; before, the people anchored here only).
+  const holders = await peoplePlacedHere(orgId, { roleIds: [area.ownerRole.id] }, "active");
 
   if (holders.length > 0) {
     await prisma.notification.createMany({

@@ -83,7 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!candidates.length) return jsonError("Nothing to finalize: set an outcome for at least one person", 400);
 
   const scoring = await orgScoring(orgId);
-  const sop = await sopScoresFor(candidates.map((r) => r.subjectId), { start: cycle.startDate, end: cycle.endDate });
+  const sop = await sopScoresFor(orgId, candidates.map((r) => r.subjectId), { start: cycle.startDate, end: cycle.endDate });
   const explicitById = new Map((explicit ?? []).map((o) => [String(o.reviewId), o] as const));
 
   const finals = candidates.map((r) => {

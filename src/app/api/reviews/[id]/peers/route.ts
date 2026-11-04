@@ -17,12 +17,22 @@
 // The same people may call it as may POST the request: the subject's
 // reviewer in this cycle, anyone above the subject in the chain, the People
 // team and Admin. Anyone else gets 404.
+//
+// THE SUBJECT AS THIS WORKSPACE HOLDS THEM (docs/plans/workspace-status-2.md
+// E1, step 3): "Their manager", "Same manager" and "Reports to them" read
+// the line the subject's seat here holds (the account's for someone anchored
+// here, the membership's for someone here through one), and "Same
+// department" and "Same office" the placement it holds here (D18). Before,
+// a membership subject's suggestions came from their account's line and
+// department, which are another workspace's: Pat's B review suggested
+// whoever shares her A manager, and never Dana.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleViewerCtx, peerAllowedWhere, peerCandidateWhere, reviewWritersIn } from "@/lib/performance/review-cycle.server";
-import { ownHere } from "@/lib/access/profile-here";
+import { ownHere, seatPlacementsHere } from "@/lib/access/profile-here";
+import { linesHereOf } from "@/lib/access/acting-workspace";
 
 const PAGE = 50;
 
@@ -39,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const review = await prisma.review.findFirst({
     where: { cycleId: id, subjectId, cycle: { organizationId: orgId } },
-    select: { id: true, subjectId: true, reviewerId: true, status: true, cycle: { select: { status: true } }, subject: { select: { id: true, managerId: true, departmentId: true, officeId: true } } },
+    select: { id: true, subjectId: true, reviewerId: true, status: true, cycle: { select: { status: true } } },
   });
   if (!review) return jsonError("Not found", 404);
   // The reviewer is the one who writes it now (reviewWritersIn), never an
@@ -48,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const allowed = ctx.peopleTeamOrAdmin || (!!writer && writer === ctx.userId) || ctx.chain.has(subjectId);
   if (!allowed) return jsonError("Not found", 404);
 
-  const s = review.subject;
+  const s = await subjectHere(orgId, review.subjectId);
   const base = await peerCandidateWhere(orgId, s);
   const text = q
     ? { OR: [
@@ -92,4 +102,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     total,
     more: !q && total > people.length,
   });
+}
+
+/**
+ * The subject's line and placement HERE (see the header): the line their
+ * seat here holds (acting-workspace.ts linesHereOf; none once their seat
+ * here is removed) and the department and office it holds
+ * (profile-here.ts seatPlacementsHere), the account's own for someone
+ * anchored here, the membership's for anyone else.
+ */
+async function subjectHere(organizationId: string, id: string): Promise<{ id: string; managerId: string | null; departmentId: string | null; officeId: string | null }> {
+  const row = await prisma.user.findUnique({ where: { id }, select: { id: true, organizationId: true, departmentId: true, officeId: true } });
+  if (!row) return { id, managerId: null, departmentId: null, officeId: null };
+  const [lines, placed] = await Promise.all([linesHereOf(organizationId, [id]), seatPlacementsHere(organizationId, [row])]);
+  const here = placed.get(id);
+  return { id, managerId: lines.get(id) ?? null, departmentId: here?.departmentId ?? null, officeId: here?.officeId ?? null };
 }

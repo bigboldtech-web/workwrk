@@ -4,7 +4,8 @@
 // state (the membership's own status and removal), so the Removed view lists
 // a membership this workspace removed, for Restore. Their profile here is
 // empty (D18): no department, job title or office, their join date the
-// membership's, their placement not editable here. The Org chart and the
+// membership's, their placement editable here since workspace-status-2.md
+// step 5 (before, not editable here). The Org chart and the
 // export list the same people. Before, all three listed people anchored
 // here only, so a removed contractor had no screen to come back from.
 // Run on the in-memory database.
@@ -48,13 +49,14 @@ beforeEach(() => {
 });
 
 describe("the Directory lists everyone who works here (D11)", () => {
-  it("lists a member here with this workspace's state and none of their profile, their placement not editable here", async () => {
+  it("lists a member here with this workspace's state and none of their account's profile, their placement editable here", async () => {
     const body = await dir();
     // Before: Ada and Bea only.
     expect(ids(body.data)).toEqual(["u-admin", "bea", "cy"]);
     expect(body.pagination.total).toBe(3);
     const cy = body.data.find((r) => r.id === "cy")!;
-    expect(cy).toMatchObject({ department: null, role: null, office: null, isAgent: true, isDeactivated: false, deletedAt: null, canEdit: false, profileHere: false });
+    // Editable here by an Admin since workspace-status-2.md step 5 (E8): on his B membership.
+    expect(cy).toMatchObject({ department: null, role: null, office: null, isAgent: true, isDeactivated: false, deletedAt: null, canEdit: true, profileHere: false });
     expect(new Date(cy.joinDate as string).toISOString()).toBe("2026-06-01T00:00:00.000Z");
     expect(JSON.stringify(cy)).not.toMatch(/Finance|2019/);
     expect(body.data.find((r) => r.id === "bea")).toMatchObject({ canEdit: true, profileHere: true });
@@ -141,8 +143,10 @@ describe("the Directory's rows of membership people, after the step 4 review", (
     const cy = (await dir()).data.find((r) => r.id === "cy")!;
     // Before: 2, Amy reporting to Cy in A counted here too.
     expect(cy.directReports).toBe(1);
-    db.seed("userDottedLine", { id: "d1", userId: "bea", managerId: "cy" });
-    db.seed("userDottedLine", { id: "d2", userId: "bea", managerId: "amy" });
+    // Both rows are B's (workspace-status-2 E2: each dotted line names its
+    // workspace); Amy holds no seat in B, so B's row to her names nobody here.
+    db.seed("userDottedLine", { id: "d1", userId: "bea", managerId: "cy", organizationId: "b" });
+    db.seed("userDottedLine", { id: "d2", userId: "bea", managerId: "amy", organizationId: "b" });
     const chart = (await (await directoryList(new NextRequest("https://app.test/api/users?fields=chart"))).json()) as { data: Row[] };
     // Before: ["cy", "amy"], Amy being A's alone.
     expect(chart.data.find((r) => r.id === "bea")?.dottedManagerIds).toEqual(["cy"]);

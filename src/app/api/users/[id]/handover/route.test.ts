@@ -12,6 +12,11 @@
 // (person-access.server.ts relationTo and mayHandOverPerson), over a viewer
 // each test sets, since batch 8's rule let the org-wide levels and the
 // People team read and take anyone's work who was not an Admin.
+// docs/plans/workspace-status-2.md step 4: the summary's reports are the
+// people whose line HERE names the leaver (reportsHereOf): the account's
+// line for someone anchored here, the membership's (`memberLine`) for
+// someone here through one. The run and the preview are this workspace's
+// whatever the leaver's account does elsewhere (no `leavesOnlyHere`).
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +24,7 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 const st = vi.hoisted(() => ({
   /** People, by id: where each is anchored, and whether they have a membership here. */
-  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string; seatStatus?: string; seatRemovedAt?: Date | null; memberRole?: string }>,
+  people: {} as Record<string, { organizationId: string; member?: boolean; status?: string; deletedAt?: Date | null; firstName: string; lastName: string; managerId?: string | null; level?: string; seatStatus?: string; seatRemovedAt?: Date | null; memberRole?: string; memberLine?: string | null }>,
   /** Whose account keeps working elsewhere once their seat here ends (workspace-status.ts leavesOnlyHere). */
   onlyHere: [] as string[],
   /** The live API keys the leaver made here (seat-api-keys.ts liveKeysMadeHere). */
@@ -28,7 +33,7 @@ const st = vi.hoisted(() => ({
   previews: [] as unknown[][],
   /** Active KRA assignments: whose, and the workspace of the KRA (the step 3 review H1). */
   kras: [] as Array<{ id: string; userId: string; organizationId: string; name: string }>,
-  outcome: "done" as "done" | "partial" | "busy" | "elsewhere" | "waiting",
+  outcome: "done" as "done" | "partial" | "busy" | "deadlock",
   /** People who also belong to another live workspace. */
   alsoElsewhere: [] as string[],
   ran: [] as Array<Record<string, unknown>>,
@@ -60,7 +65,7 @@ vi.mock("@/lib/access/workspace-admin", async (importOriginal) => ({
 }));
 vi.mock("@/lib/activity", () => ({ logActivity: (row: Record<string, unknown>) => { st.logs.push(row); } }));
 vi.mock("@/lib/prisma", () => {
-  type W = { id?: string | { in: string[] }; organizationId?: string | { not: string }; deletedAt?: null; managerId?: string };
+  type W = { id?: string | { in: string[] }; organizationId?: string | { not: string }; deletedAt?: null; managerId?: string | { in: string[] } };
   const match = (id: string, w: W) => {
     const p = st.people[id];
     if (!p) return false;
@@ -70,7 +75,8 @@ vi.mock("@/lib/prisma", () => {
     // Anchored in another workspace (the dialog's "belongs elsewhere").
     if (w.organizationId && typeof w.organizationId === "object" && p.organizationId === w.organizationId.not) return false;
     if ("deletedAt" in w && p.deletedAt) return false;
-    if (w.managerId !== undefined && p.managerId !== w.managerId) return false;
+    if (typeof w.managerId === "string" && p.managerId !== w.managerId) return false;
+    if (w.managerId && typeof w.managerId === "object" && !w.managerId.in.includes(p.managerId ?? "")) return false;
     return true;
   };
   const row = (id: string) => ({ id, ...st.people[id], status: st.people[id].status ?? "ACTIVE", ...legacyLevelRow(st.people[id].level ?? "EMPLOYEE") });
@@ -85,7 +91,18 @@ vi.mock("@/lib/prisma", () => {
     return { userId, role: p.memberRole ?? "SUPER_ADMIN", status: p.seatStatus ?? "ACTIVE", removedAt: p.seatRemovedAt ?? null, adminScopes: [] };
   };
   const organizationMembership = {
-    findMany: async (a: { where: { userId: { in: string[] } } }) => a.where.userId.in.filter((id) => st.people[id]?.member).map(seatRow),
+    // By person (the seat reads), or by the managers a membership's line
+    // HERE names (reportsHereOf's membership half, of people anchored
+    // elsewhere, not removed here).
+    findMany: async (a: { where: { userId?: { in: string[] }; organizationId?: string; managerId?: { in: string[] } } }) => {
+      if (a.where.managerId) {
+        const named = a.where.managerId.in;
+        return Object.keys(st.people)
+          .filter((id) => { const p = st.people[id]; return a.where.organizationId === "org" && p.member && p.organizationId !== "org" && !p.seatRemovedAt && !p.deletedAt && named.includes(p.memberLine ?? ""); })
+          .map((id) => ({ ...seatRow(id), managerId: st.people[id].memberLine ?? null }));
+      }
+      return (a.where.userId?.in ?? []).filter((id) => st.people[id]?.member).map(seatRow);
+    },
     findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) => {
       const { userId, organizationId } = a.where.userId_organizationId;
       return organizationId === "org" && st.people[userId]?.member ? seatRow(userId) : null;
@@ -121,15 +138,13 @@ vi.mock("@/lib/people/handover.server", async (orig) => {
       if (st.outcome === "busy") throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
       if (st.outcome === "partial") {
         throw new real.HandoverWorkFailed(
-          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2 },
+          { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsMoved: 2 },
           new Error("timeout"),
         );
       }
-      // Batch 7: every report moves; one who also reported to the leaver in another workspace is named.
-      if (st.outcome === "elsewhere") return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [], reportsAlsoElsewhere: [{ id: "r1", name: "Ida Ray" }] };
-      // Batch 8: the leaver's account is live, so r1's line waits for its end.
-      if (st.outcome === "waiting") return { tasksReassigned: 3, reportsReassigned: 1, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [{ id: "r1", name: "Ida Ray" }], reportsAlsoElsewhere: [] };
-      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [], reportsStaying: [], reportsAtAccountEnd: [], reportsAlsoElsewhere: [] };
+      // Postgres broke a deadlock (40P01): the LINES transaction wrote nothing.
+      if (st.outcome === "deadlock") throw Object.assign(new Error("deadlock detected"), { code: "P2034" });
+      return { tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: [] };
     },
   };
 });
@@ -199,7 +214,7 @@ describe("the handover's answer when the reports moved and the work did not", ()
     expect(body).toEqual({
       error: "Their 2 direct reports moved, but their open tasks and their Spaces, Folders and Lists didn't. Try again to move the rest.",
       code: "handover_partial",
-      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
+      partial: { reportsReassigned: 1, reportsRehomed: [{ id: "r2", name: "Kim", managerId: null, managerName: null }], reportsMoved: 2, tasksReassigned: 0, containersReassigned: 0 },
     });
     expect(st.logs.filter((l) => l.type === "user_handover")).toEqual([]);
   });
@@ -211,6 +226,17 @@ describe("the handover's answer when the reports moved and the work did not", ()
     const res = await post("u-rae");
     expect(res.status).toBe(200);
     expect(st.logs.filter((l) => l.type === "user_handover")).toHaveLength(1);
+  });
+
+  // workspace-status-2 step 4 (the step 1 review L5): with lines per
+  // workspace two line moves can cross workspaces, and Postgres ends one.
+  it("a deadlock Postgres broke is the same 503 roles_busy, never a 500", async () => {
+    st.outcome = "deadlock";
+    const res = await post("u-rae");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    expect((await res.json()).code).toBe("roles_busy");
+    expect(st.logs.filter((l) => l.type === "user_handover")).toEqual([]);
   });
 });
 
@@ -247,31 +273,48 @@ describe("the person picked to take the work", () => {
   });
 
   it("the summary lists a direct report who works here through a membership", async () => {
-    st.people["u-rio"] = { organizationId: "client", member: true, firstName: "Rio", lastName: "Ray", managerId: "u-leo" };
+    // Rio's line HERE (his membership's) names Leo; his account's line is
+    // the client workspace's.
+    st.people["u-rio"] = { organizationId: "client", member: true, firstName: "Rio", lastName: "Ray", managerId: "u-cleo", memberLine: "u-leo" };
     st.people["u-fay"].managerId = "u-leo";
     const res = await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params);
     const body = await res.json();
     // Before: only reports anchored here, so the summary said none.
     expect(body.directReports).toEqual({ count: 1, items: [expect.objectContaining({ id: "u-rio" })] });
   });
+
+  // workspace-status-2 step 4 (the step 3 review item 1, pairing 3): the
+  // summary read the account lines naming the leaver, then kept those with
+  // a seat here, so it listed another workspace's reports and missed the
+  // ones here through a membership. The Transfer dialog's count and its
+  // preview (the plan, the lines here) disagreed.
+  it("the summary's reports are the people whose line HERE names them, never an account line of another workspace", async () => {
+    // Kai works here through a membership with no line here; his account's
+    // line (the client workspace's) names Leo. Bea is anchored here under
+    // Leo. Rio is here through a membership under Leo here.
+    st.people["u-kai"] = { organizationId: "client", member: true, firstName: "Kai", lastName: "Ko", managerId: "u-leo", memberLine: null };
+    st.people["u-bea"] = { organizationId: "org", firstName: "Bea", lastName: "Bo", managerId: "u-leo" };
+    st.people["u-rio"] = { organizationId: "client", member: true, firstName: "Rio", lastName: "Ray", managerId: null, memberLine: "u-leo" };
+    const body = await (await GET(new NextRequest("https://app.test/api/users/u-leo/handover"), params)).json();
+    expect(body.directReports.count).toBe(2);
+    expect(body.directReports.items.map((r: { id: string }) => r.id)).toEqual(["u-bea", "u-rio"]);
+  });
 });
 
-// Docs-found fixes batch 7: every report moves, and a report who also
-// reported to the leaver in another workspace is named in the answer and
-// counted in the log. Batch 6 said they stayed "listed under them", untrue
-// once the removal or deactivation that follows had landed.
-describe("the handover's answer names the reports who also reported to them elsewhere", () => {
-  it("answers them, and the user_handover row counts them in plain words", async () => {
-    st.outcome = "elsewhere";
+// workspace-status-2 step 4 (E6): the answer and the log say what moved
+// here. Batches 7 and 8 named the reports who also reported to the leaver
+// in another workspace, and the lines left for the account's end; with one
+// line per workspace there are none, and nothing is said about them.
+describe("the handover's answer and log say what moved here, and nothing of another workspace", () => {
+  it("answers the moves, and the user_handover row counts them in plain words", async () => {
     const res = await post("u-rae");
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
-    expect(body.reportsStaying).toEqual([]);
+    expect(Object.keys(body).sort()).toEqual(["containersReassigned", "reportsReassigned", "reportsRehomed", "tasksReassigned"]);
     const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
-    expect(row.description).toBe("Handed over 3 open tasks, 2 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 of their reports also reported to them in another workspace, whose Audit log records the move");
-    expect(row.description).not.toMatch(/stay|--|\u2014/);
-    expect(row.metadata.reportsAlsoElsewhere).toBe(1);
+    expect(row.description).toBe("Handed over 3 open tasks, 2 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient");
+    expect(row.description).not.toMatch(/another workspace|--|\u2014/);
+    expect(row.metadata).toEqual({ recipientId: "u-rae", tasksReassigned: 3, reportsReassigned: 2, containersReassigned: 1, reportsRehomed: 0 });
   });
 });
 
@@ -296,14 +339,6 @@ describe("the handover runs only where the removal that follows could land", () 
     expect(st.ran).toEqual([]);
   });
 
-  it("says in the log which lines wait for the account's end", async () => {
-    st.outcome = "waiting";
-    const res = await post("u-rae");
-    expect((await res.json()).reportsAtAccountEnd).toEqual([{ id: "r1", name: "Ida Ray" }]);
-    const row = st.logs.find((l) => l.type === "user_handover") as { description: string; metadata: Record<string, unknown> };
-    expect(row.description).toBe("Handed over 3 open tasks, 1 direct reports and 1 Spaces, Folders and Lists from Leo Leaver to Rae Recipient. 1 direct report also reports to them in another workspace, so that line moves only when their account ends");
-    expect(row.metadata.reportsAtAccountEnd).toBe(1);
-  });
 });
 
 // Docs-found fixes batch 9, from the batch 8 review: the gate read DELETE's
@@ -369,27 +404,31 @@ describe("the handover of someone whose account keeps working elsewhere", () => 
     st.onlyHere = ["u-mia"];
   });
 
-  it("finds someone who works here through a membership, and hands their work over as a leaver of this workspace only", async () => {
+  it("finds someone who works here through a membership, and hands their work here over", async () => {
     const summary = await getFor("u-mia");
     // Before: 404 "User not found" (anchored people only).
     expect(summary.status).toBe(200);
-    // She belongs to the workspace her account is anchored to.
+    // She belongs to the workspace her account is anchored to (the D17 note).
     expect((await summary.json()).alsoElsewhere).toBe(true);
     const res = await postFor("u-mia", "u-rae");
     expect(res.status).toBe(200);
-    // Before: 404, and SCIM's member path was the only one with leavesOnlyHere.
-    expect(st.ran[0]).toMatchObject({ fromId: "u-mia", toId: "u-rae", leavesOnlyHere: true });
-    // The preview says the same: the lines her other workspace relies on stay.
+    // This workspace's lines, whatever her account does elsewhere (step 4, E6).
+    expect(st.ran[0]).toEqual({ organizationId: "org", fromId: "u-mia", toId: "u-rae", actorId: "u-admin" });
     await getFor("u-mia", "?to=u-rae");
-    expect(st.previews.at(-1)).toEqual(["org", "u-mia", "u-rae", { leavesOnlyHere: true }]);
+    expect(st.previews.at(-1)).toEqual(["org", "u-mia", "u-rae"]);
   });
 
-  it("passes leavesOnlyHere for someone anchored here who moves to a usable seat elsewhere, and not for someone with nowhere else", async () => {
+  // Step 4 (E6): before, someone whose account keeps working elsewhere was
+  // handed over "as a leaver of this workspace only" (leavesOnlyHere), which
+  // kept a report whose line another workspace relied on.
+  it("runs the same handover for someone anchored here, whether or not their account keeps working elsewhere", async () => {
     await post("u-rae");
-    expect(st.ran[0]).toMatchObject({ fromId: "u-leo", leavesOnlyHere: false });
     st.onlyHere = ["u-leo"];
     await post("u-rae");
-    expect(st.ran[1]).toMatchObject({ fromId: "u-leo", leavesOnlyHere: true });
+    expect(st.ran).toEqual([
+      { organizationId: "org", fromId: "u-leo", toId: "u-rae", actorId: "u-admin" },
+      { organizationId: "org", fromId: "u-leo", toId: "u-rae", actorId: "u-admin" },
+    ]);
   });
 
   it("finds nobody with no seat here, and a manager only over a membership person in their tree who is no Admin here", async () => {

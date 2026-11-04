@@ -6,6 +6,8 @@ import { clientIpFromHeaders } from "@/lib/client-ip";
 import { canSeeAckRoster } from "@/lib/announcement-access";
 import { announcementViewer } from "@/lib/announcement-server";
 import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
+import { byName, peopleHereAmong } from "@/lib/access/seated-here";
+import { placementsHere } from "@/lib/access/profile-here";
 
 /**
  * Acknowledge a must-ack announcement.
@@ -129,19 +131,20 @@ export async function GET(
   );
   const expectedIds = audienceIds.filter((u) => u !== announcement.authorId);
 
-  const [users, acks] = await Promise.all([
-    expectedIds.length > 0
-      ? prisma.user.findMany({
-          where: { id: { in: expectedIds }, deletedAt: null },
-          select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true } } },
-          orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-        })
-      : Promise.resolve([]),
+  // Each person at their seat here, at the audience's own reach (anchored
+  // here and not removed, or here through a live membership), named by the
+  // department that seat holds here (docs/plans/workspace-status-2.md E15,
+  // step 8): before, the account's department, so someone here through a
+  // membership was listed under another workspace's department.
+  const [here, acks] = await Promise.all([
+    peopleHereAmong(orgId, expectedIds, { anchored: "kept", membership: "live" }),
     prisma.announcementAcknowledgment.findMany({
       where: { announcementId },
       select: { userId: true, acknowledgedAt: true },
     }),
   ]);
+  const users = [...here.values()].sort(byName());
+  const departments = (await placementsHere(orgId, users.map((u) => u.seat))).department;
 
   const ackMap = new Map(acks.map((a) => [a.userId, a.acknowledgedAt]));
   const roster = users.map((u) => ({
@@ -150,7 +153,7 @@ export async function GET(
     lastName: u.lastName,
     email: u.email,
     avatar: u.avatar,
-    department: u.department?.name ?? null,
+    department: (u.seat.departmentId ? departments.get(u.seat.departmentId)?.name : null) ?? null,
     acknowledgedAt: ackMap.get(u.id) ?? null,
   }));
 

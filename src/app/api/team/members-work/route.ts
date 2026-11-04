@@ -83,12 +83,15 @@ export async function GET(req: NextRequest) {
   // their seat here holds (the department and job title on the membership,
   // D18) and their KRAs here. The scope already holds both kinds
   // (teamScopeFor); before, only the people anchored here were rows. Reports
-  // to reads the line stored on the account, for both kinds, as the
-  // Directory's filter does (the manager line is not per workspace yet).
+  // to reads the line each seat here holds (docs/plans/workspace-status-2.md
+  // E1, step 3), as the Directory's filter does: the account's for someone
+  // anchored here, the membership's own for someone here through one. Before,
+  // both halves read the account's line, so a filter on Dana in B missed Pat,
+  // and one on Max (her manager in A) listed her.
   const baseIds = view === "direct" ? scope.ids.filter((id) => scope.direct.has(id)) : scope.ids;
   const orgId = ctx.organizationId;
+  const line = manager ? { managerId: manager } : {};
   const person: Prisma.UserWhereInput = {
-    ...(manager ? { managerId: manager } : {}),
     ...(noKras ? { kraAssignments: { none: { status: "ACTIVE", kra: { organizationId: orgId } } } } : {}),
     ...(q
       ? { OR: [
@@ -102,9 +105,9 @@ export async function GET(req: NextRequest) {
   const card = { id: true, firstName: true, lastName: true, email: true, avatar: true } as const;
   const [anchoredPeople, memberSeats] = baseIds.length
     ? await Promise.all([
-        prisma.user.findMany({ where: { organizationId: orgId, id: { in: baseIds }, ...placement, ...person }, select: card }),
+        prisma.user.findMany({ where: { organizationId: orgId, id: { in: baseIds }, ...placement, ...line, ...person }, select: card }),
         prisma.organizationMembership.findMany({
-          where: { ...membershipHereWhere(orgId, sp.get("includeDeactivated") === "1" ? "kept" : "live", { id: { in: baseIds }, ...person }), ...placement },
+          where: { ...membershipHereWhere(orgId, sp.get("includeDeactivated") === "1" ? "kept" : "live", { id: { in: baseIds }, ...person }), ...placement, ...line },
           select: { userId: true, departmentId: true, roleId: true, user: { select: card } },
         }),
       ])

@@ -10,6 +10,7 @@
 import { prisma } from "@/lib/prisma";
 import { summarizeUserAcks, ackStatusFor, daysOverdue, type AckRecord } from "@/lib/policy-evidence";
 import { matchesGap, matchesPerson, matchesPolicy, periodStart, type Period } from "@/lib/policy-compliance-view";
+import { AUDIENCE_REACH, peoplePlacedHere, placementsHere } from "@/lib/access/profile-here";
 
 export interface PolicyComplianceQuery {
   q?: string | null;
@@ -38,7 +39,7 @@ export async function buildPolicyCompliance(orgId: string, scopeUserIds: Set<str
   const since = periodStart(query.period ?? "all", now);
   const q = (query.q ?? "").trim();
 
-  const [policies, users] = await Promise.all([
+  const [policies, placed] = await Promise.all([
     prisma.policy.findMany({
       where: { organizationId: orgId, status: "PUBLISHED", requiresAck: true, ...(query.policyId ? { id: query.policyId } : {}) },
       select: {
@@ -47,11 +48,18 @@ export async function buildPolicyCompliance(orgId: string, scopeUserIds: Set<str
         assignments: { select: { id: true, userId: true, dueDate: true } },
       },
     }),
-    prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null, ...(scopeUserIds ? { id: { in: Array.from(scopeUserIds) } } : {}), ...(query.departmentId ? { departmentId: query.departmentId } : {}) },
-      select: { id: true, firstName: true, lastName: true, avatar: true, department: { select: { id: true, name: true } } },
-    }),
+    // Everyone the policies ask, at their seat here, in the department that
+    // seat holds (docs/plans/workspace-status-2.md E15, step 8): the people
+    // anchored here who are not removed, as before, and the people here
+    // through a live membership, two halves. Before, the people anchored
+    // here only, so someone here through a membership was on no compliance row.
+    peoplePlacedHere(orgId, query.departmentId ? { departmentIds: [query.departmentId] } : "everyone", AUDIENCE_REACH, scopeUserIds ? { among: scopeUserIds } : {}),
   ]);
+  const deptRows = (await placementsHere(orgId, placed)).department;
+  const users = placed.map((u) => {
+    const d = u.departmentId ? deptRows.get(u.departmentId) : undefined;
+    return { id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar, department: d ? { id: d.id, name: d.name } : null };
+  });
 
   const activeIds = new Set(users.map((u) => u.id));
   const userById = new Map(users.map((u) => [u.id, u]));

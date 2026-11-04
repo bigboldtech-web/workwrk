@@ -39,6 +39,10 @@ async function main() {
       title: true,
       organizationId: true,
       kraTemplates: { select: { id: true, name: true, weight: true } },
+      // The holders ANCHORED in the job title's workspace only (Role.users),
+      // never someone there through a membership: no KRA is assigned to them
+      // there (docs/plans/workspace-status-2.md, the step 5 review M1, kept by
+      // step 8), as seedKraToRoleHolders reads them.
       users: {
         where: { status: "ACTIVE" },
         select: { id: true, firstName: true, lastName: true },

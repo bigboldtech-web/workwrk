@@ -12,6 +12,8 @@ const st = vi.hoisted(() => ({
   invitationsMade: 0,
   /** People anchored elsewhere with a membership here, with its role (batch 5). */
   memberships: {} as Record<string, string>,
+  /** That membership's status here, ACTIVE unless named (the step 2 review L2). */
+  membershipStatus: {} as Record<string, string>,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -26,9 +28,13 @@ vi.mock("@/lib/prisma", () => ({
     },
     organizationMembership: {
       findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) => {
-        const role = st.memberships[a.where.userId_organizationId.userId];
-        return role ? { role } : null;
+        const id = a.where.userId_organizationId.userId;
+        const role = st.memberships[id];
+        return role ? { role, status: st.membershipStatus[id] ?? "ACTIVE", removedAt: null } : null;
       },
+      // The manager's seat here (managerCandidateIn reads it with seatsHeldFor, workspace-status-2 E4).
+      findMany: async (a: { where: { userId: { in: string[] } } }) =>
+        a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, role: st.memberships[userId], status: st.membershipStatus[userId] ?? "ACTIVE", removedAt: null, managerId: null })),
     },
     // This workspace's own placement rows (batch 5).
     department: { count: async (a: { where: { id: string } }) => (a.where.id === "dept-here" ? 1 : 0), findFirst: async () => null },
@@ -63,6 +69,7 @@ beforeEach(() => {
   };
   st.invitationsMade = 0;
   st.memberships = {};
+  st.membershipStatus = {};
 });
 
 describe("sendInvitation's Reports to", () => {
@@ -73,6 +80,25 @@ describe("sendInvitation's Reports to", () => {
   it("refuses someone outside this workspace", async () => {
     expect(await invite("far")).toEqual({ ok: false, status: 400, error: "That manager isn't in this workspace" });
     expect(await invite("ghost")).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("refuses a manager deactivated here, in words, and makes no invitation (workspace-status-2, the step 2 review L2)", async () => {
+    // Rita works here through a membership this workspace deactivated; Dee is anchored here, deactivated.
+    st.people.rita = { organizationId: "client", level: "MANAGER", deletedAt: null };
+    st.memberships.rita = "MANAGER";
+    st.membershipStatus.rita = "INACTIVE";
+    st.people.dee = { organizationId: "org", level: "MANAGER", deletedAt: null, status: "INACTIVE" };
+    const refused = { ok: false, status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive" };
+    // Before: Rita was "not in this workspace", and Dee was stored, then
+    // dropped without a word when the invitation was accepted.
+    expect(await invite("rita")).toEqual(refused);
+    expect(await invite("dee")).toEqual(refused);
+    expect(st.invitationsMade).toBe(0);
+    // An HR label is a live seat: past the manager check.
+    st.people.dee.status = "ON_LEAVE";
+    st.membershipStatus.rita = "ON_LEAVE";
+    expect(await invite("dee")).toMatchObject({ error: "User already exists in your organization" });
+    expect(await invite("rita")).toMatchObject({ error: "User already exists in your organization" });
   });
 
   it("passes a live manager of this workspace, and no manager at all", async () => {

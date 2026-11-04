@@ -11,7 +11,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { findWeeklyReview, getOrCreateWeeklyReview, listMyWeeklyReviews } from "@/lib/weekly-review";
 import { isCurrentWeek, parseWeekKey, weekKey } from "@/lib/weeks";
@@ -22,22 +21,23 @@ export async function GET(req: Request) {
   const u = session.user as { id?: string; organizationId?: string };
   if (!u.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // THIS WORKSPACE'S weeks (docs/plans/workspace-status-2.md, the final
+  // review, security M1): a person has one row per workspace and week, and
+  // each is read with this workspace's KPI snapshots and KRA progress only.
   const url = new URL(req.url);
   if (url.searchParams.get("history") === "1") {
-    const reviews = await listMyWeeklyReviews(u.id, { take: 24 });
+    const reviews = await listMyWeeklyReviews(u.id, u.organizationId, { take: 24 });
     return NextResponse.json({ reviews });
   }
 
   const asked = parseWeekKey(url.searchParams.get("week"));
   if (asked && !isCurrentWeek(weekKey(asked))) {
     // A past (or future) week: read only.
-    const row = await prisma.weeklyReview.findUnique({
-      where: { userId_periodStart: { userId: u.id, periodStart: asked } },
-    });
-    return NextResponse.json({ review: row ?? null, week: weekKey(asked) });
+    const review = await findWeeklyReview({ userId: u.id, organizationId: u.organizationId, periodStart: asked });
+    return NextResponse.json({ review, week: weekKey(asked) });
   }
 
-  const review = await findWeeklyReview({ userId: u.id });
+  const review = await findWeeklyReview({ userId: u.id, organizationId: u.organizationId });
   return NextResponse.json({ review });
 }
 

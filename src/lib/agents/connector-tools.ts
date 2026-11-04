@@ -94,6 +94,7 @@ const freeTime = () => import("@/lib/connectors/free-time");
 const db = () => import("@/lib/prisma");
 const workSchedule = () => import("@/lib/work-schedule");
 const workScheduleServer = () => import("@/lib/work-schedule-server");
+const seatedHere = () => import("@/lib/access/seated-here");
 
 // ── Inputs ──────────────────────────────────────────────────────────
 
@@ -875,11 +876,16 @@ function weekdayName(n: number): string {
  * blocks of busy time on the person's clock (`zone`, the call's own).
  */
 async function workingDaysOf(person: ActingPerson, days: { from: string; to: string }, zone: string): Promise<{ days: number[]; closed: Array<{ start: number; end: number }> }> {
-  const [{ readOrgWorkSchedule }, { effectivePersonSchedule }, { prisma }, { addDays, dayStart, daysBetween }] = await Promise.all([workScheduleServer(), workSchedule(), db(), calendar()]);
+  const [{ readOrgWorkSchedule }, { effectivePersonSchedule }, { prisma }, { addDays, dayStart, daysBetween }, { capacityHereOf }] = await Promise.all([workScheduleServer(), workSchedule(), db(), calendar(), seatedHere()]);
   const org = await readOrgWorkSchedule(person.organizationId);
+  // The working week the person gives THIS workspace (workspace-status-2.md
+  // E13, step 5): the account's where they are anchored here, their
+  // membership's when they work here through one (none means this
+  // workspace's), never another workspace's. Before, the account's, which is
+  // the workspace it is anchored to.
   let own: unknown = null;
   try {
-    own = (await prisma.user.findUnique({ where: { id: person.userId }, select: { workSchedule: true } }))?.workSchedule ?? null;
+    own = (await capacityHereOf(person.organizationId, [person.userId], prisma)).get(person.userId)?.workSchedule ?? null;
   } catch {
     // Unread: the workspace's days, as for someone with no schedule of their own.
     own = null;

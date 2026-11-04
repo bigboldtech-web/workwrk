@@ -8,6 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { summarizeUserAcks, ackStatusFor, daysOverdue, type AckRecord, type AckStatus } from "@/lib/policy-evidence";
+import { AUDIENCE_REACH, peoplePlacedHere, placementsHere } from "@/lib/access/profile-here";
 
 export type LedgerRow = {
   userId: string;
@@ -51,10 +52,14 @@ export async function buildPolicyLedger(policyId: string, orgId: string, scopeUs
   });
   if (!policy) return null;
 
-  const users = await prisma.user.findMany({
-    where: { organizationId: orgId, deletedAt: null, ...(scopeUserIds ? { id: { in: Array.from(scopeUserIds) } } : {}) },
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true } } },
-  });
+  // Everyone the policy may ask, at their seat here, in the department that
+  // seat holds (docs/plans/workspace-status-2.md E15, step 8): the people
+  // anchored here who are not removed, as before, and the people here
+  // through a live membership, two halves. Before, the people anchored here
+  // only, so someone here through a membership was on no ledger row.
+  const placed = await peoplePlacedHere(orgId, "everyone", AUDIENCE_REACH, scopeUserIds ? { among: scopeUserIds } : {});
+  const deptRows = (await placementsHere(orgId, placed)).department;
+  const users = placed.map((u) => ({ ...u, department: u.departmentId ? deptRows.get(u.departmentId) ?? null : null }));
   const activeIds = new Set(users.map((u) => u.id));
 
   const assigned = new Map<string, { id: string; dueDate: Date | null; mandatory: boolean }>();

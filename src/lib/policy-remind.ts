@@ -9,6 +9,8 @@ import { sendEmail } from "@/lib/email";
 import { policyAssignedTemplate } from "@/lib/email-templates";
 import { parseProcessSettings } from "@/lib/process-settings";
 import { absoluteUrl } from "@/lib/app-url";
+import { seatedHereAmong } from "@/lib/access/seated-here";
+import { AUDIENCE_REACH } from "@/lib/access/profile-here";
 
 const REMINDER_TITLE = "Reminder: policy to acknowledge";
 
@@ -20,7 +22,16 @@ export interface RemindTarget {
 }
 
 export async function remindPolicyAssignees(opts: { orgId: string; policyId: string; policyTitle: string; targets: RemindTarget[] }): Promise<number> {
-  const { orgId, policyId, policyTitle, targets } = opts;
+  const { orgId, policyId, policyTitle } = opts;
+  // Every reminder door (the ledger's Remind everyone pending, one person's
+  // Remind, the due-soon pass) tells only people whose seat here can be told
+  // (AUDIENCE_REACH: anchored here and not removed, or here through a live
+  // membership). An assignment row stays when a seat ends, so without this a
+  // reminder reached someone this workspace deactivated or removed, in
+  // whichever workspace their account is in (docs/plans/workspace-status-2.md,
+  // the step 8 review M2). The count answered is who was told.
+  const here = opts.targets.length ? await seatedHereAmong(orgId, opts.targets.map((t) => t.userId), AUDIENCE_REACH) : new Set<string>();
+  const targets = opts.targets.filter((t) => here.has(t.userId));
   if (targets.length === 0) return 0;
   await prisma.notification.createMany({
     data: targets.map((t) => ({

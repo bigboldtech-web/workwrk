@@ -340,14 +340,16 @@ async function loadGoals(userId: string, organizationId: string) {
  * person opens it.
  */
 async function loadWeeklyReview(userId: string, organizationId: string, now: Date, locale: LocaleContext) {
+  // This workspace's KRAs and KPI numbers only, as the week row (docs/plans/
+  // workspace-status-2.md, the final review, product M5).
   const [assignments, review, pendingKpis] = await Promise.all([
-    prisma.kRAAssignment.count({ where: { userId, status: "ACTIVE" } }),
+    prisma.kRAAssignment.count({ where: { userId, status: "ACTIVE", kra: { organizationId } } }),
     prisma.weeklyReview.findFirst({
       where: { userId, organizationId },
       orderBy: { periodStart: "desc" },
       select: { id: true, periodStart: true, status: true },
     }).catch(() => null),
-    prisma.kPIRecord.count({ where: { userId, status: "PENDING" } }).catch(() => 0),
+    prisma.kPIRecord.count({ where: { userId, status: "PENDING", kpi: { organizationId } } }).catch(() => 0),
   ]);
 
   if (assignments === 0 && !review && pendingKpis === 0) return null;

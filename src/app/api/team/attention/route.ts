@@ -28,7 +28,10 @@ export async function GET() {
     countReviewsAwaitingManager(ctx.userId, ctx.organizationId),
     listAwaitingKpiNumbers(ctx).then((r) => r.length),
     scope.ids.length
-      ? prisma.user.count({ where: { id: { in: scope.ids }, kraAssignments: { none: { status: "ACTIVE" } } } })
+      // No active KRA of THIS workspace (docs/plans/workspace-status-2.md, the
+      // final review, product M5), as My team's own filter counts it
+      // (team/members-work): another workspace's KRAs never count here.
+      ? prisma.user.count({ where: { id: { in: scope.ids }, kraAssignments: { none: { status: "ACTIVE", kra: { organizationId: ctx.organizationId } } } } })
       : Promise.resolve(0),
   ]);
   return NextResponse.json(

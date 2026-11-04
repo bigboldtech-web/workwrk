@@ -9,6 +9,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
+import { AUDIENCE_REACH, idsPlacedHere } from "@/lib/access/profile-here";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 
 // SPACE was added in Phase 4 (spec-talk section 2.3 Data): a person who holds
@@ -76,7 +77,11 @@ export async function resolveAnnouncementAudienceUserIds(
   orgId: string,
   aud: AnnouncementAudience,
 ): Promise<string[]> {
-  if (aud.type === "TAGS") return resolveUserIdsByTags(orgId, aud.ids);
+  // A tag's holders at their seat here, at the audience's reach: a tag stays
+  // on someone this workspace ended, and the post's notice and email (with
+  // its preview) belong to the account (docs/plans/workspace-status-2.md, the
+  // step 8 review M3, as surveys read a tag's holders).
+  if (aud.type === "TAGS") return [...(await seatedHereAmong(orgId, await resolveUserIdsByTags(orgId, aud.ids), AUDIENCE_REACH))];
   if (aud.type === "SPACE") {
     const members = await prisma.spaceMember.findMany({
       where: { spaceId: { in: aud.ids }, space: { organizationId: orgId } },
@@ -90,20 +95,18 @@ export async function resolveAnnouncementAudienceUserIds(
     return [...(await seatedHereAmong(orgId, ids, { anchored: "kept", membership: "live" }))];
   }
   if (aud.type === "USERS") {
-    // People picked by name, at the seat each holds here (E12, step 6). The
-    // audiences by department, office or the whole workspace read the
-    // people anchored here until step 8 (E15) reads placements for both kinds.
+    // People picked by name, at the seat each holds here (E12, step 6).
     return [...(await seatedHereAmong(orgId, aud.ids, { anchored: "kept", membership: "live" }))];
   }
-  const where: { organizationId: string; deletedAt: null; departmentId?: { in: string[] }; officeId?: { in: string[] }; id?: { in: string[] } } = {
-    organizationId: orgId,
-    deletedAt: null,
-  };
-  if (aud.type === "DEPARTMENTS") where.departmentId = { in: aud.ids };
-  else if (aud.type === "OFFICES") where.officeId = { in: aud.ids };
-  // ALL → no extra filter (whole org).
-  const rows = await prisma.user.findMany({ where, select: { id: true } });
-  return rows.map((r) => r.id);
+  // By department, by office or the whole workspace: everyone placed there
+  // here, the people anchored here by their account's placement (not
+  // removed, as before) and the people here through a membership by the
+  // placement their membership holds, while that seat is live
+  // (docs/plans/workspace-status-2.md E15, step 8). Before, only the people
+  // anchored here: Pat, placed in B's Design on her B membership, never got
+  // B's Design announcement and was on nobody's acknowledgement list.
+  const by = aud.type === "DEPARTMENTS" ? { departmentIds: aud.ids } : aud.type === "OFFICES" ? { officeIds: aud.ids } : ("everyone" as const);
+  return idsPlacedHere(orgId, by, AUDIENCE_REACH);
 }
 
 /** Feed-side membership. No query for the common cases. */

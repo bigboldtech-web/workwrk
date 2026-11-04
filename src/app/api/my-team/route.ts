@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { managersWithSeatHere, placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
-import { levelsHeldIn } from "@/lib/access/acting-workspace";
+import { seatsHeldFor } from "@/lib/access/acting-workspace";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
@@ -21,6 +21,13 @@ import { getTeamUserIds } from "@/lib/team";
  * for a membership person). Before, a membership member carried their
  * anchored workspace's level and a manager id naming someone of another
  * workspace.
+ *
+ * THE LINE HERE (docs/plans/workspace-status-2.md E1, step 3): each
+ * member's managerId, and so directReportIds, is the line their seat here
+ * holds (acting-workspace.ts seatsHeldFor: the account's for someone
+ * anchored here, the membership's otherwise), the same lines the walk that
+ * found teamIds climbed. Before, it was the account's line, so Dana's My
+ * team in B listed Pat under Max, her manager in A.
  */
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -38,32 +45,39 @@ export async function GET() {
         where: { id: { in: teamIds } },
         select: {
           id: true, organizationId: true, firstName: true, lastName: true, email: true, avatar: true,
-          accessLevel: true, managerId: true, departmentId: true, roleId: true,
+          accessLevel: true, status: true, managerId: true, departmentId: true, roleId: true,
         },
       })
     : [];
-  // The level each holds here (kept seats: a deactivated report stays listed,
-  // as the walk keeps them), the placement each holds here, and the managers
-  // with a seat here.
-  const [levels, held, managersHere] = await Promise.all([
-    levelsHeldIn(orgId, teamMembers.map((m) => m.id), prisma, { keptSeats: true }),
+  // The seat each holds here (kept seats: a deactivated report stays
+  // listed, as the walk keeps them) with its level and its line here, and
+  // the placement each holds here.
+  const [seats, held] = await Promise.all([
+    seatsHeldFor(orgId, teamMembers),
     seatPlacementsHere(orgId, teamMembers),
-    managersWithSeatHere(orgId, teamMembers.map((m) => m.managerId)),
   ]);
-  const placed = await placementsHere(orgId, [...held.values()]);
+  const lineHere = (id: string) => seats.get(id)?.managerId ?? null;
+  // A manager is named only while they hold a seat here (profile-here.ts).
+  const [placed, managersHere] = await Promise.all([
+    placementsHere(orgId, [...held.values()]),
+    managersWithSeatHere(orgId, teamMembers.map((m) => lineHere(m.id))),
+  ]);
 
   const members = teamMembers
-    .map(({ organizationId: _o, departmentId: _d, roleId: _r, ...m }) => {
+    .map(({ organizationId: _o, departmentId: _d, roleId: _r, status: _s, managerId: _account, ...m }) => {
       void _o;
       void _d;
       void _r;
+      void _s;
+      void _account;
       const h = held.get(m.id);
       const dept = h?.departmentId ? placed.department.get(h.departmentId) : undefined;
       const role = h?.roleId ? placed.role.get(h.roleId) : undefined;
+      const managerId = lineHere(m.id);
       return {
         ...m,
-        accessLevel: levels.get(m.id) ?? "EMPLOYEE",
-        managerId: m.managerId && managersHere.has(m.managerId) ? m.managerId : null,
+        accessLevel: seats.get(m.id)?.level ?? "EMPLOYEE",
+        managerId: managerId && managersHere.has(managerId) ? managerId : null,
         department: dept ? { id: dept.id, name: dept.name } : null,
         role: role ? { id: role.id, title: role.title } : null,
       };

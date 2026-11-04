@@ -13,6 +13,14 @@ describe("audit families", () => {
     expect(typeInFamily("okr_created", "access")).toBe(false);
     expect(typeInFamily("anything", "all")).toBe(true);
   });
+  // workspace-status-2 step 7: a manager the identity provider asked for and
+  // the workspace did not set is filed with the reporting line changes, in words.
+  it("files a refused manager from the identity provider under Access, beside the line changes", async () => {
+    expect(typeInFamily("reporting_line_refused", "access")).toBe(true);
+    expect(familyWhere("access")?.OR).toContainEqual({ type: "reporting_line_refused" });
+    const { auditTypeWords } = await import("./audit-families");
+    expect(auditTypeWords("reporting_line_refused")).toBe("Reporting line refused");
+  });
   it("does not let a bare word match a longer type", () => {
     expect(typeInFamily("login_failed_elsewhere", "security")).toBe(false);
     expect(typeInFamily("logout", "security")).toBe(true);

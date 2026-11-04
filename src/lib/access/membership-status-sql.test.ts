@@ -180,10 +180,12 @@ describe(FILE, () => {
     expect(SQL).not.toMatch(/—|–|--/);
   });
 
-  it("is listed last in SQL_MANIFEST, once, with its README row", () => {
+  it("is listed in SQL_MANIFEST once, followed only by the workspace lines file, with its README row", () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(read("scripts/deploy-migrations.mjs"))?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files[files.length - 1]).toBe(FILE);
+    // After it only a person's manager and dotted lines in each workspace (docs/plans/workspace-status-2.md),
+    // then their week rows in each (its final review, security M1).
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     const row = new RegExp(`^\\| \`${FILE}\` \\| A person's status in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");

@@ -122,7 +122,9 @@ async function aggregateForUserIds(userIds: string[], organizationId: string): P
       select: { userId: true, status: true },
     }),
     prisma.weeklyReview.findMany({
-      where: { userId: { in: userIds }, periodStart },
+      // This workspace's week (docs/plans/workspace-status-2.md, the final
+      // review, security M1): a person has one row per workspace and week.
+      where: { userId: { in: userIds }, organizationId, periodStart },
       select: { userId: true, status: true, managerStatus: true },
     }),
   ]);
@@ -215,9 +217,10 @@ export async function getDirectorRollup(args: {
     if (own.length) reportsBySubManager.set(subId, own);
   }
 
-  // 3. Mark dotted reports of the director.
+  // 3. Mark dotted reports of the director: this workspace's dotted lines
+  // only (docs/plans/workspace-status-2.md E2).
   const dottedDirects = await prisma.userDottedLine.findMany({
-    where: { managerId: directorId, userId: { in: directIds } },
+    where: { organizationId, managerId: directorId, userId: { in: directIds } },
     select: { userId: true },
   });
   const dottedSet = new Set(dottedDirects.map((d) => d.userId));

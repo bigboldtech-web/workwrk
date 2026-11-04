@@ -249,11 +249,13 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
   it("keeps a live manager, and takes off a dotted line to an Agent (PUT too)", async () => {
     manager();
     db.seed("user", { id: "u-sam", email: "sam@x.test", organizationId: "org1", ...legacyLevelRow("AGENT"), status: "ACTIVE", deletedAt: null, firstName: "Sam", lastName: "Agent" });
-    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-sam" });
+    // This workspace's row (E2), and the client workspace's row of the same pair, never read here.
+    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-sam", organizationId: "org1" });
+    db.seed("userDottedLine", { id: "d2", userId: "u-max", managerId: "u-sam", organizationId: "client" });
     const res = await PUT(req("PUT", "u-max", { active: true }), params("u-max"));
     expect(res.status).toBe(200);
     expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: "u-dana" });
-    expect(db.tables.userDottedLine).toEqual([]);
+    expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d2"]);
     expect(st.followed).toEqual([]);
   });
 
@@ -272,23 +274,31 @@ describe("SCIM reactivation re-checks the person's lines, as a restore does", ()
   });
 });
 
-// Docs-found fixes batch 6, from the batch 5 review: the identity provider's
-// reactivation deleted a manager line and a dotted line that belong to the
-// person's other workspace, saying "is no longer in the workspace".
-describe("SCIM reactivation keeps the lines another workspace relies on", () => {
-  it("keeps a manager and a dotted manager who work with the person in the other workspace only", async () => {
+// Docs-found fixes batch 6 kept a manager line and a dotted line the person's
+// other workspace relied on, since they were one row each. Since
+// workspace-status-2.md E1 and E2 the client's lines are its own rows, and
+// step 4 checks this workspace's lines only (E4): one here to someone with
+// no seat here is cleared, never named, and the client's rows are never read.
+describe("SCIM reactivation checks this workspace's lines only", () => {
+  it("clears a line here to someone who works with the person in the other workspace only, unnamed, and keeps that workspace's row", async () => {
     Object.assign(db.row("user", "u-max"), { status: "INACTIVE", managerId: "u-dana" });
     db.seed("user", { id: "u-dana", email: "dana@x.test", organizationId: "client", ...legacyLevelRow("MANAGER"), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" });
-    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-dana" });
+    db.seed("userDottedLine", { id: "d1", userId: "u-max", managerId: "u-dana", organizationId: "org1" });
+    db.seed("userDottedLine", { id: "d2", userId: "u-max", managerId: "u-dana", organizationId: "client" });
     // Max works in the client workspace too, through a membership whose seat is deactivated with the account (D16).
     db.seed("organizationMembership", { id: "m-max-client", userId: "u-max", organizationId: "client", role: "EMPLOYEE", status: "INACTIVE", endedWithAccount: true });
     const res = await PATCH(req("PATCH", "u-max", { Operations: [{ op: "replace", path: "active", value: true }] }), params("u-max"));
     expect(res.status).toBe(200);
-    // Before batch 6: { status: "ACTIVE", managerId: null }, the dotted line
-    // deleted, and "Dana Ray is no longer in the workspace" in the Audit log.
-    expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: "u-dana" });
-    expect(db.tables.userDottedLine).toHaveLength(1);
-    expect(audit().filter((a) => a.type === "reporting_line_changed")).toEqual([]);
+    // Max is anchored here: his account's line is this workspace's, to
+    // someone with no seat here. Before (batch 6): kept, as the client's.
+    expect(db.row("user", "u-max")).toMatchObject({ status: "ACTIVE", managerId: null });
+    expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d2"]);
+    const said = audit().filter((a) => a.type === "reporting_line_changed").map((a) => a.description);
+    expect(said).toEqual([
+      "Reactivated Max Chen with no manager: the manager on their record doesn't work in this workspace",
+      "Reactivated Max Chen without a dotted line to someone who doesn't work in this workspace",
+    ]);
+    expect(JSON.stringify(said)).not.toContain("Dana");
     // D16: the seat the one-time step ended with the account comes back with it, and its skills with it.
     expect(db.row("organizationMembership", "m-max-client")).toMatchObject({ status: "ACTIVE", endedWithAccount: false });
     expect(st.skillsBack).toEqual([["org1", ["u-max"]], ["client", ["u-max"]]]);

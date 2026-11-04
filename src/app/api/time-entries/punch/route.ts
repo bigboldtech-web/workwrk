@@ -92,7 +92,7 @@ export async function GET() {
     ]);
     const weekStart = weekStartUTC(dayStartInZone(new Date(), punchZone ?? orgZone ?? null));
     const sheet = await prisma.timesheet.findUnique({
-      where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+      where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
       select: { id: true, status: true, weekStartDate: true },
     });
     return jsonSuccess({ active: null, week: sheet ?? { id: null, status: "DRAFT", weekStartDate: weekStart } });
@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
       const weekStart = weekStartUTC(day);
 
       let timesheet = await tx.timesheet.findUnique({
-        where: { userId_weekStartDate: { userId, weekStartDate: weekStart } },
+        where: { userId_organizationId_weekStartDate: { userId, organizationId: orgId, weekStartDate: weekStart } },
       });
       if (!timesheet) {
         // The approver is their manager, never an Agent (manager-lines.ts).

@@ -21,8 +21,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type U = { id: string; organizationId: string; managerId: string | null; accessLevel: string; status: string; deletedAt: Date | null; firstName: string; lastName: string };
-type M = { userId: string; organizationId: string; role: string };
-const st = vi.hoisted(() => ({ users: new Map<string, U>(), dotted: [] as Array<{ userId: string; managerId: string }>, memberships: [] as M[] }));
+// A membership holds its person's line in its workspace (docs/plans/workspace-status-2.md E1),
+// and each dotted line names its workspace (E2).
+type M = { userId: string; organizationId: string; role: string; managerId?: string | null };
+const st = vi.hoisted(() => ({ users: new Map<string, U>(), dotted: [] as Array<{ userId: string; managerId: string; organizationId: string }>, memberships: [] as M[] }));
 
 type Where = Record<string, unknown>;
 function matches(row: Record<string, unknown>, where: Where | undefined): boolean {
@@ -73,18 +75,21 @@ vi.mock("@/lib/prisma", () => {
   // same rows: everyone below the root through stored lines, removed people
   // ending the walk, the root first.
   // When the walk names a workspace (its second value, batch 5), only the
-  // people who hold a level there: anchored there, or a membership there.
+  // people who hold a level there: anchored there, or a membership there,
+  // each by their line THERE (workspace-status-2 E1): the account's for
+  // someone anchored there, the membership's otherwise.
   const $queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const root = values[0] as string;
     const org = typeof values[1] === "string" ? values[1] : null;
     const here = (u: U) => !org || u.organizationId === org || st.memberships.some((m) => m.userId === u.id && m.organizationId === org);
+    const lineThere = (u: U) => (!org || u.organizationId === org ? u.managerId : st.memberships.find((m) => m.userId === u.id && m.organizationId === org)?.managerId ?? null);
     const r = st.users.get(root);
     if (!r || r.deletedAt || !here(r)) return [];
     const out = [{ id: root, depth: 0 }];
     const seen = new Set([root]);
     for (let i = 0; i < out.length; i += 1) {
       for (const u of users()) {
-        if (u.managerId === out[i].id && !u.deletedAt && !seen.has(u.id) && here(u)) {
+        if (lineThere(u) === out[i].id && !u.deletedAt && !seen.has(u.id) && here(u)) {
           seen.add(u.id);
           out.push({ id: u.id, depth: out[i].depth + 1 });
         }
@@ -97,11 +102,14 @@ vi.mock("@/lib/prisma", () => {
   const organizationMembership = {
     findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
       st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
-    // Read with one workspace, or (linesElsewhere, batch 8's tests) { not } and { in }.
-    findMany: async (a: { where: { organizationId: string | { not?: string; in?: string[] }; userId: { in: string[] } } }) => {
+    // Read with one workspace, or (linesElsewhere, batch 8's tests) { not } and { in };
+    // or, with no person named, by its line (reportsHereOf: the managers it names).
+    findMany: async (a: { where: { organizationId: string | { not?: string; in?: string[] }; userId?: { in: string[] } } & Where }) => {
+      if (!a.where.userId) return st.memberships.filter((m) => matches(m as unknown as Record<string, unknown>, a.where));
+      const userIds = a.where.userId;
       const w = a.where.organizationId;
       const ok = (org: string) => (typeof w === "string" ? org === w : (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)));
-      return st.memberships.filter((m) => ok(m.organizationId) && a.where.userId.in.includes(m.userId));
+      return st.memberships.filter((m) => ok(m.organizationId) && userIds.in.includes(m.userId));
     },
   };
   return { prisma: { user, userDottedLine, organizationMembership, $queryRaw } };
@@ -118,9 +126,7 @@ import {
   effectiveManagersOf,
   lineFactsAround,
   liveHereAmong,
-  managerLineIsOthers,
   managesNobody,
-  recordLinesOfOthers,
   reportsThroughAgents,
 } from "./manager-lines";
 import { agentIdsIn } from "./manager-candidate";
@@ -150,7 +156,7 @@ beforeEach(() => {
   add("rex", "gone2", "AGENT");
   add("tia", "rex");
   add("dee", null);
-  st.dotted = [{ userId: "dee", managerId: "sam" }, { userId: "dee", managerId: "mona" }];
+  st.dotted = [{ userId: "dee", managerId: "sam", organizationId: ORG }, { userId: "dee", managerId: "mona", organizationId: ORG }];
 });
 
 describe("an Agent's own reach", () => {
@@ -195,11 +201,21 @@ describe("effectiveManagersOf", () => {
     expect(await effectiveManagerOf(ORG, "lou")).toBe("mona");
   });
 
-  it("answers nobody when the line past an Agent reaches a removed person, and keeps a stored manager who is no Agent as stored", async () => {
+  it("answers nobody when the line past an Agent reaches a removed person, and nobody for a stored manager whose account has ended", async () => {
     expect(await effectiveManagerOf(ORG, "tia")).toBeNull();
-    // gone is removed but no Agent: the stored answer stands, as before.
+    // gone is removed (no Agent): an ended account is nobody's manager, as
+    // staleLinesOf judges the line (docs/plans/workspace-status-2.md, the
+    // final review, integrity M2). Before, the stored answer stood, and a
+    // review, a timesheet or a weekly review went to someone removed.
     add("pat", "gone");
-    expect(await effectiveManagerOf(ORG, "pat")).toBe("gone");
+    expect(await effectiveManagerOf(ORG, "pat")).toBeNull();
+    // A stored manager who is live and no Agent stands as stored.
+    add("lia", "max");
+    expect(await effectiveManagerOf(ORG, "lia")).toBe("max");
+    // One deactivated here (their account's status) is nobody's manager either.
+    add("dee2", null, "MANAGER", { status: "INACTIVE" });
+    add("rob", "dee2");
+    expect(await effectiveManagerOf(ORG, "rob")).toBeNull();
   });
 
   it("answers nobody for a loop of Agents, and never hangs", async () => {
@@ -251,10 +267,11 @@ describe("the tier held in this workspace", () => {
 
   it("an Agent here who is a Manager where they are anchored manages nobody here", async () => {
     // ava holds the Agent tier here through a membership, and still has stored reports here.
-    add("ava", "mona", "MANAGER", { organizationId: "client" });
-    st.memberships.push({ userId: "ava", organizationId: ORG, role: "AGENT" });
+    // Her line here (to mona) is on her membership; her account's is client's (E1).
+    add("ava", null, "MANAGER", { organizationId: "client" });
+    st.memberships.push({ userId: "ava", organizationId: ORG, role: "AGENT", managerId: "mona" });
     add("noa", "ava");
-    st.dotted.push({ userId: "max", managerId: "ava" });
+    st.dotted.push({ userId: "max", managerId: "ava", organizationId: ORG });
     expect(await managesNobody("ava", ORG)).toBe(true);
     expect(await getTeamUserIds(ORG, "ava")).toEqual(["ava"]);
     expect(await getEffectiveReportTree("ava", { organizationId: ORG })).toEqual(["ava"]);
@@ -279,7 +296,7 @@ describe("the tier held in this workspace", () => {
   it("a dotted-line manager who works here through a membership still counts, at the tier held here", async () => {
     add("pam", null, "MANAGER", { organizationId: "client" });
     st.memberships.push({ userId: "pam", organizationId: ORG, role: "MANAGER" });
-    st.dotted.push({ userId: "max", managerId: "pam" });
+    st.dotted.push({ userId: "max", managerId: "pam", organizationId: ORG });
     expect(await countedDottedManagerIds(ORG, "max")).toEqual(["pam"]);
   });
 });
@@ -316,10 +333,11 @@ describe("many managers at once (the Sub-teams page)", () => {
 // count, though they still work here.
 describe("people who work here through a membership are on the lines", () => {
   beforeEach(() => {
-    // rio reports to mona and last switched to "client"; his membership here
-    // is a Member. fay is anchored in client with no membership here.
-    add("rio", "mona", "MANAGER", { organizationId: "client" });
-    st.memberships.push({ userId: "rio", organizationId: ORG, role: "EMPLOYEE" });
+    // rio reports to mona here and last switched to "client"; his membership
+    // here is a Member and holds that line (E1), while his account holds
+    // client's (cleo). fay is anchored in client with no membership here.
+    add("rio", "cleo", "MANAGER", { organizationId: "client" });
+    st.memberships.push({ userId: "rio", organizationId: ORG, role: "EMPLOYEE", managerId: "mona" });
     add("fay", "mona", "EMPLOYEE", { organizationId: "client" });
   });
 
@@ -337,23 +355,23 @@ describe("people who work here through a membership are on the lines", () => {
 
   it("walks through one who is an Agent here, at the tier held here, whatever their row says", async () => {
     // zed is a Manager where he is anchored and an Agent here; zia is listed under him.
-    add("zed", "mona", "MANAGER", { organizationId: "client" });
-    st.memberships.push({ userId: "zed", organizationId: ORG, role: "AGENT" });
+    add("zed", "cleo", "MANAGER", { organizationId: "client" });
+    st.memberships.push({ userId: "zed", organizationId: ORG, role: "AGENT", managerId: "mona" });
     add("zia", "zed");
     expect(new Set(await effectiveDirectReportIds(ORG, "mona")).has("zia")).toBe(true);
     expect(await effectiveManagerOf(ORG, "zia")).toBe("mona");
   });
 
   it("counts an Agent's stored reports who work here that way, for the Members drawer", async () => {
-    add("rue", "sam", "EMPLOYEE", { organizationId: "client" });
-    st.memberships.push({ userId: "rue", organizationId: ORG, role: "EMPLOYEE" });
+    add("rue", "cleo", "EMPLOYEE", { organizationId: "client" });
+    st.memberships.push({ userId: "rue", organizationId: ORG, role: "EMPLOYEE", managerId: "sam" });
     add("foe", "sam", "EMPLOYEE", { organizationId: "client" });
     expect(await agentStoredReports(ORG, "sam")).toEqual({ solid: 3, dotted: 1 });
     expect((await agentsWithStoredReports(ORG, ["sam"])).get("sam")).toEqual({ solid: 3, dotted: 1 });
   });
 
   it("counts their dotted line, and leaves out a removed person or one not in this workspace", async () => {
-    st.dotted.push({ userId: "rio", managerId: "mona" }, { userId: "fay", managerId: "mona" }, { userId: "gone", managerId: "mona" });
+    st.dotted.push({ userId: "rio", managerId: "mona", organizationId: ORG }, { userId: "fay", managerId: "mona", organizationId: ORG }, { userId: "gone", managerId: "mona", organizationId: ORG });
     expect(new Set(await countedDottedReportIds(ORG, "mona"))).toEqual(new Set(["dee", "rio"]));
     // getDottedReports and the effective tree's dotted read named no
     // workspace and kept removed people.
@@ -371,31 +389,14 @@ describe("people who work here through a membership are on the lines", () => {
   });
 });
 
-// Docs-found fixes batch 8, from the batch 7 review: PATCH asked before
-// replacing a Reports to another workspace relies on only when the manager
-// held no level here, so an Agent here who manages the person there was
-// overwritten with no question, while the Agent move and the dotted lines'
-// rule kept that line.
-describe("a Reports to another workspace relies on", () => {
-  beforeEach(() => {
-    // ida also works in the client workspace, where sam (an Agent here) is a Manager.
-    st.memberships.push({ userId: "ida", organizationId: "client", role: "EMPLOYEE" }, { userId: "sam", organizationId: "client", role: "MANAGER" });
-  });
-
-  it("is the other workspace's when the manager holds the Agent tier here, as a dotted line is", async () => {
-    // Before: false, since sam holds a level here.
-    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBe("agent");
-    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(true);
-  });
-
-  it("is unnamed for a manager with no level here, and nobody's for a Manager here or an Agent there too", async () => {
-    add("fay", null, "MANAGER", { organizationId: "client" });
-    expect(await managerLineIsOthers(ORG, "ida", "fay")).toBe("unnamed");
-    st.memberships.push({ userId: "mona", organizationId: "client", role: "MANAGER" });
-    expect(await managerLineIsOthers(ORG, "ida", "mona")).toBeNull();
-    st.memberships = st.memberships.map((m) => (m.userId === "sam" ? { ...m, role: "AGENT" } : m));
-    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBeNull();
-    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(false);
-    expect(await managerLineIsOthers(ORG, "ida", null)).toBeNull();
+// Docs-found fixes batches 6 to 8: PATCH asked before replacing a Reports to
+// another workspace relied on (managerLineIsOthers), and the dotted-lines PUT
+// kept such a line (othersDottedLines). Since workspace-status-2.md E1 and E2
+// a line is one workspace's row, so step 4 retired both (E6).
+describe("the relied-line helpers are gone (workspace-status-2 E6, step 4)", () => {
+  it("answers no question about another workspace's line", async () => {
+    const lines = await import("./manager-lines");
+    for (const name of ["managerLineIsOthers", "othersDottedLines", "recordLinesOfOthers"]) expect(lines, name).not.toHaveProperty(name);
   });
 });
+

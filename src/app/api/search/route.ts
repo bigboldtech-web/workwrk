@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { guestConversationPartnerIds, peopleHereByName } from "@/lib/access/seated-here";
+import { placementHereOf } from "@/lib/access/profile-here";
 import { orgRoleOf } from "@/lib/access/org-role";
 import { getSessionOrFail, getOrgId, isManager, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgAdminAccessLevel } from "@/lib/space";
@@ -283,7 +284,8 @@ export async function GET(req: NextRequest) {
   const annAudienceTypes = announcements.map((a) => parseAnnouncementAudience(a.targetAudience).type);
   const [annViewer, annTagIds, annSpaceIds] = await Promise.all([
     announcements.length > 0
-      ? prisma.user.findUnique({ where: { id: me }, select: { id: true, departmentId: true, officeId: true } })
+      ? // The reader's department and office at their seat here (E15, step 8), as the feed reads them.
+        placementHereOf(orgId, me).then((p) => (p ? { id: me, departmentId: p.departmentId, officeId: p.officeId } : null))
       : Promise.resolve(null),
     annAudienceTypes.includes("TAGS") ? getUserTagIds(orgId, me) : Promise.resolve<string[]>([]),
     annAudienceTypes.includes("SPACE") ? announcementViewerSpaceIds(orgId, me) : Promise.resolve<string[]>([]),

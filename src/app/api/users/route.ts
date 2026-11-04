@@ -53,6 +53,14 @@ export async function GET(req: NextRequest) {
   const tagIdsParam = searchParams.get("tagIds");
   const tagIds = tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const pagination = parsePaginationParams(req);
+  // A sort is one of the columns this list shows (the final review of
+  // workspace-status-2, security L1): any other key was read from the
+  // account for someone here through a membership (seatKey's default), so
+  // ?sortBy=phone or dateOfBirth ordered this workspace's list by another
+  // workspace's values, and an unknown key was a 500.
+  if (pagination.sortBy && !USERS_SORTS.has(pagination.sortBy)) {
+    return jsonError(`sortBy must be one of: ${[...USERS_SORTS].join(", ")}`, 400);
+  }
 
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
@@ -159,9 +167,12 @@ export async function GET(req: NextRequest) {
     // With their workspace: only this workspace's own are answered (D18).
     department: { select: { id: true, name: true, organizationId: true } },
     role: { select: { id: true, title: true, organizationId: true } },
-    manager: { select: { id: true, firstName: true, lastName: true } },
-    // Filtered count: soft-deleted reports don't inflate "N reports".
-    _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: !directoryCard } },
+    // The reports are counted HERE below (reportsHere), never by the
+    // cross-workspace directReports relation (workspace-status-2.md E1).
+    // KRA assignments are counted where they were before: never for the
+    // directory card (a scope=directory request is answered by
+    // directoryList above, so this select is never left empty).
+    _count: { select: { kraAssignments: !directoryCard } },
   } satisfies Prisma.UserSelect;
 
   const memberTotal = await prisma.organizationMembership.count({ where: seatWhere });
@@ -192,29 +203,39 @@ export async function GET(req: NextRequest) {
   // Attach each person's tags (one batched query) so the directory can show
   // and filter by them without an N+1.
   const tagsByUser = await getUserTagsMap(orgId, users.map((u) => u.id));
-  // A department or job title of another workspace, and a manager who holds
-  // no seat here, are never answered (D18, profile-here.ts).
-  const managersHere = await managersWithSeatHere(orgId, users.map((u) => u.managerId));
+  // THE LINE HERE (docs/plans/workspace-status-2.md E1, step 3): the
+  // manager each row's seat here holds, the account's line for someone
+  // anchored here and the membership's own for someone here through one,
+  // never the account's line of another workspace. A department or job
+  // title of another workspace, and a manager who holds no seat here, are
+  // never answered (D18, profile-here.ts).
+  const lineOf = (u: (typeof users)[number]) => (seatOf.has(u.id) ? seatOf.get(u.id)!.managerId ?? null : u.managerId);
+  const managersHere = await managersWithSeatHere(orgId, users.map(lineOf));
   // What this workspace holds of the people here through a membership: the
-  // placement on their membership, their reports here, and their KRAs here
-  // (never their account's in another workspace).
+  // placement on their membership, and their KRAs here (never their
+  // account's in another workspace); and everyone's reports here.
   const memberIds = users.filter((u) => seatOf.has(u.id)).map((u) => u.id);
-  const [placed, reports, kras] = await Promise.all([
+  const [placed, reports, kras, managerRows] = await Promise.all([
     placementsHere(orgId, memberIds.map((id) => seatOf.get(id)!)),
-    reportsHere(orgId, memberIds),
+    reportsHere(orgId, users.map((u) => u.id)),
     memberIds.length && !directoryCard
       ? prisma.kRAAssignment.groupBy({ by: ["userId"], where: { userId: { in: memberIds }, kra: { organizationId: orgId } }, _count: { _all: true } })
       : Promise.resolve([] as Array<{ userId: string; _count: { _all: number } }>),
+    managersHere.size ? prisma.user.findMany({ where: { id: { in: [...managersHere] } }, select: { id: true, firstName: true, lastName: true } }) : Promise.resolve([] as Array<{ id: string; firstName: string; lastName: string }>),
   ]);
   const krasHere = new Map(kras.map((k) => [k.userId, k._count._all]));
+  const managerOf = new Map(managerRows.map((m) => [m.id, m]));
   const usersWithTags = users.map((u) => {
+    const line = lineOf(u);
+    const shown = line && managersHere.has(line) ? line : null;
     const base = {
       ...u,
       department: ownHere(u.department, orgId),
       role: ownHere(u.role, orgId),
-      managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
-      manager: u.manager && managersHere.has(u.manager.id) ? u.manager : null,
+      managerId: shown,
+      manager: shown ? managerOf.get(shown) ?? null : null,
       tags: tagsByUser.get(u.id) ?? [],
+      _count: { directReports: reports.get(u.id) ?? 0, ...(directoryCard ? {} : { kraAssignments: u._count.kraAssignments }) },
     };
     const m = seatOf.get(u.id);
     if (!m) return base;
@@ -222,13 +243,18 @@ export async function GET(req: NextRequest) {
     const title = m.roleId ? placed.role.get(m.roleId) : undefined;
     return {
       ...base,
+      // The account's phone is its anchored workspace's to show (phase 1's
+      // security L2: the record, the Directory and its export withhold it
+      // here), never this list's (the final review of workspace-status-2,
+      // security L1).
+      phone: null,
       status: m.status,
       ...(directoryCard ? {} : { accessLevel: m.role }),
       joinDate: m.joinDate ?? joinedHere(m, m.user),
       deletedAt: m.removedAt,
       department: dept ? { id: dept.id, name: dept.name } : null,
       role: title ? { id: title.id, title: title.title } : null,
-      _count: { ...u._count, directReports: reports.get(u.id) ?? 0, ...(directoryCard ? {} : { kraAssignments: krasHere.get(u.id) ?? 0 }) },
+      _count: { directReports: reports.get(u.id) ?? 0, ...(directoryCard ? {} : { kraAssignments: krasHere.get(u.id) ?? 0 }) },
     };
   });
 
@@ -237,13 +263,19 @@ export async function GET(req: NextRequest) {
 
 /** A membership here as the list reads it, with the account's keys. */
 const USERS_SEAT_SELECT = {
-  userId: true, role: true, status: true, removedAt: true, departmentId: true, roleId: true, officeId: true,
+  userId: true, role: true, status: true, removedAt: true, departmentId: true, roleId: true, officeId: true, managerId: true,
   joinDate: true, weeklyCapacityHours: true, orgRole: true, isAgent: true, createdAt: true, isPrimary: true,
 } as const;
 type UsersSeatRow = Prisma.OrganizationMembershipGetPayload<{ select: typeof USERS_SEAT_SELECT }> & { user: { id: string; createdAt: Date } & Record<string, unknown> };
 
 /** The account's own columns a list sorts by in the database, half by half, then merged. */
 const PERSON_SORTS = new Set(["firstName", "lastName", "email"]);
+/**
+ * Every sort this list takes: the account's name and address, and the
+ * columns a seat holds here (seatKey), each read at the seat that holds it.
+ * Nothing else (the account's phone, birthday or working week).
+ */
+const USERS_SORTS = new Set([...PERSON_SORTS, "status", "accessLevel", "joinDate", "departmentId", "roleId", "officeId", "managerId"]);
 /** Postgres sorts an enum by its declaration order (prisma/schema.prisma), so the in-memory sort does too. */
 const LEVEL_ORDER = ["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR"];
 const STATUS_ORDER = ["ACTIVE", "INACTIVE", "ON_LEAVE", "PROBATION", "PIP", "NOTICE_PERIOD"];
@@ -259,6 +291,8 @@ function seatKey(m: UsersSeatRow, key: string): unknown {
     case "departmentId": return m.departmentId;
     case "roleId": return m.roleId;
     case "officeId": return m.officeId;
+    // The line their membership holds here (workspace-status-2.md E1), never the account's.
+    case "managerId": return m.managerId;
     case "weeklyCapacityHours": return m.weeklyCapacityHours;
     case "orgRole": return m.orgRole;
     case "isAgent": return m.isAgent;

@@ -128,11 +128,13 @@ export async function buildAnalytics(
       where: { organizationId: orgId, userId: { in: peopleIds }, startedAt: { gte: prevFrom, lt: from } },
       _sum: { durationMs: true },
     }),
+    // This workspace's SOPs only (docs/plans/workspace-status-2.md, the final
+    // review, product M5): an SOP assignment names no workspace of its own.
     prisma.sOPAssignment.count({
-      where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: from } },
+      where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: from }, sop: { organizationId: orgId } },
     }),
     prisma.sOPAssignment.count({
-      where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: prevFrom, lt: from } },
+      where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: prevFrom, lt: from }, sop: { organizationId: orgId } },
     }),
     prisma.user.findMany({
       where: { id: { in: peopleIds }, organizationId: orgId },
@@ -211,7 +213,7 @@ export async function buildAnalytics(
   }
   const acksByUser = await prisma.sOPAssignment.groupBy({
     by: ["userId"],
-    where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: from } },
+    where: { userId: { in: peopleIds }, status: "COMPLETED", completedAt: { gte: from }, sop: { organizationId: orgId } },
     _count: { _all: true },
   });
   for (const row of acksByUser) {

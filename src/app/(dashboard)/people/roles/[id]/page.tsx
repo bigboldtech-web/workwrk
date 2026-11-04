@@ -16,6 +16,7 @@ import { legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 import { gatePage } from "@/lib/access/gate";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { jobTitleWriterByFacts } from "@/lib/people/job-title-access";
+import { peoplePlacedHere } from "@/lib/access/profile-here";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +86,7 @@ export default async function RolePage(props: {
 
   // Non-editors read the role as a JD: no org-wide user list, no holder
   // emails. The workspace renders read-only off canEdit.
-  const [allAreas, allRoles, allKras, scopes, orgUsers] = await Promise.all([
+  const [allAreas, allRoles, allKras, scopes, orgUsers, placedThrough] = await Promise.all([
     prisma.ownershipArea.findMany({
       where: { organizationId: orgId },
       select: { id: true, name: true, ownerRole: { select: { id: true, title: true } } },
@@ -97,6 +98,12 @@ export default async function RolePage(props: {
     canEdit
       ? prisma.user.findMany({ where: { organizationId: orgId, status: "ACTIVE" }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true }, orderBy: { firstName: "asc" } })
       : Promise.resolve([]),
+    // The holders here through a membership whose membership holds this
+    // title, kept seats, the rule DELETE /api/roles/[id] refuses by
+    // (docs/plans/workspace-status-2.md E15, step 8): before, the People tab
+    // listed the people anchored here only, and Delete was offered on a
+    // title only Pat held, then refused.
+    peoplePlacedHere(orgId, { roleIds: [id] }, "kept", { only: "membership" }),
   ]);
 
   const stripEmail = <T extends { email: string }>(p: T): T => (canEdit ? p : { ...p, email: "" });
@@ -106,8 +113,16 @@ export default async function RolePage(props: {
   // attached later (or a legacy holder) silently drifts. One grouped count
   // query; the workspace renders an amber "missing N of M" note + a Seed
   // action (POST /api/users/[id]/seed-alignment) per drifted holder.
+  //
+  // The holders here through a membership are counted too (the fixes
+  // review, finding 8): none is assigned a KRA here (the step 5 review M1),
+  // but one whose account was here when this title was set (just after
+  // joining by invitation) holds its KRAs, and the template KRAs are this
+  // workspace's own, so the count is of this workspace's rows only. Before,
+  // every such row said "KRAs not assigned here", even for someone holding
+  // them all.
   const templateKraIds = role.kraTemplates.map((k) => k.id);
-  const holderIds = role.users.map((u) => u.id);
+  const holderIds = [...role.users.map((u) => u.id), ...placedThrough.map((p) => p.id)];
   const seededCounts = new Map<string, number>();
   if (templateKraIds.length > 0 && holderIds.length > 0) {
     const grouped = await prisma.kRAAssignment.groupBy({
@@ -146,10 +161,22 @@ export default async function RolePage(props: {
     boundaries: role.boundaries.map((b) => ({ id: b.id, relation: b.relation as string, area: b.area })),
     thresholds: role.thresholds.map((t) => ({ id: t.id, label: t.label, trigger: t.trigger, value: t.value, unit: t.unit, businessHoursOnly: t.businessHoursOnly })),
     instances: role.instances.map((i) => ({ id: i.id, name: i.name, status: i.status, scope: i.scope, user: i.user ? stripEmail(i.user) : i.user })),
-    people: role.users.map((u) => ({
-      ...stripEmail(u),
-      missingKras: templateKraIds.length - (seededCounts.get(u.id) ?? 0),
-    })),
+    people: [
+      ...role.users.map((u) => ({
+        ...stripEmail(u),
+        missingKras: (templateKraIds.length - (seededCounts.get(u.id) ?? 0)) as number | null,
+      })),
+      // No KRA is assigned here to someone who works here from another
+      // workspace's account (the step 5 review M1), so their row offers no
+      // Seed; it shows what they hold of this title's KRAs (`elsewhere`).
+      ...placedThrough
+        .map((p) => ({
+          ...stripEmail({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar }),
+          missingKras: (templateKraIds.length - (seededCounts.get(p.id) ?? 0)) as number | null,
+          elsewhere: true,
+        }))
+        .sort((a, b) => a.firstName.localeCompare(b.firstName)),
+    ],
     allAreas,
     allRoles,
     allKras,

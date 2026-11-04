@@ -23,13 +23,15 @@
 //
 // Someone who works here through a membership (docs/plans/workspace-status.md
 // D11, the row's `profileHere: false`): their Role, Tier and Status are this
-// workspace's and work as for anyone (Deactivate, Reactivate, Remove); their
-// Job title, Department, Office and Weekly capacity are the ones their
-// membership here holds (D18; the final review, product H1), and Reports to
-// the manager with a seat here, all shown as text, with the same empty mark
-// anyone's gets and one line saying why (PROFILE_ELSEWHERE). No Admin scopes control for them
-// (the access engine reads an Admin's scopes from the anchored row only) and
-// no two step reset (the server refuses it for anyone who belongs elsewhere).
+// workspace's and work as for anyone (Deactivate, Reactivate, Remove), and
+// since docs/plans/workspace-status-2.md step 5 (E7, E8) so are their Job
+// title, Department, Office, Reports to and Weekly capacity: the ones their
+// membership here holds (D18), edited here by the same people as anyone's
+// and written on that membership. One line says that their name and sign-in
+// address are the account's (SHARED_IDENTITY_REFUSAL). No Admin scopes
+// control for them (the access engine reads an Admin's scopes from the
+// anchored row only, a known limit) and no two step reset (the server
+// refuses it for anyone who belongs elsewhere).
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -42,8 +44,8 @@ import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/sett
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
-import { agentReportsNote, linesStayNote } from "@/lib/people/reporting-lines";
-import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
+import { agentReportsNote } from "@/lib/people/reporting-lines";
+import { SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
 /** One field save that failed: what it sent and showed, so Retry resends exactly that. */
@@ -93,23 +95,25 @@ export function undoFor(before: MemberRow, optimistic: Partial<MemberRow>): Part
 
 /**
  * Whether this viewer may edit the person's profile fields here (pure;
- * tested): the People team's and Admins' right, and only for someone whose
- * profile this workspace keeps. Someone who works here through a membership
- * (`profileHere: false`, workspace-status D11) keeps theirs elsewhere.
+ * tested): the People team's and Admins' right, for everyone who works here.
+ * Someone here through a membership (`profileHere: false`, workspace-status
+ * D11) has their job title, department, office, Reports to and weekly
+ * capacity here edited here too, on their membership
+ * (workspace-status-2.md E7, step 5); before, they were read-only.
  */
 export function profileEditable(member: Pick<MemberRow, "profileHere">, canEditPeople: boolean): boolean {
-  return canEditPeople && member.profileHere !== false;
+  void member;
+  return canEditPeople;
 }
 
 /**
  * What a refused save keeps for its Retry, and what the row says (pure;
- * tested). A Reports to another workspace counts (409 manager_elsewhere,
- * docs-found fixes batch 7) is asked about, not refused: the row says so, and
- * its Retry is the confirmation, resending the change with
- * replaceOtherWorkspaceLine.
+ * tested): the same change, and the server's sentence. Batch 7's 409
+ * manager_elsewhere, whose Retry confirmed with replaceOtherWorkspaceLine,
+ * retired with workspace-status-2 step 4 (E6): a Reports to here never
+ * reaches another workspace's line, so nothing is asked first.
  */
 export function refusedSave(body: Record<string, unknown>, r: { error: string; code?: string }): { body: Record<string, unknown>; message: string } {
-  if (r.code === "manager_elsewhere") return { body: { ...body, replaceOtherWorkspaceLine: true }, message: `${r.error} Retry to change it anyway.` };
   return { body, message: r.error };
 }
 
@@ -177,7 +181,7 @@ export function MemberDrawer({
     const undo = undoFor(m, optimistic);
     const memberId = m.id;
     setM((cur) => ({ ...cur, ...optimistic }));
-    const r = await apiFetch(`/api/users/${memberId}`, { method: "PATCH", json: body });
+    const r = await apiFetch<{ alignmentNote?: string }>(`/api/users/${memberId}`, { method: "PATCH", json: body });
     const newest = attempt.current[gid] === n;
     if (!r.ok) {
       if (!newest) return false; // the newer attempt's answer decides the row
@@ -189,6 +193,9 @@ export function MemberDrawer({
       return false;
     }
     setSaved((s) => ({ ...s, [key]: Date.now() }));
+    // A job title saved for someone here through a membership assigns no
+    // KRAs or SOPs here, and the server says so (the step 5 review M1).
+    if (r.data?.alignmentNote) toast(r.data.alignmentNote);
     onChanged();
     return true;
   };
@@ -223,7 +230,7 @@ export function MemberDrawer({
     void patch(key, { orgRole: role, memberTier: role === "MEMBER" ? tier : null }, { role, tier: role === "MEMBER" ? tier : null });
   };
 
-  // Their profile is this workspace's to edit only when they are anchored here (D11).
+  // Their profile here is this workspace's to edit, whichever kind of seat they hold (E7, step 5).
   const canEditProfile = profileEditable(m, canEditPeople);
   const pick = (list: Lookup[], cur: { id: string } | null) => [{ value: "", label: "None" }, ...list.map((l) => ({ value: l.id, label: l.label }))].concat(cur && !list.some((l) => l.id === cur.id) ? [{ value: cur.id, label: "Current" }] : []);
   const inactive = m.status === "INACTIVE";
@@ -253,6 +260,8 @@ export function MemberDrawer({
     >
       <div className="flex flex-col p-5">
         <p className="mb-2 text-sm text-ink-2">{m.email}</p>
+        {/* Their name and address are the account's, read by every workspace they belong to (E8, step 5). */}
+        {m.profileHere === false ? <p className="mb-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}
         <SettingsRow
           label="Role"
           helper={m.role === "OWNER" ? "Runs the company account." : m.role === "ADMIN" ? "Runs the workspace day to day." : "Works in the Spaces they are added to."}
@@ -315,7 +324,6 @@ export function MemberDrawer({
             }
           />
         ) : null}
-        {m.profileHere === false ? <p className="mt-3 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}
         <SettingsRow
           label="Job title"
           savedAt={saved.roleId}
@@ -458,7 +466,6 @@ type AgentReportsPlan = {
   solid: number;
   dotted: number;
   rehomed: { to: string | null; count: number }[];
-  stays?: { id: string; name: string | null; kind: "solid" | "dotted" }[];
 };
 
 /**
@@ -466,9 +473,9 @@ type AgentReportsPlan = {
  * their reports sends them (GET /api/users/[id]/agent-reports, the
  * handover's own routing), and the button. The button waits for that
  * answer, so it never runs a move the notice has not described; a failed
- * read says so and offers Retry. People whose line to the Agent another
- * workspace relies on stay as they are, named (docs-found fixes batch 6);
- * with nobody else to move, there is no button.
+ * read says so and offers Retry. Only this workspace's lines are counted and
+ * moved (workspace-status-2.md E1, E2, E6): a line to them in another
+ * workspace is that workspace's own.
  */
 export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: string; name: string; onMoved: (message: string) => void }) {
   const [plan, setPlan] = useState<{ for: string; plan: AgentReportsPlan | null } | null>(null);
@@ -484,14 +491,13 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
   }, [memberId, attempt]);
   const now = plan && plan.for === `${memberId}:${attempt}` ? plan : null;
   const note = now?.plan ? agentReportsNote(now.plan, name) : null;
-  const staysNote = now?.plan ? linesStayNote(now.plan.stays ?? [], name) : null;
-  if (now?.plan && !note && !staysNote) return null;
+  if (now?.plan && !note) return null;
   const move = async () => {
     setBusy(true);
     setError(null);
     // The plan shown goes with the move: the server moves nothing if the
     // lines changed since, and the notice reads the new plan.
-    const r = await apiFetch<{ moved: number; dottedRemoved: number; stays?: { name: string | null; kind: "solid" | "dotted" }[] }>(`/api/users/${memberId}/agent-reports`, {
+    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, {
       method: "POST",
       json: { expect: now?.plan ?? null },
     });
@@ -501,13 +507,11 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
       if (r.code === "plan_changed") setAttempt((n) => n + 1);
       return;
     }
-    const stayed = linesStayNote(r.data?.stays ?? [], name);
-    onMoved(stayed ? `Moved the reports listed under ${name}. ${stayed}` : `Moved the reports listed under ${name}`);
+    onMoved(`Moved the reports listed under ${name}`);
   };
   return (
     <div className="mt-3 rounded-md border border-line p-3 text-sm text-ink-2" role="status">
       {note ? <p>{note}</p> : now?.plan ? null : now ? <p>Couldn&apos;t check where their reports would go.</p> : <p>Checking where their reports would go.</p>}
-      {staysNote ? <p className={note ? "mt-2" : undefined}>{staysNote}</p> : null}
       {error ? <p role="alert" className="mt-2 text-danger-text">{error}</p> : null}
       {now?.plan && !note ? null : (
         <div className="mt-2 flex gap-2">

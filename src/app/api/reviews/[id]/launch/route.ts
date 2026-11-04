@@ -7,6 +7,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 import { sendEmail } from "@/lib/email";
 import { reviewPendingTemplate } from "@/lib/email-templates";
 import { formatDate } from "@/lib/format/date";
+import { peoplePlacedHere } from "@/lib/access/profile-here";
 
 type Session = NonNullable<Awaited<ReturnType<typeof getSessionOrFail>>["session"]>;
 
@@ -41,24 +42,30 @@ async function launchPlan(session: Session, id: string) {
 
   // The active people the cycle covers (review-cycle-rules.ts): the cycle's
   // own audience for the People team and Admin; a manager's cycle is always
-  // clipped to their chain. Removed people are never reviewed.
+  // clipped to their chain. Removed people are never reviewed. The people
+  // ANCHORED here only, by their account's department, whatever the
+  // audience (everyone, departments or names): a membership person's
+  // reviews here are a known limit of docs/plans/workspace-status-2.md (E8,
+  // the Risks list), with their KRAs, which a review's self-assessment
+  // reads across every workspace (the step 5 review M1), so step 8 (E15)
+  // leaves this audience anchored.
   const people = await prisma.user.findMany({
     where: { organizationId: orgId, status: "ACTIVE", deletedAt: null },
     select: { id: true, managerId: true, departmentId: true },
   });
   const peopleOrAdmin = await isPeopleTeamOrAdmin(session);
-  const covered = new Set(
-    launchAudience({
-      peopleTeamOrAdmin: peopleOrAdmin,
-      audienceType: cycle.audienceType,
-      departmentIds: cycle.departmentIds,
-      userIds: cycle.userIds,
-      chainIds: peopleOrAdmin ? [] : await chainOf(getUserId(session), { organizationId: orgId }),
-      people,
-    }),
-  );
+  const chainIds = peopleOrAdmin ? [] : await chainOf(getUserId(session), { organizationId: orgId });
+  const audience = { peopleTeamOrAdmin: peopleOrAdmin, audienceType: cycle.audienceType, departmentIds: cycle.departmentIds, userIds: cycle.userIds, chainIds };
+  const covered = new Set(launchAudience({ ...audience, people }));
   const employees = people.filter((p) => covered.has(p.id));
-  return { cycle, employees, peopleOrAdmin } as const;
+  // The people here through a membership the same audience would cover (an
+  // active seat here, the department their membership holds, the same
+  // clip to a manager's chain), left out and counted so the confirm says so
+  // (the final review, product L4): before, the count was short by them
+  // with no word why.
+  const elsewhere = await peoplePlacedHere(orgId, "everyone", "active", { only: "membership" });
+  const notReviewedElsewhere = launchAudience({ ...audience, people: elsewhere }).length;
+  return { cycle, employees, peopleOrAdmin, notReviewedElsewhere } as const;
 }
 
 /**
@@ -77,7 +84,7 @@ export async function GET(
   const { id } = await params;
   const plan = await launchPlan(session, id);
   if ("error" in plan) return plan.error;
-  const { cycle, employees, peopleOrAdmin } = plan;
+  const { cycle, employees, peopleOrAdmin, notReviewedElsewhere } = plan;
   const covers =
     cycle.audienceType === "DEPARTMENTS"
       ? (await prisma.department.findMany({ where: { id: { in: cycle.departmentIds }, organizationId: getOrgId(session) }, select: { name: true } })).map((d) => d.name).join(", ") || null
@@ -88,6 +95,7 @@ export async function GET(
     named: cycle.audienceType === "USERS" ? cycle.userIds.length : null,
     covers,
     clipped: !peopleOrAdmin,
+    notReviewedElsewhere,
   });
 }
 

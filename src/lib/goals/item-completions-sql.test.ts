@@ -60,11 +60,13 @@ describe(`prisma/sql/${FILE}`, () => {
     expect(SQL).not.toMatch(/—|–| -- /);
   });
 
-  it("is listed in SQL_MANIFEST once, followed only by the membership status file, with its README row", () => {
+  it("is listed in SQL_MANIFEST once, followed only by the membership status file and the workspace lines file, with its README row", () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(read("scripts/deploy-migrations.mjs"))?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    // After it only a person's status in each workspace (docs/plans/workspace-status.md).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-01-membership-status.sql"]);
+    // After it only a person's status in each workspace (docs/plans/workspace-status.md),
+    // then their manager and dotted lines in each (docs/plans/workspace-status-2.md).
+    // Then a person's week rows in each (the final review of workspace-status-2, security M1).
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Item completions .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });

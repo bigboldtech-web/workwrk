@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Dept = { id: string; current: number; subs: number };
 let dept: Dept | null;
+/** People here through a membership whose membership holds the department (the step 5 review M2). */
+let memberships: number;
 let goalIds: string[];
 const writes: string[] = [];
 const userUpdateMany = vi.fn();
@@ -33,6 +35,16 @@ vi.mock("@/lib/prisma", () => ({
     },
     user: {
       updateMany: (args: unknown) => { writes.push("user.updateMany"); userUpdateMany(args); return "user.updateMany"; },
+    },
+    // profile-here.ts membershipsPlacedHere: kept seats here of people
+    // anchored elsewhere, by the department (a where that is not that one
+    // throws, so a regression to another rule is seen).
+    organizationMembership: {
+      count: async (args: { where: { organizationId?: string; removedAt?: null; departmentId?: string; user?: { organizationId?: { not?: string }; deletedAt?: null } } }) => {
+        const w = args.where;
+        if (w.organizationId !== "org-1" || w.removedAt !== null || w.departmentId !== "d-1" || w.user?.organizationId?.not !== "org-1" || w.user?.deletedAt !== null) throw new Error(`unexpected membership count: ${JSON.stringify(w)}`);
+        return memberships;
+      },
     },
     oKR: {
       findMany: async () => goalIds.map((id) => ({ id, title: id, level: "DEPARTMENT", ownerId: null, departmentId: dept?.id ?? null })),
@@ -58,6 +70,7 @@ async function del(query = "") {
 
 beforeEach(() => {
   dept = { id: "d-1", current: 0, subs: 0 };
+  memberships = 0;
   goalIds = [];
   writes.length = 0;
   userUpdateMany.mockClear();
@@ -80,6 +93,19 @@ describe("DELETE /api/departments/[id]", () => {
     const r = await del();
     expect(r.status).toBe(409);
     expect(r.body).toMatchObject({ code: "not_empty", error: "Move 2 people and 1 sub-department out of this department first." });
+    expect(writes).toEqual([]);
+  });
+
+  // workspace-status-2.md, the step 5 review M2: someone here through a
+  // membership placed in it (their membership's department) is a current
+  // person too. Before, the delete went through and left them a dead id.
+  it("counts the people here through a membership placed in it as current people", async () => {
+    memberships = 1;
+    const r = await del();
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ code: "not_empty", error: "Move 1 person out of this department first." });
+    dept = { id: "d-1", current: 1, subs: 0 };
+    expect((await del()).body).toMatchObject({ error: "Move 2 people out of this department first." });
     expect(writes).toEqual([]);
   });
 

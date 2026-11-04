@@ -13,6 +13,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity";
+import { personHere } from "@/lib/access/seated-here";
+import { placementsHere } from "@/lib/access/profile-here";
 
 export type WorkflowStep = {
   id: string;
@@ -214,11 +216,15 @@ async function actorMatchesRule(args: {
   rule: WorkflowStep["approverRule"];
   value?: string;
 }): Promise<boolean> {
-  const actor = await prisma.user.findUnique({
-    where: { id: args.actorId },
-    select: { id: true, accessLevel: true, organizationId: true, roleId: true, role: { select: { title: true } } },
-  });
-  if (!actor || actor.organizationId !== args.organizationId) return false;
+  // The actor at their seat here (docs/plans/workspace-status-2.md E15, step
+  // 8): someone anchored here as before (any state), or someone here through
+  // a membership while that seat is live, with the level held here and the
+  // job title their seat here holds (this workspace's own only). Before,
+  // someone here through a membership matched no rule, not even USER.
+  const here = await personHere(args.organizationId, args.actorId, { anchored: "any", membership: "live" });
+  if (!here) return false;
+  const title = here.seat.roleId ? (await placementsHere(args.organizationId, [here.seat])).role.get(here.seat.roleId)?.title ?? null : null;
+  const actor = { id: here.id, accessLevel: String(here.seat.level), role: title ? { title } : null };
 
   const MANAGER_ROLES = new Set([
     "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",

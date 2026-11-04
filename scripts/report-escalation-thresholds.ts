@@ -114,14 +114,32 @@ async function main() {
     let orgHits = 0;
     let orgUnreachable = 0;
     for (const t of thresholds) {
-      // Threshold.roleId joins User.roleId: the people who hold the job title today (leavers excluded).
+      // The people who hold the job title here today (leavers excluded), at
+      // their seat here (docs/plans/workspace-status-2.md E15, step 8): those
+      // anchored here by User.roleId with their account's line, and those
+      // here through a membership by the job title their membership holds,
+      // with the line that membership holds (E1). Two halves, as
+      // src/lib/access/seated-here.ts reads them ("kept"); the membership
+      // half leaves out anyone anchored here.
       const holders = t.roleId
-        ? await prisma.user.findMany({ where: { organizationId: org.id, roleId: t.roleId, deletedAt: null }, select: { id: true, managerId: true } })
+        ? [
+            ...(await prisma.user.findMany({ where: { organizationId: org.id, roleId: t.roleId, deletedAt: null }, select: { id: true, managerId: true } })),
+            ...(await prisma.organizationMembership.findMany({
+              where: { organizationId: org.id, roleId: t.roleId, removedAt: null, user: { organizationId: { not: org.id }, deletedAt: null } },
+              select: { userId: true, managerId: true },
+            })).map((m) => ({ id: m.userId, managerId: m.managerId })),
+          ]
         : [];
       assert(new Set(holders.map((h) => h.id)).size === holders.length, "each holder is counted once per threshold");
       for (const h of holders) matchedPeople.add(h.id);
+      // The named person, at their seat here (anchored here, or here through a membership), not removed.
       const target = t.escalatedToId
-        ? await prisma.user.findFirst({ where: { id: t.escalatedToId, organizationId: org.id, deletedAt: null }, select: { firstName: true, lastName: true } })
+        ? (await prisma.user.findFirst({ where: { id: t.escalatedToId, organizationId: org.id, deletedAt: null }, select: { firstName: true, lastName: true } })) ??
+          (await prisma.organizationMembership.findFirst({
+            where: { userId: t.escalatedToId, organizationId: org.id, removedAt: null, user: { organizationId: { not: org.id }, deletedAt: null } },
+            select: { user: { select: { firstName: true, lastName: true } } },
+          }))?.user ??
+          null
         : null;
       const summary: ThresholdSummary = { holders: holders.length, unreachable: unreachableHolders(t.escalatedToId, holders), wouldEscalate: null };
       const ms = thresholdDurationMs(t.value, t.unit);

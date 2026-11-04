@@ -13,7 +13,7 @@ import { RowMoreButton } from "@/components/ui/table-card";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
 import type { SettingsTab } from "@/components/settings/settings-page";
 import { PeoplePickerField, personName, type PickPerson } from "@/components/people/person-bits";
-import { linesAlsoElsewhereNote, linesStayNote, reportHandoverNote } from "@/lib/people/reporting-lines";
+import { reportHandoverNote } from "@/lib/people/reporting-lines";
 import { leavingNotes } from "@/lib/people/leaving-notes";
 import { settingsTabs } from "@/lib/settings-registry";
 import { cn } from "@/lib/utils";
@@ -253,12 +253,11 @@ type Handover = {
 };
 
 /**
- * GET /api/users/[id]/handover?to=: where the direct reports go if `to` takes
- * the work, and who of them also reports to the person leaving in another
- * workspace (docs-found fixes batch 7: every report moves, and that
- * workspace's Audit log records it).
+ * GET /api/users/[id]/handover?to=: where the direct reports here go if `to`
+ * takes the work (every report here moves; their reports in another
+ * workspace are that workspace's lines, workspace-status-2.md E4, E6).
  */
-type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[]; alsoElsewhere?: { id: string; name: string | null }[]; stays?: { id: string; name: string | null }[]; accountEnded?: boolean };
+type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boolean; rehomed: { to: string | null; count: number }[] };
 
 /**
  * The transfer dialog (560px): what the person holds, a transferee picker
@@ -270,23 +269,14 @@ type ReportsPlan = { reports: number; toRecipient: number; recipientIsAgent: boo
  * before anything runs. Confirm waits for that plan: if it cannot be read,
  * the dialog says so and offers Retry, and Confirm stays held (Cancel
  * stays open), so a handover never runs without saying where the reports go.
- * Every report moves, a report who also reports to them in another
- * workspace too: the deactivation or removal that follows ends their account
- * there as well. The dialog names those reports before and after (batch 7;
- * batch 6 said they stayed, untrue once the removal landed). They move WITH
- * the deactivation or removal, never with the handover (batch 8: that step
- * can still be refused, and the other workspace's line must not change for
- * an account that did not end), so the dialog sends the person picked with
- * it (`handoverTo`), says before that the line moves once they are
- * deactivated or removed, and says after what that step moved. For someone
- * whose account has already ended (deactivated, or removed; the plan's
- * `accountEnded`, batch 9) the handover moves those lines at once, so the
- * dialog says that instead, and a step refused after it says they moved.
- * Each workspace holds its own status now (docs/plans/workspace-status.md):
- * for someone whose account keeps working elsewhere (a membership here, or a
- * usable seat elsewhere the account moves to) those lines stay, and the plan
- * names them (`stays`); the dialog says their other workspaces are not
- * affected (D17) and how many API keys they made here stop working (D15).
+ * Every report HERE moves with the handover (workspace-status-2.md E4, E6):
+ * their lines in another workspace are that workspace's own, so the dialog
+ * says nothing about them (batches 7 to 9 named reports "who also report to
+ * them in another workspace", moved them with the deactivation or removal
+ * and sent `handoverTo` for it; that retired with one line per workspace).
+ * Each workspace holds its own status (docs/plans/workspace-status.md): the
+ * dialog says their other workspaces are not affected (D17) and how many API
+ * keys they made here stop working (D15).
  */
 export function TransferDialog({
   member,
@@ -358,46 +348,25 @@ export function TransferDialog({
   // dialog has not described), the dialog says why, and Retry asks again.
   const planFailed = needsPlan && plan?.for === planKey && !plan.plan;
   const reportsNote = planNow ? reportHandoverNote(planNow, to ? personName(to) : "you") : null;
-  const ends = mode === "remove" ? "removed" : "deactivated";
-  // Already ended (batch 9): the handover itself moves them, never "only once removed".
-  const elsewhereNote = planNow ? linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, planNow.accountEnded ? "ended" : ends) : null;
-  // They still work in the other workspace that relies on these lines (a
-  // membership here, or an account that moves there): the lines stay.
-  const staysNote = planNow ? linesStayNote(planNow.stays ?? [], member.name) : null;
   const leaving = leavingNotes(s);
 
-  type Moved = { reportsAlsoElsewhere?: { id: string; name: string | null }[]; reportsAtAccountEnd?: { id: string; name: string | null }[] };
   const run = async () => {
     setBusy(true);
     setError(null);
     const recipient = to?.id ?? actingId;
-    // Moved by the handover (an account that had already ended) and by the
-    // deactivation or removal itself (batch 8).
-    const alsoMoved: { id: string; name: string | null }[] = [];
-    let waiting: { id: string; name: string | null }[] = [];
     if (needsTransfer) {
-      const h = await apiFetch<Moved>(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
+      const h = await apiFetch(`/api/users/${member.id}/handover`, { method: "POST", json: { reassignToId: recipient } });
       if (!h.ok) { setBusy(false); setError(h.error); return; }
-      alsoMoved.push(...(h.data?.reportsAlsoElsewhere ?? []));
-      waiting = h.data?.reportsAtAccountEnd ?? [];
     }
-    // The person picked takes the reports the step moves itself too.
     const r = mode === "remove"
-      ? await apiFetch<Moved>(`/api/users/${member.id}?handoverTo=${encodeURIComponent(recipient)}`, { method: "DELETE" })
-      : await apiFetch<Moved>(`/api/users/${member.id}`, { method: "PATCH", json: { status: "INACTIVE", handoverTo: recipient } });
+      ? await apiFetch(`/api/users/${member.id}`, { method: "DELETE" })
+      : await apiFetch(`/api/users/${member.id}`, { method: "PATCH", json: { status: "INACTIVE" } });
     setBusy(false);
     if (!r.ok) {
-      // The handover ran, the step did not: the lines another workspace
-      // relies on did not move, and the dialog says when they will. For an
-      // account already ended the handover moved them, and it says so.
-      const said = [linesAlsoElsewhereNote(alsoMoved, member.name, "done"), linesAlsoElsewhereNote(waiting, member.name, ends)].filter(Boolean);
-      setError(said.length ? `${r.error} ${said.join(" ")}` : r.error);
+      setError(r.error);
       return;
     }
-    alsoMoved.push(...(r.data?.reportsAlsoElsewhere ?? []));
-    const done = mode === "remove" ? `${member.name} removed` : `${member.name} deactivated`;
-    const said = linesAlsoElsewhereNote(alsoMoved, member.name, "done");
-    onDone(said ? `${done}. ${said}` : done);
+    onDone(mode === "remove" ? `${member.name} removed` : `${member.name} deactivated`);
   };
 
   return (
@@ -438,8 +407,6 @@ export function TransferDialog({
               </Field>
             ) : null}
             {reportsNote ? <p className="text-sm text-ink-2">{reportsNote}</p> : null}
-            {elsewhereNote ? <p className="text-sm text-ink-2">{elsewhereNote}</p> : null}
-            {staysNote ? <p className="text-sm text-ink-2">{staysNote}</p> : null}
             {planFailed ? (
               <p role="alert" className="text-sm text-danger-text">
                 Couldn&apos;t check where their direct reports go, so this waits until it can.{" "}

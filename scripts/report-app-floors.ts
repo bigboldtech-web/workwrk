@@ -70,14 +70,25 @@ async function main() {
     const rows = [...keys].filter((k) => APP_ACCESS_BY_KEY[k] && !APP_ACCESS_BY_KEY[k].alwaysPinned);
     if (rows.length === 0) continue;
     const orgId = pref.organizationId;
-    const [users, dotted] = await Promise.all([
+    // This workspace's lines (docs/plans/workspace-status-2.md E1, E2, step
+    // 2), as app-floor-impact.server.ts reads them: the people anchored here
+    // by their account's line, the people here through a membership by its
+    // line, and this workspace's dotted lines of people not removed here.
+    const [users, members, dotted] = await Promise.all([
       prisma.user.findMany({ where: { organizationId: orgId, deletedAt: null, status: "ACTIVE" }, select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, managerId: true } }),
-      prisma.userDottedLine.findMany({ where: { user: { organizationId: orgId } }, select: { managerId: true } }),
+      prisma.organizationMembership.findMany({
+        where: { organizationId: orgId, status: "ACTIVE", removedAt: null, managerId: { not: null }, user: { organizationId: { not: orgId }, deletedAt: null, status: { not: "INACTIVE" } } },
+        select: { managerId: true },
+      }),
+      prisma.userDottedLine.findMany({
+        where: { organizationId: orgId, OR: [{ user: { organizationId: orgId } }, { user: { organizationMemberships: { some: { organizationId: orgId, removedAt: null } } } }] },
+        select: { managerId: true },
+      }),
     ]);
     const access = parseAccessSettings((pref.organization.settings as Record<string, unknown> | null)?.access);
     const hr = users.filter((u) => u.accessLevel === "HR").map((u) => u.id);
     const peopleTeam = new Set(access.peopleTeamUserIds.length > 0 ? access.peopleTeamUserIds : hr);
-    const managers = new Set<string>([...users.map((u) => u.managerId).filter((m): m is string => !!m), ...dotted.map((d) => d.managerId)]);
+    const managers = new Set<string>([...[...users, ...members].map((u) => u.managerId).filter((m): m is string => !!m), ...dotted.map((d) => d.managerId)]);
     const people: ImpactPerson[] = users.map((u) => ({
       id: u.id,
       name: [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email || u.id,

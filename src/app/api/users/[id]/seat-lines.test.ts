@@ -4,8 +4,13 @@
 // and the REAL handover gate (handover.server.ts pendingHandover), on an
 // in-memory database. seat.test.ts mocks both; this proves that bringing back
 // someone who works here through a membership keeps the line their own
-// company relies on, and that the handover comes first for them as for
-// anyone. Before step 3 every one of these was a 404.
+// company holds, and that the handover comes first for them as for anyone.
+// Before step 3 every one of these was a 404.
+//
+// docs/plans/workspace-status-2.md step 4 (E1, E4): the lines a restore and a
+// reactivation check, and clear, are THIS workspace's: the line the seat
+// here holds (Pat's B membership's) and B's dotted rows. Pat's A line, on
+// her account, is A's: B never reads or clears it.
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,17 +85,53 @@ describe("bringing back someone who works here through a membership keeps their 
     expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE", removedAt: null });
   });
 
-  it("a line nobody relies on any more is cleared on a restore, with a sentence that never names the manager", async () => {
-    // Amy has left A for good: the line counts nowhere.
+  it("a restore in B never clears A's line, even one A could clear itself", async () => {
+    // Amy has left A for good. Before step 4 B's restore read the account's
+    // line (A's), found it stale and cleared it: a write of A's line by B.
     db.row("user", "amy").deletedAt = new Date("2026-09-01");
     db.row("user", "amy").status = "INACTIVE";
     expect((await remove("pat")).status).toBe(200);
     const back = await restore("pat");
     expect(back.status).toBe(200);
-    expect(db.row("user", "pat").managerId).toBeNull();
+    expect(db.row("user", "pat").managerId).toBe("amy");
     const body = await back.json();
-    expect(body.message).toBe("pat Lee has been restored with no manager, because the manager on their record doesn't work in this workspace. Set who they report to in Members.");
-    expect(body.linesCleared).toEqual([{ managerId: "amy", kind: "manager", reason: "elsewhere" }]);
+    expect(body).toMatchObject({ message: "pat Lee has been restored", linesCleared: [] });
+  });
+
+  it("a restore in B clears a stale B line on the membership, with B's dotted row, and leaves A's line and A's row", async () => {
+    // In B, Pat reports to Rita, whom B removed while Pat was away, and has a
+    // dotted line to Ada, an Agent in B. A's line (Amy) and A's dotted row to
+    // Ada stay A's.
+    person("rita", "b", "MANAGER", { deletedAt: new Date("2026-09-01"), status: "INACTIVE" });
+    person("ada", "a", "MANAGER");
+    db.seed("organizationMembership", { id: "m-ada-b", userId: "ada", organizationId: "b", role: "AGENT" });
+    seatOf("pat", "b").managerId = "rita";
+    db.seed("userDottedLine", { id: "d-b", userId: "pat", managerId: "ada", organizationId: "b" });
+    db.seed("userDottedLine", { id: "d-a", userId: "pat", managerId: "ada", organizationId: "a" });
+    expect((await remove("pat")).status).toBe(200);
+    const back = await restore("pat");
+    expect(back.status).toBe(200);
+    const body = await back.json();
+    expect(body.linesCleared).toEqual([{ managerId: "rita", kind: "manager", reason: "removed" }, { managerId: "ada", kind: "dotted", reason: "agent" }]);
+    // Before: B's restore read the account's line (A's Amy, fine) and never
+    // Pat's B line, so she came back under Rita; and it deleted the Ada pair
+    // in every workspace.
+    expect(seatOf("pat", "b").managerId).toBeNull();
+    expect(db.row("user", "pat").managerId).toBe("amy");
+    expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d-a"]);
+  });
+
+  it("a reactivation in B clears a B line to a manager B deactivated, and never A's", async () => {
+    // Rita is deactivated in B through her membership, live in A.
+    person("rita", "a", "MANAGER");
+    db.seed("organizationMembership", { id: "m-rita-b", userId: "rita", organizationId: "b", role: "MANAGER", status: "INACTIVE" });
+    seatOf("pat", "b").managerId = "rita";
+    expect((await patch("pat", { status: "INACTIVE" })).status).toBe(200);
+    const back = await patch("pat", { status: "ACTIVE" });
+    expect(back.status).toBe(200);
+    expect((await back.json()).linesCleared).toEqual([{ managerId: "rita", kind: "manager", reason: "inactive" }]);
+    expect(seatOf("pat", "b").managerId).toBeNull();
+    expect(db.row("user", "pat").managerId).toBe("amy");
   });
 });
 

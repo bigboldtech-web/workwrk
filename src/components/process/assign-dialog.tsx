@@ -133,11 +133,14 @@ export function AssignDialog({ open, onClose, object, defaults, alreadyAssigned 
     } else {
       body.userIds = selected;
     }
-    const r = await apiFetch<{ count?: number; data?: { count?: number } }>(url, { method: "POST", json: body });
+    const r = await apiFetch<{ count?: number; alignmentNote?: string; data?: { count?: number } }>(url, { method: "POST", json: body });
     setBusy(false);
     if (!r.ok) { toast(r.error || "Couldn't assign", { tone: "danger" }); return; }
     const count = r.data?.count ?? r.data?.data?.count ?? (audience === "people" ? selected.length : 0);
     toast(count ? `Assigned to ${count} ${count === 1 ? "person" : "people"}` : "Everyone chosen already has it. Nothing new was assigned.");
+    // The people here from another workspace's account a department or
+    // everyone left out, said plainly (the SOP API's note).
+    if (r.data?.alignmentNote) toast(r.data.alignmentNote);
     onAssigned?.(count);
     onClose();
   }

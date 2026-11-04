@@ -7,6 +7,12 @@
 // them, which they no longer could. AI teammates Phase 4 (Decision 27): the
 // same hook closes their teammates' browsers too (leaver-hooks.ts
 // endTeammateAccessFor, its two halves mocked here as the modules they are).
+//
+// docs/plans/workspace-status-2.md step 4 (E1, E2, E4, E6): Reports to and the
+// clears on a restore and a reactivation write THIS workspace's line
+// (seat-writes.ts writeLineHere, removeDottedHere). There is no line of
+// another workspace to keep, ask about or move with an end any more, so
+// batches 6 to 9's cases are kept below with the rule that replaced them.
 
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
 import { NextRequest } from "next/server";
@@ -30,6 +36,10 @@ const st = vi.hoisted(() => ({
   /** The target's dotted-line managers. */
   dotted: [] as string[],
   dottedDeleted: [] as string[][],
+  /** Every dotted delete's where (removeDottedHere names this workspace). */
+  dottedWheres: [] as Array<Record<string, unknown>>,
+  /** Postgres ends the transaction to break a deadlock (40P01). */
+  deadlock: false,
   logs: [] as Array<{ type: string; description: string; oldValue?: unknown; newValue?: unknown }>,
   locks: [] as string[],
   /** The role lock is busy (membership.ts lockOrgRoles throws OrgRolesBusy). */
@@ -44,10 +54,6 @@ const st = vi.hoisted(() => ({
   reportsUnderLock: 0,
   /** The keys the field whitelist was asked about (batch 7). */
   checkedKeys: [] as string[],
-  /** The step that ends the account (batch 8): its calls, and where they fell. */
-  endCalls: [] as Array<{ input: Record<string, unknown>; locksBefore: number; updatesBefore: number }>,
-  /** What moveReliedReportsAtEnd answers. */
-  endMoved: [] as Array<{ id: string; name: string | null }>,
   /** pendingHandover's answer before the lock (batch 8: DELETE asks too). */
   pending: { openTasks: 0, directReports: 0, containers: 0 },
   /** Its open tasks and Spaces, Folders and Lists read again under the lock (batch 9); the reports are reportsUnderLock. */
@@ -59,6 +65,8 @@ const st = vi.hoisted(() => ({
   followed: [] as string[][],
   /** Live Owners (batch 8: an Owner's removal or deactivation is refused for an Admin who is none). */
   owners: new Set<string>(),
+  /** The record GET's card read, as the route asked for it (workspace-status-2 step 3). */
+  cardArgs: null as null | { select?: Record<string, unknown> },
 }));
 
 const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -67,14 +75,16 @@ vi.mock("@/lib/prisma", () => {
   const user = {
     // A manager lookup (managerCandidateIn) names someone in st.people, with
     // its where checked; anything else reads the target.
-    findFirst: async (a: { where?: { id?: string; organizationId?: string; deletedAt?: null } } = {}) => {
+    findFirst: async (a: { where?: { id?: string; organizationId?: string; deletedAt?: null }; select?: Record<string, unknown> } = {}) => {
+      if (a.select && "dottedLineToManagers" in a.select) st.cardArgs = a;
       const p = a.where?.id ? st.people[a.where.id] : undefined;
       if (!p) return { ...st.target };
       if (a.where?.organizationId && p.organizationId !== a.where.organizationId) return null;
       if (a.where && "deletedAt" in a.where && p.deletedAt) return null;
       return { id: a.where?.id, ...p };
     },
-    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })),
+    // By id; or who reports to someone here (reportsHereOf's anchored half): nobody, in these tests.
+    findMany: async (a: { where: { id?: { in: string[] }; managerId?: unknown } }) => (a.where.id ? a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })) : []),
     findUnique: async () => ({ ...st.target }),
     update: async (a: { data: Record<string, unknown> }) => {
       st.updates.push(a.data);
@@ -95,7 +105,13 @@ vi.mock("@/lib/prisma", () => {
   };
   const userDottedLine = {
     findMany: async () => st.dotted.map((managerId) => ({ managerId })),
-    deleteMany: async (a: { where: { managerId: { in: string[] } } }) => { st.dottedDeleted.push(a.where.managerId.in); return { count: a.where.managerId.in.length }; },
+    // removeDottedHere: this workspace's rows of these pairs.
+    deleteMany: async (a: { where: { organizationId?: string; OR: Array<{ userId: string; managerId: string }> } }) => {
+      st.dottedWheres.push(a.where);
+      const ids = a.where.OR.map((o) => o.managerId);
+      st.dottedDeleted.push(ids);
+      return { count: ids.length };
+    },
   };
   // A person anchored elsewhere works here through a membership (acting-workspace.ts levelHeldIn).
   const organizationMembership = {
@@ -103,31 +119,39 @@ vi.mock("@/lib/prisma", () => {
       const role = st.memberships[a.where.userId_organizationId.userId];
       return role ? { role } : null;
     },
-    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
+    findMany: async (a: { where: { userId?: { in: string[] }; managerId?: unknown; organizationId?: string | { not?: string; in?: string[] } } }) => {
+      // Who reports to someone here through a membership (reportsHereOf's membership half): nobody, in these tests.
+      if (!a.where.userId) return [];
+      const userIds = a.where.userId;
       const w = a.where.organizationId;
       // Memberships in other workspaces (batch 6), read with { not } or { in }.
       if (w && typeof w === "object") {
-        return a.where.userId.in.flatMap((userId) =>
+        return userIds.in.flatMap((userId) =>
           Object.entries(st.elsewhere[userId] ?? {})
             .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
             .map(([organizationId, role]) => ({ userId, organizationId, role })),
         );
       }
-      return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
+      return userIds.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
     },
     // The account's memberships in other workspaces (shared-identity.ts identityShared, the final review H1).
     count: async (a: { where: { userId: string; organizationId: { not: string } } }) =>
       Object.keys(st.elsewhere[a.where.userId] ?? {}).filter((org) => org !== a.where.organizationId.not).length,
   };
   // As Postgres runs it: a callback that throws rolls back what it wrote (batch 7).
+  // The Audit rows a restore's or a reactivation's clears write in the
+  // transaction (the final review of workspace-status-2, integrity L2),
+  // kept with the others and rolled back with it.
+  const activityLog = { create: async (a: { data: { type: string; description: string } }) => { st.logs.push(a.data); return {}; } };
   const $transaction = async (fn: (tx: unknown) => unknown) => {
-    const before = { updates: st.updates.length, dotted: st.dottedDeleted.length };
+    const before = { updates: st.updates.length, dotted: st.dottedDeleted.length, logs: st.logs.length };
     try {
       // The person's row lock a profile or label write takes first (the step 3 review M1).
-      return await fn({ user, userDottedLine, organizationMembership, $executeRaw: async () => 1 });
+      return await fn({ user, userDottedLine, organizationMembership, activityLog, $executeRaw: async () => 1 });
     } catch (e) {
       st.updates.length = before.updates;
       st.dottedDeleted.length = before.dotted;
+      st.logs.length = before.logs;
       throw e;
     }
   };
@@ -150,6 +174,7 @@ vi.mock("@/lib/access/membership", () => ({
   lockOrgRoles: async () => {
     st.locks.push("roles");
     if (st.busy) throw Object.assign(new Error("busy"), { name: "OrgRolesBusy" });
+    if (st.deadlock) throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
   },
   roleChangeSentence: () => "",
   wouldRemoveLastOwner: async () => false,
@@ -176,6 +201,7 @@ vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_LABEL: {},
   PATCHABLE_PERSON_FIELDS: new Set(["firstName", "lastName", "phone", "status", "managerId", "orgRole", "memberTier"]),
   SEAT_FIELDS: new Set(["status", "orgRole", "memberTier", "accessLevel"]),
+  ALIGNMENT_NOT_HERE: "KRAs and SOPs are not assigned to people who work here from another workspace's account.",
   PROFILE_ELSEWHERE: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.",
   canWritePersonField: () => true,
   checkPersonPatch: (body: Record<string, unknown>) => { st.checkedKeys = Object.keys(body); return { unknown: [], forbidden: [] }; },
@@ -191,14 +217,6 @@ vi.mock("@/lib/people/handover.server", () => ({
     return { openTasks: st.underLock.openTasks, directReports: st.reportsUnderLock, containers: st.underLock.containers };
   },
   handoverReportCount: async () => st.reportsUnderLock,
-  // The step that ends the account (batch 8): its move is a user write in
-  // the caller's transaction, so a rollback takes it back.
-  moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
-    st.endCalls.push({ input, locksBefore: st.locks.length, updatesBefore: st.updates.length });
-    if (st.endMoved.length) st.updates.push({ movedReports: st.endMoved.map((m) => m.id) });
-    return { reportsMoved: st.endMoved.length, reportsReassigned: st.endMoved.length, reportsRehomed: [], reportsAlsoElsewhere: [...st.endMoved], reportIds: st.endMoved.map((m) => m.id) };
-  },
-  followAccountEndLines: async (_org: string, done: { reportIds: string[] }) => { if (done.reportIds.length) st.followed.push(done.reportIds); },
 }));
 // The seat itself (docs/plans/workspace-status.md step 3): endSeat and
 // restoreSeat run for real in seat.test.ts, on an in-memory database. Here
@@ -219,8 +237,14 @@ vi.mock("@/lib/access/workspace-status", () => {
     },
     restoreSeat: async (_tx: unknown, input: { kind: string; status?: string }) => {
       st.updates.push({ status: input.status ?? "ACTIVE", ...(input.kind === "restored" ? { deletedAt: null } : {}) });
+      // The seat is back in the database: the row the clears below are
+      // written on (step 4, writeLineHere) holds it again.
+      if (input.kind === "restored") st.dbDeletedAt = null;
       return { outcome: "restored", seat: "anchor", anchoredIn: "org1", movedFrom: null, anchorEnded: false, alsoRestoredIn: [] };
     },
+    // The target holds no seat in another workspace in these tests; the
+    // seats that come back with an account are workspace-lines-writes.test.ts's.
+    clearLinesBackWithAccount: async () => [],
   };
 });
 vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async () => undefined }));
@@ -261,6 +285,8 @@ beforeEach(() => {
   st.people = {};
   st.dotted = [];
   st.dottedDeleted = [];
+  st.dottedWheres = [];
+  st.deadlock = false;
   st.logs = [];
   st.locks = [];
   st.busy = false;
@@ -269,14 +295,13 @@ beforeEach(() => {
   st.elsewhere = {};
   st.reportsUnderLock = 0;
   st.checkedKeys = [];
-  st.endCalls = [];
-  st.endMoved = [];
   st.pending = { openTasks: 0, directReports: 0, containers: 0 };
   st.underLock = { openTasks: 0, containers: 0 };
   st.pendingInTx = 0;
   st.mayHandOver = true;
   st.followed = [];
   st.owners = new Set();
+  st.cardArgs = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -563,6 +588,8 @@ describe("a restore re-checks the person's reporting lines", () => {
     st.dotted = ["agent", "left", "keep"];
     await restore();
     expect(st.dottedDeleted).toEqual([["agent", "left"]]);
+    // This workspace's rows only (step 4: removeDottedHere).
+    expect(st.dottedWheres).toEqual([{ organizationId: "org1", OR: [{ userId: "u-max", managerId: "agent" }, { userId: "u-max", managerId: "left" }] }]);
     expect(st.logs.filter((l) => l.type === "reporting_line_changed").map((l) => l.description)).toEqual([
       "Restored Max Chen without their dotted line to Dana Ray: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager",
       "Restored Max Chen without their dotted line to Dana Ray: Dana Ray is no longer in the workspace",
@@ -624,6 +651,18 @@ describe("a new Reports to, checked again under the role lock (batch 4)", () => 
     expect(st.updates).toEqual([]);
   });
 
+  // workspace-status-2 step 4 (the step 1 review L5): two line writes can
+  // cross workspaces, and Postgres ends one of them with nothing written.
+  it("answers a deadlock Postgres broke as the same 503 roles_busy, never a 500, and writes nothing", async () => {
+    st.people.x = manager();
+    st.deadlock = true;
+    const res = await patch({ managerId: "x" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("2");
+    expect((await res.json()).code).toBe("roles_busy");
+    expect(st.updates).toEqual([]);
+  });
+
   it("a restore answers 503 roles_busy the same way", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01") };
     st.busy = true;
@@ -663,7 +702,8 @@ describe("someone who works here through a membership is still in the workspace"
     st.memberships = { dana: "AGENT" };
     await restore();
     expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
+    // The clear's own row, written in the restore's transaction (the final review, integrity L2), so before the restore's own row.
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").at(-1)?.description).toBe("Restored Max Chen with no manager: Dana Ray is on the Agent tier, and an Agent can't be anyone's manager");
   });
 
   it("PATCH clears Reports to under the role lock too, as every write of a line is (batch 5)", async () => {
@@ -698,8 +738,9 @@ describe("a reactivation re-checks the person's lines, as a restore does", () =>
     const res = await patch({ status: "ACTIVE" });
     expect(res.status).toBe(200);
     // Before: { status: "ACTIVE" } alone, back under a deactivated manager.
-    // Step 3: the line is cleared with the profile, then the seat comes back (restoreSeat).
-    expect(st.updates.slice(0, 2)).toEqual([{ managerId: null }, { status: "ACTIVE" }]);
+    // Step 4: the seat comes back (restoreSeat), then the line here is
+    // cleared on the row that holds it now (writeLineHere).
+    expect(st.updates.slice(0, 2)).toEqual([{ status: "ACTIVE" }, { managerId: null }]);
     const body = await res.json();
     expect(body.message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
     expect(body.linesCleared).toEqual([{ managerId: "x", kind: "manager", reason: "inactive" }]);
@@ -748,38 +789,46 @@ describe("the seat lock after the role lock answers busy, never a 500", () => {
   });
 });
 
-// Docs-found fixes batch 6, from the batch 5 review.
-describe("a restore and a reactivation clear only the lines this workspace owns", () => {
+// Docs-found fixes batch 6, from the batch 5 review; workspace-status-2 step 4
+// (E1, E2, E4). The lines a restore checks are THIS workspace's: the line the
+// seat here holds and this workspace's dotted rows. A manager on them who
+// holds no seat here is cleared, never named, whatever another workspace the
+// person works in holds: that workspace's line is its own row, never read or
+// cleared here.
+describe("a restore and a reactivation check this workspace's lines only", () => {
   const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
   // Dana works only in the client workspace, where Max works too.
   const dana = (level = "MANAGER", extra: Record<string, unknown> = {}) =>
     ({ organizationId: "client", ...legacyLevelRow(level), status: "ACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray", ...extra }) as (typeof st.people)[string];
 
-  it("a restore keeps a manager and a dotted line the person's other workspace relies on, and says nothing untrue", async () => {
+  it("a restore clears a line here to someone with no seat here, unnamed, though Max works with her elsewhere", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = dana();
     st.dotted = ["dana"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     const res = await restore();
     expect(res.status).toBe(200);
-    // Before: managerId cleared, the dotted line deleted, and "Max Chen has
-    // been restored with no manager, because Dana Ray is no longer in the
-    // workspace", though Dana was never here and the client workspace reads both.
-    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
-    expect(st.dottedDeleted).toEqual([]);
-    expect((await res.json()).message).toBe("Max Chen has been restored");
+    // Batches 6 to 8 kept these as "relied on" by the client workspace: the
+    // line here was the account's one column, read there too. Since E1 and
+    // E2 the client's line is its own row: this one is only this workspace's,
+    // names someone who holds no seat here, and goes, with its record.
+    expect(st.updates).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
+    expect(st.dottedWheres).toEqual([{ organizationId: "org1", OR: [{ userId: "u-max", managerId: "dana" }] }]);
+    const body = await res.json();
+    expect(body.linesCleared).toEqual([{ managerId: "dana", kind: "manager", reason: "elsewhere" }, { managerId: "dana", kind: "dotted", reason: "elsewhere" }]);
+    expect(JSON.stringify(body)).not.toContain("Dana");
   });
 
-  it("a reactivation keeps them too", async () => {
+  it("a reactivation clears them the same way", async () => {
     st.target = { ...TARGET, status: "INACTIVE", managerId: "dana" };
     st.people.dana = dana();
     st.dotted = ["dana"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     const res = await patch({ status: "ACTIVE" });
     expect(res.status).toBe(200);
-    expect(st.updates[0]).toEqual({ status: "ACTIVE" });
-    expect(st.dottedDeleted).toEqual([]);
-    expect(await res.json()).not.toHaveProperty("linesCleared");
+    expect(st.updates).toEqual([{ status: "ACTIVE" }, { managerId: null }]);
+    expect(st.dottedDeleted).toEqual([["dana"]]);
+    expect((await res.json()).linesCleared).toEqual([{ managerId: "dana", kind: "manager", reason: "elsewhere" }, { managerId: "dana", kind: "dotted", reason: "elsewhere" }]);
   });
 
   it("a line no workspace reads is cleared with a true sentence that never names them (batch 7)", async () => {
@@ -788,7 +837,8 @@ describe("a restore and a reactivation clear only the lines this workspace owns"
     const res = await restore();
     expect(st.updates.slice(-2)).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
     expect((await res.json()).message).toBe("Max Chen has been restored with no manager, because the manager on their record doesn't work in this workspace. Set who they report to in Members.");
-    expect(st.logs.at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
+    // The clear's own row, written in the restore's transaction (the final review, integrity L2), so before the restore's own row.
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").at(-1)?.description).toBe("Restored Max Chen with no manager: the manager on their record doesn't work in this workspace");
   });
 
   it("a removed account that never held a level here is asked nothing about: cleared, and never named (batch 7)", async () => {
@@ -825,8 +875,9 @@ describe("the reactivation and deactivation lows of the batch 5 review", () => {
     expect(res.status).toBe(200);
     // Before: the unchanged Reports to was checked with live: false and left
     // to "its own check", so they came back under a deactivated manager.
-    // Step 3: the line is cleared with the profile, then the seat comes back (restoreSeat).
-    expect(st.updates.slice(0, 2)).toEqual([{ managerId: null }, { status: "ACTIVE" }]);
+    // The Reports to sent is written as it stands, the seat comes back, and
+    // the stale line is cleared then (step 4).
+    expect(st.updates.slice(0, 3)).toEqual([{ managerId: "x" }, { status: "ACTIVE" }, { managerId: null }]);
     expect((await res.json()).message).toBe("Max Chen has been reactivated with no manager, because Dana Ray is deactivated. Set who they report to in Members.");
   });
 
@@ -845,7 +896,11 @@ describe("the reactivation and deactivation lows of the batch 5 review", () => {
 });
 
 // Docs-found fixes batch 7, from the batch 6 review.
-describe("a line another workspace counts is shown as such, and asked about before it is replaced", () => {
+// workspace-status-2 step 4 (E1, E6): the record reads this workspace's line
+// (step 3), and PATCH writes it with no question. Batch 7's 409
+// manager_elsewhere ("changing it here changes it there too") retired: the
+// line here is never another workspace's.
+describe("a line of another workspace is never shown here, and PATCH writes this workspace's line", () => {
   // Max also works in the client workspace, where he reports to Dana. Dana
   // holds no level here.
   const dana = (extra: Record<string, unknown> = {}) =>
@@ -874,43 +929,54 @@ describe("a line another workspace counts is shown as such, and asked about befo
     _count: { kudosReceived: 0, kpiRecords: 0, reviewsAsSubject: 0 },
   });
 
-  it("the record says Reports to someone in another workspace, never who", async () => {
+  // workspace-status-2 E1, E2, E6, step 3: the record reads THIS
+  // workspace's line, dotted rows and reports, so a line of another
+  // workspace is never there to be named or said about. Before: batch 7's
+  // "Reports to someone in another workspace" (managerElsewhere) and its
+  // count of dotted lines kept for another workspace (dottedElsewhere).
+  it("the record names nobody of another workspace, and says nothing about a line there", async () => {
     st.target = card([]);
     const res = await get();
     expect(res.status).toBe(200);
     const body = await res.json();
-    // Before: manager null and nothing else, so the card said "Nobody".
     expect(body.manager).toBeNull();
-    expect(body.managerElsewhere).toBe(true);
+    expect(body).not.toHaveProperty("managerElsewhere");
+    expect(body).not.toHaveProperty("dottedElsewhere");
     expect(JSON.stringify(body)).not.toContain("Dana");
   });
 
-  it("the record leaves out a dotted line kept for another workspace, and counts it", async () => {
-    // ava is an Agent here and a manager where Max also works.
+  it("the record reads this workspace's dotted lines, and lists each to someone with a seat here, an Agent here too", async () => {
+    // ava is an Agent here (through a membership) and a manager where Max also works.
     st.people.ava = here({ organizationId: "client", firstName: "ava" });
     st.memberships = { ava: "AGENT" };
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     st.target = card(["ava", "sam"]);
     const body = await (await get()).json();
-    // Before: ava listed, and the dialog let her be taken off while the PUT kept her.
-    expect(body.dottedManagers.map((d: { id: string }) => d.id)).toEqual(["sam"]);
-    expect(body.dottedElsewhere).toBe(1);
+    // The card asks for this workspace's rows only (E2): another workspace's copy is never read.
+    expect((st.cardArgs?.select?.dottedLineToManagers as { where?: unknown }).where).toEqual({ organizationId: "org1" });
+    // Before: ["sam"] and dottedElsewhere 1, ava's row here kept out as another workspace's.
+    expect(body.dottedManagers.map((d: { id: string }) => d.id)).toEqual(["ava", "sam"]);
+    expect(body).not.toHaveProperty("dottedElsewhere");
+    // The reports are read here (reportsHereOf), never the cross-workspace relation.
+    expect(st.cardArgs?.select).not.toHaveProperty("directReports");
   });
 
-  it("PATCH asks before replacing it: 409 manager_elsewhere, nothing written", async () => {
+  it("PATCH writes the line here with no question, and nothing about another workspace", async () => {
     for (const managerId of ["sam", null]) {
+      st.updates = [];
       const res = await patch({ managerId });
-      // Before: 200, and the client workspace's line rewritten unseen.
-      expect(res.status).toBe(409);
-      const body = await res.json();
-      expect(body).toMatchObject({ code: "manager_elsewhere", field: "managerId", confirmWith: "replaceOtherWorkspaceLine" });
-      expect(body.error).toBe("Max Chen reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.");
-      expect(body.error).not.toMatch(/Dana|--|\u2014/);
+      // Before: 409 manager_elsewhere, nothing written until the person confirmed.
+      expect(res.status).toBe(200);
+      expect(st.updates).toEqual([{ managerId }]);
+      expect(JSON.stringify(await res.json())).not.toMatch(/another workspace|Dana/);
     }
-    expect(st.updates).toEqual([]);
+    expect(st.logs.filter((l) => l.type === "reporting_line_changed").map((l) => [l.oldValue, l.newValue])).toEqual([
+      [{ managerId: "dana" }, { managerId: "sam" }],
+      [{ managerId: "dana" }, { managerId: null }],
+    ]);
   });
 
-  it("PATCH replaces it once the request confirms, and the confirmation is no field", async () => {
+  it("ignores the confirmation an older tab still sends, and it is no field", async () => {
     const res = await patch({ managerId: "sam", replaceOtherWorkspaceLine: true });
     expect(res.status).toBe(200);
     expect(st.updates[0]).toEqual({ managerId: "sam" });
@@ -948,42 +1014,35 @@ describe("a PATCH is one outcome (batch 7)", () => {
   });
 });
 
-// Docs-found fixes batch 8, from the batch 7 review: a deactivation and a
-// removal end the account in every workspace, so the reports whose line
-// another workspace relies on move with them, in their own role-locked
-// transaction, never with the handover before them (which moved them before
-// a step that could still be refused).
-describe("the lines another workspace relies on move with the deactivation or the removal itself", () => {
+// Docs-found fixes batch 8, from the batch 7 review, and workspace-status-2
+// step 4 (E4, E6): a deactivation and a removal move no line themselves.
+// Every report here is the handover's (the gate counts them all under the
+// lock), and their reports in another workspace are that workspace's lines.
+// Before, batch 8 moved a report "another workspace relies on" inside the
+// end, to `handoverTo`.
+describe("a deactivation and a removal move no line themselves", () => {
   const remove = (query = "") => DELETE(new NextRequest(`https://app.test/api/users/u-max${query}`, { method: "DELETE" }), params);
 
-  it("a deactivation moves them in its locked transaction, before status is written, to the person picked, and says so", async () => {
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+  it("a deactivation writes the end only, and a handoverTo from an older tab is ignored and is no field", async () => {
     const res = await patch({ status: "INACTIVE", handoverTo: "u-rae" });
     expect(res.status).toBe(200);
-    // Before: this step moved nothing (the handover had, before it).
-    expect(st.endCalls).toHaveLength(1);
-    expect(st.endCalls[0].input).toMatchObject({ organizationId: "org1", leaverId: "u-max", recipientId: "u-rae", actorId: "u-admin", ends: "deactivated" });
-    expect(st.endCalls[0].locksBefore).toBe(1);
-    expect(st.updates).toEqual([{ movedReports: ["r1"] }, expect.objectContaining({ status: "INACTIVE" })]);
-    // The recipient writes nothing on the person: it is no field.
+    expect(st.updates).toEqual([expect.objectContaining({ status: "INACTIVE" })]);
     expect(st.checkedKeys).toEqual(["status"]);
-    expect((await res.json()).reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
-    expect(st.followed).toEqual([["r1"]]);
-    expect(st.logs.find((l) => l.type === "membership.changed")?.description).toBe(
-      "Deactivated Max Chen. 1 of their reports also reported to them in another workspace: that line moved with the deactivation, and that workspace's Audit log records it",
-    );
+    const body = await res.json();
+    expect(body).not.toHaveProperty("reportsAlsoElsewhere");
+    expect(body).not.toHaveProperty("reportsRehomed");
+    expect(st.followed).toEqual([]);
+    expect(st.logs.find((l) => l.type === "membership.changed")?.description).toBe("Deactivated Max Chen");
   });
 
-  it("a refused or busy deactivation moves nothing", async () => {
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+  it("a refused or busy deactivation writes nothing", async () => {
     st.owners = new Set(["u-max"]);
-    expect((await patch({ status: "INACTIVE", handoverTo: "u-rae" })).status).toBe(403);
+    expect((await patch({ status: "INACTIVE" })).status).toBe(403);
     expect(st.updates).toEqual([]);
     st.owners = new Set();
     st.busy = true;
-    expect((await patch({ status: "INACTIVE", handoverTo: "u-rae" })).status).toBe(503);
+    expect((await patch({ status: "INACTIVE" })).status).toBe(503);
     expect(st.updates).toEqual([]);
-    expect(st.endCalls).toEqual([]);
   });
 
   it("a removal waits for the handover, as a deactivation does", async () => {
@@ -1000,32 +1059,31 @@ describe("the lines another workspace relies on move with the deactivation or th
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
 
-  it("a removal moves them in its locked transaction, before deletedAt is written, to ?handoverTo, and says so", async () => {
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+  it("a removal writes the end only, and says nothing about another workspace", async () => {
     const res = await remove("?handoverTo=u-rae");
     expect(res.status).toBe(200);
-    expect(st.endCalls[0].input).toMatchObject({ leaverId: "u-max", recipientId: "u-rae", ends: "removed" });
-    expect(st.endCalls[0].locksBefore).toBe(1);
-    expect(st.updates).toEqual([{ movedReports: ["r1"] }, expect.objectContaining({ deletedAt: expect.any(Date) })]);
-    expect((await res.json()).reportsAlsoElsewhere).toEqual([{ id: "r1", name: "Ida Ray" }]);
-    expect(st.followed).toEqual([["r1"]]);
+    expect(st.updates).toEqual([expect.objectContaining({ deletedAt: expect.any(Date) })]);
+    const body = await res.json();
+    expect(body).toEqual({ message: "Max Chen has been removed" });
+    expect(st.logs.find((l) => l.type === "user_removed")?.description).toBe("Removed Max Chen from organization");
   });
 
-  it("a removal refused under the lock moves nothing, and one that finds them removed meanwhile takes its moves back", async () => {
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
+  it("a removal refused under the lock writes nothing, and one that finds them removed meanwhile is a harmless success", async () => {
     st.owners = new Set(["u-max"]);
-    expect((await remove("?handoverTo=u-rae")).status).toBe(403);
-    expect(st.endCalls).toEqual([]);
+    expect((await remove()).status).toBe(403);
+    expect(st.updates).toEqual([]);
     st.owners = new Set();
     st.dbDeletedAt = new Date("2026-10-01");
-    const res = await remove("?handoverTo=u-rae");
+    const res = await remove();
     expect(res.status).toBe(200);
     expect(st.updates).toEqual([]);
-    expect(st.followed).toEqual([]);
   });
 });
 
-describe("PATCH asks before replacing a Reports to an Agent here manages elsewhere (batch 8)", () => {
+// Batch 8 asked before replacing a Reports to an Agent here who manages the
+// person elsewhere; workspace-status-2 step 4 (E1, E6): the line here is this
+// workspace's alone, so PATCH replaces it with no question.
+describe("PATCH replaces a Reports to an Agent here with no question, whatever the Agent is elsewhere", () => {
   beforeEach(() => {
     st.target = { ...TARGET, managerId: "dana" };
     // Dana is on the Agent tier here and a Manager in the client workspace, where Max also works.
@@ -1034,43 +1092,35 @@ describe("PATCH asks before replacing a Reports to an Agent here manages elsewhe
     st.elsewhere = { "u-max": { client: "EMPLOYEE" }, dana: { client: "MANAGER" } };
   });
 
-  it("answers 409 manager_elsewhere, naming the Agent, and writes nothing until confirmed", async () => {
+  it("writes the new line at once", async () => {
     const res = await patch({ managerId: "sam" });
-    // Before: 200, and the client workspace's live line rewritten with no question.
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body).toMatchObject({ code: "manager_elsewhere", field: "managerId", confirmWith: "replaceOtherWorkspaceLine" });
-    expect(body.error).toBe("Max Chen also reports to Dana Ray in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.");
-    expect(body.error).not.toMatch(/--|\u2014/);
-    expect(st.updates).toEqual([]);
-    expect((await patch({ managerId: "sam", replaceOtherWorkspaceLine: true })).status).toBe(200);
-  });
-
-  it("asks nothing when the Agent is an Agent there too, or no other workspace relies on the line", async () => {
-    st.elsewhere = { "u-max": { client: "EMPLOYEE" }, dana: { client: "AGENT" } };
-    expect((await patch({ managerId: "sam" })).status).toBe(200);
-    st.elsewhere = {};
+    // Before: 409 manager_elsewhere, "changes it there too", untrue since E1.
+    expect(res.status).toBe(200);
+    expect(st.updates).toEqual([{ managerId: "sam" }]);
+    st.updates = [];
     expect((await patch({ managerId: null })).status).toBe(200);
+    expect(st.updates).toEqual([{ managerId: null }]);
   });
 });
 
-describe("a restore keeps a line to a manager deactivated in the person's other workspace (batch 8)", () => {
+// Batch 8 kept a line to a manager deactivated in the person's other
+// workspace; workspace-status-2 step 4: that workspace's line is its own row,
+// and a line HERE to someone with no seat here is cleared, unnamed.
+describe("a restore clears a line here to someone who holds no seat here, whatever their state elsewhere", () => {
   const restore = () => DELETE(new NextRequest("https://app.test/api/users/u-max?restore=true", { method: "DELETE" }), params);
 
-  it("keeps the solid line and the dotted line there, where they wait for that workspace's own handover, and says nothing about them", async () => {
-    // Dana is an Owner in the client workspace, where Max also works; the
-    // identity provider deactivated her there and kept her reports on purpose.
+  it("clears the solid and the dotted line here, never naming the manager", async () => {
     st.target = { ...TARGET, deletedAt: new Date("2026-03-01"), managerId: "dana" };
     st.people.dana = { organizationId: "client", ...legacyLevelRow("SUPER_ADMIN"), status: "INACTIVE", deletedAt: null, firstName: "Dana", lastName: "Ray" };
     st.dotted = ["dana"];
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     const res = await restore();
     expect(res.status).toBe(200);
-    // Before: both cleared as "doesn't work in this workspace", so when the
-    // client workspace handed Dana's reports over, Max was no longer one.
-    expect(st.updates).toEqual([{ deletedAt: null, status: "ACTIVE" }]);
-    expect(st.dottedDeleted).toEqual([]);
-    expect(await res.json()).toMatchObject({ message: "Max Chen has been restored", linesCleared: [] });
+    expect(st.updates).toEqual([{ status: "ACTIVE", deletedAt: null }, { managerId: null }]);
+    expect(st.dottedDeleted).toEqual([["dana"]]);
+    const body = await res.json();
+    expect(body.linesCleared).toEqual([{ managerId: "dana", kind: "manager", reason: "elsewhere" }, { managerId: "dana", kind: "dotted", reason: "elsewhere" }]);
+    expect(JSON.stringify(body)).not.toContain("Dana");
   });
 });
 
@@ -1081,38 +1131,35 @@ describe("the handover's rule and the whole gate under the lock (batch 9)", () =
   it("counts open tasks and Spaces, Folders and Lists again under the lock, not the reports alone, and writes nothing when one landed", async () => {
     // The first check, before the lock, saw nothing; a task given to Max landed before the lock.
     st.underLock = { openTasks: 1, containers: 0 };
-    const res = await patch({ status: "INACTIVE", handoverTo: "u-rae" });
+    const res = await patch({ status: "INACTIVE" });
     // Before: only the reports were counted under the lock, so Max was deactivated holding the task.
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("handover_first");
     expect(st.pendingInTx).toBe(1);
     expect(st.updates).toEqual([]);
-    expect(st.endCalls).toEqual([]);
     // A List given to them, for a removal.
     st.underLock = { openTasks: 0, containers: 1 };
-    const del = await remove("?handoverTo=u-rae");
+    const del = await remove();
     expect(del.status).toBe(409);
     expect((await del.json()).code).toBe("handover_first");
     expect(st.updates).toEqual([]);
-    expect(st.endCalls).toEqual([]);
     expect(st.endConnectionsFor).not.toHaveBeenCalled();
   });
 
-  it("reads the person picked only from someone who may hand the work over: from anyone else the reports go up the line", async () => {
-    st.mayHandOver = false;
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
-    expect((await remove("?handoverTo=u-dir")).status).toBe(200);
-    // Before: a Director outside their own tree named themselves to take the reports.
-    expect(st.endCalls[0].input).toMatchObject({ leaverId: "u-max", recipientId: null, ends: "removed" });
-    st.endCalls = [];
-    expect((await patch({ status: "INACTIVE", handoverTo: "u-dir" })).status).toBe(200);
-    expect(st.endCalls[0].input).toMatchObject({ recipientId: null, ends: "deactivated" });
-    // Someone who may hand it over still names the recipient.
-    st.mayHandOver = true;
-    st.endCalls = [];
-    st.updates = [];
-    expect((await remove("?handoverTo=u-rae")).status).toBe(200);
-    expect(st.endCalls[0].input).toMatchObject({ recipientId: "u-rae" });
+  // Batch 9 read `handoverTo` only from someone who may hand the work over;
+  // since step 4 nobody's is read: the end moves no line (E6).
+  it("ignores a handoverTo from anyone, the end moving no line", async () => {
+    for (const may of [false, true]) {
+      st.mayHandOver = may;
+      st.updates = [];
+      expect((await remove("?handoverTo=u-dir")).status).toBe(200);
+      expect(st.updates).toEqual([expect.objectContaining({ deletedAt: expect.any(Date) })]);
+      st.target = { ...TARGET };
+      st.updates = [];
+      expect((await patch({ status: "INACTIVE", handoverTo: "u-dir" })).status).toBe(200);
+      expect(st.updates).toEqual([expect.objectContaining({ status: "INACTIVE" })]);
+      st.target = { ...TARGET };
+    }
   });
 
   it("tells a viewer who may remove but not hand over who can, never \"hand over their work first\"", async () => {

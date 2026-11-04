@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { resolveUserIdsByTags } from "@/lib/user-tags";
 import { cleanSurveyAnswers, missingRequired, type SurveyQuestion } from "@/lib/performance/survey";
+import { placementHereOf } from "@/lib/access/profile-here";
 
 export async function POST(
   req: NextRequest,
@@ -38,10 +39,9 @@ export async function POST(
   if (missing.length) return jsonError(`Answer the required ${missing.length === 1 ? "question" : "questions"}: ${missing.join(", ")}`);
 
   if (survey.audienceType !== "ALL") {
-    const viewer = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { officeId: true, departmentId: true },
-    });
+    // Their office and department at their seat here: the membership's for
+    // someone here through one (docs/plans/workspace-status-2.md E15, step 8).
+    const viewer = await placementHereOf(orgId, userId);
     const tagMatch =
       survey.audienceType === "TAGS"
         ? (await resolveUserIdsByTags(orgId, survey.tagIds)).includes(userId)

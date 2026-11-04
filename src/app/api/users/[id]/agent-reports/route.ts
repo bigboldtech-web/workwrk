@@ -18,9 +18,12 @@
 //         { expect } (the plan GET answered, which the drawer showed), the
 //         move runs only if the plan under the lock is still that plan,
 //         else 409 plan_changed and nothing moves. A busy lock is a 503.
-//   Both name the people whose line to the Agent another workspace relies
-//   on (`stays`): they also work with the Agent there, where the Agent is no
-//   Agent, so that line is that workspace's too and stays (batch 6).
+//   Both read and move THIS workspace's lines only (docs/plans/
+//   workspace-status-2.md E1, E2, E6, step 4): the solid lines here that
+//   name the Agent and this workspace's dotted rows to them. A line to the
+//   Agent in another workspace, where they may be no Agent, is that
+//   workspace's own row: never counted, moved or named here (batch 6's
+//   `stays` retired with it).
 //
 // For Owners, Admins and the People team: the people who write Reports to.
 
@@ -99,18 +102,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .filter((r) => r.count > 0)
       .map((r) => `${r.count} to ${r.to ?? "no manager"}`)
       .join(", ");
-    // Lines another workspace relies on stay (batch 6), and the log says so.
-    const stays = done.stays.length
-      ? `. ${done.stays.length} ${done.stays.length === 1 ? "line stays" : "lines stay"}: another workspace they work in relies on ${done.stays.length === 1 ? "it" : "them"}`
-      : "";
     void logActivity({
       type: "reporting_line_changed",
       actorId: g.ctx.userId,
       organizationId: g.ctx.organizationId,
-      description: `Moved the reports listed under ${name}, who is on the Agent tier: ${done.moved} direct ${done.moved === 1 ? "report" : "reports"}${where ? ` (${where})` : ""}, and ${done.dottedRemoved} dotted ${done.dottedRemoved === 1 ? "line" : "lines"} taken off${stays}`,
+      description: `Moved the reports listed under ${name}, who is on the Agent tier: ${done.moved} direct ${done.moved === 1 ? "report" : "reports"}${where ? ` (${where})` : ""}, and ${done.dottedRemoved} dotted ${done.dottedRemoved === 1 ? "line" : "lines"} taken off`,
       targetId: id,
       targetType: "user",
-      metadata: { agentReports: true, moved: done.moved, dottedRemoved: done.dottedRemoved, staying: done.stays.length, rehomed: done.rehomed.map((r) => ({ managerId: r.toId, count: r.count })) },
+      metadata: { agentReports: true, moved: done.moved, dottedRemoved: done.dottedRemoved, rehomed: done.rehomed.map((r) => ({ managerId: r.toId, count: r.count })) },
     });
   }
   return NextResponse.json(done);

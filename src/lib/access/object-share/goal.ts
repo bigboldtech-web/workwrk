@@ -113,7 +113,7 @@ async function seesWithoutOwnRow(session: ReturnType<typeof sessionFor>, goal: G
   if (!manager && reports.length === 0) return false;
   if (!goal.ownerId && seesUnownedGoals({ manager })) return true;
   if (goal.ownerId && reports.includes(goal.ownerId)) return true;
-  const teamOr = await teamAudienceVisibilityOr(reports);
+  const teamOr = await teamAudienceVisibilityOr(organizationId, reports);
   return teamOr.length > 0 && (await prisma.oKR.count({ where: { id: goal.id, OR: teamOr } })) > 0;
 }
 

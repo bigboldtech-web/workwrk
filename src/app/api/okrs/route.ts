@@ -2,6 +2,7 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { byName, peopleHereAmong, personHere } from "@/lib/access/seated-here";
+import { placementHereOf } from "@/lib/access/profile-here";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { goalCreatorIds, goalRightsActor, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
@@ -108,12 +109,10 @@ export async function GET(req: NextRequest) {
   const orgWide = isOrgWideAlignment(session);
   // departmentId + roleId feed audience resolution for the three-door
   // filter AND My goals, fetched once when either needs it.
-  const me = !orgWide || mineOnly
-    ? await prisma.user.findUnique({
-        where: { id: callerId },
-        select: { departmentId: true, roleId: true },
-      })
-    : null;
+  // At their seat here (docs/plans/workspace-status-2.md E15, step 8): the
+  // membership's department and job title for someone here through one,
+  // never the account's, which is another workspace's.
+  const me = !orgWide || mineOnly ? await placementHereOf(orgId, callerId) : null;
   // The caller's own person-tags: goals targeting any of them are visible.
   const myTagIds = !orgWide || mineOnly ? await getUserTagIds(orgId, callerId) : [];
   const treeIds = await getTeamUserIds(orgId, callerId);
@@ -158,7 +157,7 @@ export async function GET(req: NextRequest) {
     const unowned: Prisma.OKRWhereInput[] = seesUnownedGoals({ manager: isManager(session) })
       ? [{ ownerId: null, level: { not: "COMPANY" } }]
       : [];
-    and.push({ OR: [{ ownerId: { in: reports } }, ...unowned, ...(await teamAudienceVisibilityOr(reports))] });
+    and.push({ OR: [{ ownerId: { in: reports } }, ...unowned, ...(await teamAudienceVisibilityOr(orgId, reports))] });
   } else if (teamOnly) {
     // Team goals for someone nobody reports to is empty, never their own
     // visible goals under a Team title (the page shows My goals instead).

@@ -23,16 +23,14 @@
 //          the rest).
 //   The picked person is anyone who works here: anchored here, or through a
 //   membership here (docs-found fixes batch 5).
-//   Every report moves (batch 7), but a report who also reports to them in
-//   another workspace moves only with the step that ends the leaver's
-//   account (batch 8): PATCH's deactivation or DELETE, which the dialogs
-//   send next with `handoverTo`, the same person. That step can still be
-//   refused, and the other workspace's live line must never change for an
-//   account that did not end. So while the account is live, POST leaves
-//   them (`reportsAtAccountEnd`, by name, and this log says so); for an
-//   account already deactivated or removed it moves them at once
-//   (`reportsAlsoElsewhere`). GET ?to= names them (`alsoElsewhere`), and that
-//   workspace's Audit log records the move when it happens.
+//   Every report HERE moves (docs/plans/workspace-status-2.md E1, E4, E6,
+//   step 4): everyone whose line in this workspace names them, anchored here
+//   or here through a membership, and nobody's line in another workspace.
+//   The summary's reports, GET ?to='s preview and POST read the same lines
+//   (reportsHereOf, the plan), so the dialog's count, its preview and the
+//   run agree. Batches 7 to 9 left a report whose line another workspace
+//   relied on for the step that ends the account, and named them; with one
+//   line per workspace there is none (E6).
 //   A manager-tier viewer is never let run it on an Admin, or over someone
 //   they only read through a dotted line (batch 8), since the removal that
 //   follows would be refused after the work had moved, and POST reads the
@@ -52,7 +50,7 @@ import { freshActorRefusal, freshWorkspaceActor } from "@/lib/access/workspace-a
 import { isHandoverWorkFailed, isOpenStatus, previewReportHandover, runHandover } from "@/lib/people/handover.server";
 import { rolesBusyResponse } from "@/lib/access/roles-busy";
 import { liveHereAmong } from "@/lib/access/manager-lines";
-import { personSeatIn } from "@/lib/access/acting-workspace";
+import { personSeatIn, reportsHereOf } from "@/lib/access/acting-workspace";
 import { leavesOnlyHere } from "@/lib/access/workspace-status";
 import { liveKeysMadeHere } from "@/lib/access/seat-api-keys";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
@@ -63,22 +61,6 @@ function inactiveRecipientWords(name: string): string {
 }
 
 const LIST_CAP = 5;
-
-/** The log's words for the moved reports who also reported to them in another workspace (batch 7). */
-function alsoElsewhereSaid(n: number): string {
-  if (n === 0) return "";
-  return n === 1
-    ? ". 1 of their reports also reported to them in another workspace, whose Audit log records the move"
-    : `. ${n} of their reports also reported to them in another workspace, whose Audit log records the move`;
-}
-
-/** The log's words for the reports left until the leaver's account ends (batch 8). */
-function atAccountEndSaid(n: number): string {
-  if (n === 0) return "";
-  return n === 1
-    ? ". 1 direct report also reports to them in another workspace, so that line moves only when their account ends"
-    : `. ${n} direct reports also report to them in another workspace, so those lines move only when their account ends`;
-}
 
 /** The log's words for the goal targets they counted from their Lists (recurring-goals.md C10). */
 function goalSourcesSaid(g: { moved: number; paused: number } | undefined): string {
@@ -109,7 +91,8 @@ async function recipientHere(orgId: string, id: string) {
  * or not, anchored here or through a membership here (docs/plans/
  * workspace-status.md D11), with whether their account keeps working
  * somewhere else once this seat ends (workspace-status.ts leavesOnlyHere: a
- * membership here, D5, or a usable seat elsewhere, D3).
+ * membership here, D5, or a usable seat elsewhere, D3), for the D17 note
+ * only: the handover moves this workspace's lines whatever it is.
  */
 async function leaverHere(orgId: string, id: string) {
   const seat = await personSeatIn(orgId, id);
@@ -206,7 +189,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const recipient = await recipientHere(orgId, to);
     if (!recipient || to === id) return jsonError("Reassignment target not found or inactive", 404);
     if (recipient.status === "INACTIVE") return jsonError(inactiveRecipientWords(`${recipient.firstName} ${recipient.lastName}`.trim()), 409);
-    return jsonSuccess({ reports: await previewReportHandover(orgId, id, to, { leavesOnlyHere: target.onlyHere }) });
+    return jsonSuccess({ reports: await previewReportHandover(orgId, id, to) });
   }
 
   const [items, okrs, kraAssignments, assets, directReports, spaces, folders, lists] = await Promise.all([
@@ -233,15 +216,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       select: { id: true, name: true, type: true },
       orderBy: { assignedAt: "desc" },
     }),
-    // Everyone stored under them who works here (batch 5), the set the
-    // handover moves: anchored here, or through a membership here.
-    prisma.user.findMany({
-      where: { managerId: id, deletedAt: null },
-      select: { id: true, firstName: true, lastName: true },
-      orderBy: { firstName: "asc" },
-    }).then(async (rows) => {
-      const here = await liveHereAmong(orgId, rows.map((r) => r.id));
-      return rows.filter((r) => here.has(r.id));
+    // Everyone whose line HERE names them (E1, step 4), the set the handover
+    // moves and its gate counts: anchored here, or through a membership here
+    // (reportsHereOf, kept seats). Before, the account lines naming them, in
+    // any workspace, then filtered to seats here: the one surface still
+    // naming another workspace's reports (the step 3 review item 1).
+    reportsHereOf(orgId, [id]).then(async (lines) => {
+      const ids = lines.map((r) => r.id).filter((rid) => rid !== id);
+      return ids.length
+        ? prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { id: "asc" }] })
+        : [];
     }),
     prisma.space.findMany({ where: { organizationId: orgId, ownerId: id }, select: { id: true, name: true } }),
     prisma.folder.findMany({ where: { organizationId: orgId, ownerId: id }, select: { id: true, name: true } }),
@@ -326,11 +310,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // are already in the Audit log (one reporting_line_changed row each).
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
-    // A leaver whose account keeps working elsewhere (a membership here, or a
-    // usable seat elsewhere it moves to) leaves this workspace only: a report
-    // whose line to them another workspace relies on stays (as SCIM's member
-    // path does). Read again by the step that ends the seat.
-    result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session), leavesOnlyHere: target.onlyHere });
+    // This workspace's lines only (E6): the same run whether or not their
+    // account keeps working elsewhere.
+    result = await runHandover({ organizationId: orgId, fromId: id, toId: reassignToId, actorId: getUserId(session) });
   } catch (e) {
     const busy = rolesBusyResponse(e);
     if (busy) return busy;
@@ -351,16 +333,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     type: "user_handover",
     actorId: getUserId(session),
     organizationId: orgId,
-    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${alsoElsewhereSaid(result.reportsAlsoElsewhere.length)}${atAccountEndSaid(result.reportsAtAccountEnd.length)}${goalSourcesSaid(result.goalSources)}`,
+    description: `Handed over ${result.tasksReassigned} open tasks, ${result.reportsReassigned} direct reports and ${result.containersReassigned} Spaces, Folders and Lists from ${target.firstName} ${target.lastName} to ${recipient.firstName} ${recipient.lastName}${goalSourcesSaid(result.goalSources)}`,
     targetId: id,
     targetType: "user",
     metadata: {
       recipientId: reassignToId,
       ...result,
       reportsRehomed: result.reportsRehomed.length,
-      reportsStaying: result.reportsStaying.length,
-      reportsAtAccountEnd: result.reportsAtAccountEnd.length,
-      reportsAlsoElsewhere: result.reportsAlsoElsewhere.length,
     },
   });
 

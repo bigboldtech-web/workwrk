@@ -17,6 +17,14 @@ const st = vi.hoisted(() => ({
   session: null as null | { user: { id: string; email: string } },
   fits: true,
   skillsBack: [] as string[][],
+  /** The invitation's manager as the real reads answer it (workspace-status-2 E10), else none. */
+  realManager: false,
+  /** The workspaces whose role lock was taken. */
+  roleLocks: [] as string[],
+  /** The audit rows the join wrote after it (logAuditEvent). */
+  audits: [] as Array<Record<string, unknown>>,
+  /** followReportingLine's calls (review-cycle.server.ts). */
+  followed: [] as Array<{ ids: string[]; actor: string }>,
 }));
 
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/access/seat-test-db")).seatDb.prisma }));
@@ -27,21 +35,30 @@ vi.mock("@/lib/email", () => ({ sendEmail: async () => undefined }));
 vi.mock("@/lib/email-templates", () => ({ welcomeTemplate: () => ({ subject: "", html: "" }) }));
 vi.mock("@/lib/auth/send-verification", () => ({ appBaseUrl: () => "https://app.test" }));
 vi.mock("@/lib/rate-limit-memory", () => ({ ipFromRequest: () => "ip", rateLimit: () => ({ ok: true }) }));
-vi.mock("@/lib/activity", () => ({ logAuditEvent: async () => undefined }));
+vi.mock("@/lib/activity", () => ({ logAuditEvent: async (row: Record<string, unknown>) => { st.audits.push(row); } }));
+// Open reviews following a cleared line is review-cycle's own (tested there).
+vi.mock("@/lib/performance/review-cycle.server", () => ({ followReportingLine: async (_org: string, ids: string[], actor: string) => { st.followed.push({ ids, actor }); return 0; } }));
 vi.mock("@/lib/access/grants", () => ({ recordSpaceInviteAccepted: async () => null }));
-vi.mock("@/lib/access/membership", () => ({ lockOrgRoles: async () => undefined }));
+vi.mock("@/lib/access/membership", () => ({
+  lockOrgRoles: async (_tx: unknown, org: string) => { st.roleLocks.push(org); },
+  liveOwnerIds: async () => ["olive"],
+}));
 vi.mock("@/lib/skills/store", () => ({ skillsBackFor: async (_org: string, ids: string[]) => void st.skillsBack.push(ids) }));
 vi.mock("@/lib/seats", () => ({
   lockWorkspaceSeats: async () => undefined,
   personFitsOnAccept: async () => (st.fits ? { ok: true } : { ok: false, message: "Every seat in Here Co is taken." }),
 }));
-vi.mock("@/lib/auth/invite-facts.server", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/auth/invite-facts.server")>()),
-  inviteSender: async () => ({ inviterId: null, inviterName: "Ida", message: null }),
-  invitePlacement: async () => ({ departmentName: null, managerName: null, space: null }),
-  managerOnAccept: async () => null,
-  // placementOnAccept is the real one (D18): this workspace's own rows only.
-}));
+vi.mock("@/lib/auth/invite-facts.server", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/invite-facts.server")>();
+  return {
+    ...real,
+    inviteSender: async () => ({ inviterId: null, inviterName: "Ida", message: null }),
+    // The real ones when a test says so (workspace-status-2 E10, step 4).
+    invitePlacement: async (inv: Parameters<typeof real.invitePlacement>[0]) => (st.realManager ? real.invitePlacement(inv) : { departmentName: null, managerName: null, space: null }),
+    managerOnAccept: async (inv: Parameters<typeof real.managerOnAccept>[0], db?: Parameters<typeof real.managerOnAccept>[1]) => (st.realManager ? real.managerOnAccept(inv, db) : null),
+    // placementOnAccept is the real one (D18): this workspace's own rows only.
+  };
+});
 
 import { GET, POST } from "./route";
 import { seatDb as db } from "@/lib/access/seat-test-db";
@@ -67,6 +84,10 @@ beforeEach(() => {
   st.session = null;
   st.fits = true;
   st.skillsBack = [];
+  st.realManager = false;
+  st.roleLocks = [];
+  st.audits = [];
+  st.followed = [];
   db.seed("organization", { id: "here", name: "Here Co", status: "ACTIVE", settings: {} });
   db.seed("organization", { id: "home", name: "Home Co", status: "ACTIVE", settings: {} });
   db.seed("organization", { id: "other", name: "Other Co", status: "TRIAL", settings: {} });
@@ -272,5 +293,178 @@ describe("POST signed in: the invitation's placement is their profile here (D18)
     expect((await accept()).status).toBe(201);
     expect(seatIn("here")?.departmentId ?? null).toBeNull();
     expect(pat().departmentId ?? null).toBeNull();
+  });
+});
+
+// docs/plans/workspace-status-2.md E10 (step 4): the invitation's Reports to is
+// their line here on a signed-in join too, read under the role lock
+// (managerOnAccept) and written onto the membership with the placement,
+// before the move, so the swap (E3) hands it to the account and the
+// workspace they came from keeps its own line on the membership it leaves.
+// Before, this path wrote no manager: Pat, imported into Here Co under Dana,
+// joined with her existing account and had no manager here.
+describe("POST signed in: the invitation's Reports to is their line here (E10)", () => {
+  beforeEach(() => {
+    st.realManager = true;
+    db.seed("user", { id: "dana", email: "dana@x.test", firstName: "Dana", lastName: "Lee", organizationId: "here", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.seed("user", { id: "max", email: "max@x.test", firstName: "Max", lastName: "Ray", organizationId: "home", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    // Pat reports to Max at Home Co.
+    pat().managerId = "max";
+    db.row("invitation", "inv").managerId = "dana";
+  });
+
+  it("writes Dana onto the membership under the role lock, the move hands it to the account, and Home Co keeps Max", async () => {
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    expect(st.roleLocks).toEqual(["here"]);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: "dana" });
+    // The membership Pat left is Home Co's, with Home Co's line.
+    expect(seatIn("home")).toMatchObject({ managerId: "max" });
+  });
+
+  it("names Dana on /join to someone who already has an account", async () => {
+    // Before: null, since that path wrote no manager.
+    expect((await preview()).body).toMatchObject({ accountExists: true, managerName: "Dana Lee" });
+  });
+
+  for (const [why, make] of [
+    ["an Agent here", () => { Object.assign(db.row("user", "dana"), legacyLevelRow("AGENT")); }],
+    ["someone deactivated here", () => { db.row("user", "dana").status = "INACTIVE"; }],
+  ] as const) {
+    it(`writes no line under a manager who can't manage here: ${why}`, async () => {
+      make();
+      signedIn();
+      expect((await accept()).status).toBe(201);
+      // Read under the role lock, so a role change waits for it or is seen by it.
+      expect(st.roleLocks).toEqual(["here"]);
+      expect(pat()).toMatchObject({ organizationId: "here", managerId: null });
+      expect(seatIn("home")).toMatchObject({ managerId: "max" });
+    });
+  }
+
+  it("writes no line that would close a loop here, for someone coming back to a seat here", async () => {
+    // Pat once worked here, and Dana's line here still names her.
+    db.seed("organizationMembership", { id: "m-here", userId: "pat", organizationId: "here", role: "EMPLOYEE", status: "INACTIVE", managerId: null });
+    db.row("user", "dana").managerId = "pat";
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    // The loop is checked under the role lock (E5), and no line is written.
+    expect(st.roleLocks).toEqual(["here"]);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: null });
+  });
+
+  it("a seat here that comes back takes the invitation's manager, and keeps its own line when the invitation names none", async () => {
+    db.seed("user", { id: "bo", email: "bo@x.test", firstName: "Bo", lastName: "Bo", organizationId: "here", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.seed("organizationMembership", { id: "m-here", userId: "pat", organizationId: "here", role: "EMPLOYEE", status: "INACTIVE", managerId: "bo" });
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: "dana" });
+  });
+
+  // The step 4 review L2: the second half of the title above, which it never checked.
+  it("a seat here that comes back keeps its own line when the invitation names none, and it still holds", async () => {
+    db.seed("user", { id: "bo", email: "bo@x.test", firstName: "Bo", lastName: "Bo", organizationId: "here", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.seed("organizationMembership", { id: "m-here", userId: "pat", organizationId: "here", role: "EMPLOYEE", status: "INACTIVE", managerId: "bo" });
+    db.row("invitation", "inv").managerId = null;
+    signedIn();
+    const { status, body } = await accept();
+    expect(status).toBe(201);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: "bo" });
+    expect(seatIn("home")).toMatchObject({ managerId: "max" });
+    // Checked under the role lock, and nothing cleared or dropped.
+    expect(st.roleLocks).toEqual(["here"]);
+    expect(db.tables.activityLog ?? []).toEqual([]);
+    expect(body).not.toHaveProperty("managerDropped");
+  });
+
+  // The step 4 review L3: a manager the join drops is never dropped in silence.
+  it("says in the answer and the Audit log when the invitation's manager can't be written", async () => {
+    Object.assign(db.row("user", "dana"), legacyLevelRow("AGENT"));
+    signedIn();
+    const { status, body } = await accept();
+    expect(status).toBe(201);
+    expect(body).toMatchObject({ ok: true, managerDropped: true });
+    expect(st.audits[0]).toMatchObject({
+      type: "user.joined",
+      description: "Joined from an invitation with an existing WorkwrK account, with no manager here: the manager the invitation named can't manage them here",
+      metadata: { managerDropped: "dana" },
+    });
+  });
+
+  it("/join never names a manager the join would drop: the person themselves, or one who would close a loop here", async () => {
+    // Dana's line here names Pat (Pat once worked here): Pat under Dana is a loop.
+    db.row("user", "dana").managerId = "pat";
+    expect((await preview()).body).toMatchObject({ accountExists: true, managerName: null });
+    db.row("user", "dana").managerId = null;
+    expect((await preview()).body).toMatchObject({ managerName: "Dana Lee" });
+    // An invitation naming the person themselves (Pat holds no seat here, so
+    // managerOnAccept already refuses her; the self check stands on its own).
+    db.row("invitation", "inv").managerId = "pat";
+    expect((await preview()).body).toMatchObject({ managerName: null });
+  });
+});
+
+// The step 4 review M1: a seat that comes back by invitation (D13) keeps only
+// the lines here that still hold, as a restore or a reactivation keeps them
+// (manager-candidate.ts staleLinesOf). Before, its old line came back
+// unchecked when the invitation named no manager that passed, and the swap
+// handed it to the account.
+describe("POST signed in: a seat that comes back keeps only the lines that still hold (M1)", () => {
+  beforeEach(() => {
+    st.realManager = true;
+    db.seed("user", { id: "dana", email: "dana@x.test", firstName: "Dana", lastName: "Lee", organizationId: "here", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.seed("user", { id: "max", email: "max@x.test", firstName: "Max", lastName: "Ray", organizationId: "home", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.seed("user", { id: "ada", email: "ada@x.test", firstName: "Ada", lastName: "Bot", organizationId: "here", ...legacyLevelRow("AGENT"), createdAt: new Date("2025-02-01") });
+    pat().managerId = "max";
+    // B (Here Co) removed Pat in March while she reported to Dana here, with
+    // a dotted line here to Ada (an Agent since) and one at home to Max.
+    db.seed("organizationMembership", { id: "m-here", userId: "pat", organizationId: "here", role: "EMPLOYEE", status: "INACTIVE", removedAt: new Date("2026-03-01"), managerId: "dana" });
+    db.seed("userDottedLine", { id: "d-here", userId: "pat", managerId: "ada", organizationId: "here" });
+    db.seed("userDottedLine", { id: "d-home", userId: "pat", managerId: "max", organizationId: "home" });
+    // B's HR re-invites her with no Reports to.
+    db.row("invitation", "inv").managerId = null;
+  });
+  const lineRows = () => (db.tables.activityLog ?? []).filter((r) => r.type === "reporting_line_changed");
+
+  it("B removed Dana since: Pat comes back with no line to her, each clear logged, under the role lock", async () => {
+    Object.assign(db.row("user", "dana"), { status: "INACTIVE", deletedAt: new Date("2026-06-01") });
+    signedIn();
+    const { status } = await accept();
+    expect(status).toBe(201);
+    // Before: Pat came back under Dana (the swap handed her old B line to the account).
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: null });
+    expect(st.roleLocks).toEqual(["here"]);
+    // B's stale dotted row goes; her home row and her home line stay.
+    expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d-home"]);
+    expect(seatIn("home")).toMatchObject({ managerId: "max" });
+    expect(lineRows().map((r) => [r.organizationId, r.description, r.oldValue, r.metadata])).toEqual([
+      // She came back herself, by invitation: never "Restored" by herself (the final review, product L7).
+      ["here", "Pat P rejoined from an invitation with no manager: Dana Lee is no longer in the workspace", { managerId: "dana" }, { onJoin: true, reason: "removed" }],
+      ["here", "Pat P rejoined from an invitation without their dotted line to Ada Bot: Ada Bot is on the Agent tier, and an Agent can't be anyone's manager", { dottedManagerId: "ada" }, { onJoin: true, reason: "agent" }],
+    ]);
+    // Her open reviews here follow the cleared line, to the first Owner.
+    expect(st.followed).toEqual([{ ids: ["pat"], actor: "olive" }]);
+  });
+
+  it("B deactivated Dana since: the same, and Pat never comes back reporting to a deactivated person", async () => {
+    db.row("user", "dana").status = "INACTIVE";
+    // Pat's own seat here was deactivated, not removed.
+    Object.assign(db.row("organizationMembership", "m-here"), { removedAt: null });
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: null });
+    expect(lineRows()[0]).toMatchObject({ actorId: "pat", description: "Pat P rejoined from an invitation with no manager: Dana Lee is deactivated", metadata: { onJoin: true, reason: "inactive" } });
+    expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d-home"]);
+  });
+
+  it("a manager the invitation names that passes replaces the old line, and the stale dotted row still goes", async () => {
+    Object.assign(db.row("user", "dana"), { status: "INACTIVE", deletedAt: new Date("2026-06-01") });
+    db.seed("user", { id: "bo", email: "bo@x.test", firstName: "Bo", lastName: "Bo", organizationId: "here", ...legacyLevelRow("MANAGER"), createdAt: new Date("2025-02-01") });
+    db.row("invitation", "inv").managerId = "bo";
+    signedIn();
+    expect((await accept()).status).toBe(201);
+    expect(pat()).toMatchObject({ organizationId: "here", managerId: "bo" });
+    expect(lineRows().map((r) => r.metadata)).toEqual([{ onJoin: true, reason: "agent" }]);
+    expect(st.followed).toEqual([]);
   });
 });

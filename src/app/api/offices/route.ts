@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
+import { membershipPlacedCounts, membershipsPlacedHere } from "@/lib/access/profile-here";
 import { z } from "zod";
 
 const optText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v === "" ? null : v));
@@ -42,13 +43,21 @@ export async function GET() {
 
   const orgId = getOrgId(session);
 
-  const offices = await prisma.office.findMany({
-    where: { organizationId: orgId },
-    include: { _count: { select: { members: true } } },
-    orderBy: [{ isHeadquarters: "desc" }, { name: "asc" }],
-  });
+  const [offices, placedThrough] = await Promise.all([
+    prisma.office.findMany({
+      where: { organizationId: orgId },
+      include: { _count: { select: { members: true } } },
+      orderBy: [{ isHeadquarters: "desc" }, { name: "asc" }],
+    }),
+    membershipPlacedCounts(orgId, "officeId", "kept"),
+  ]);
+  // `_count.members` counts the people here through a membership whose
+  // membership holds the office too (kept seats), as DELETE refuses by
+  // (docs/plans/workspace-status-2.md E15, step 8), so the list never offers
+  // a Delete that then refuses.
+  const rows = offices.map((o) => ({ ...o, _count: { ...o._count, members: o._count.members + (placedThrough.get(o.id) ?? 0) } }));
 
-  return jsonSuccess(offices, 200, LOOKUP_CACHE_HEADERS);
+  return jsonSuccess(rows, 200, LOOKUP_CACHE_HEADERS);
 }
 
 export async function POST(req: NextRequest) {
@@ -161,7 +170,9 @@ export async function DELETE(req: NextRequest) {
     include: { _count: { select: { members: true } } },
   });
   if (!existing) return jsonError("Office not found", 404);
-  if (existing._count.members > 0) return jsonError("Cannot delete office with assigned members");
+  // The people here through a membership whose membership holds this office
+  // count too (docs/plans/workspace-status-2.md, the step 5 review M2).
+  if (existing._count.members > 0 || (await membershipsPlacedHere(orgId, { officeId: id })) > 0) return jsonError("Cannot delete office with assigned members");
 
   await prisma.office.delete({ where: { id } });
 

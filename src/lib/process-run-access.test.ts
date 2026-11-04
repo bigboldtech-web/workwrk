@@ -52,7 +52,8 @@ describe("canManageRun: who reads and changes a run", () => {
     expect(await canManageRun(legacyTestSession("lead", "EMPLOYEE"), "org", "lead", "matrix")).toBe(true);
     // Docs-found fixes batch 5: who works here is asked of the dotted
     // reports' rows (anchored here, or a membership here), not the anchor.
-    expect(dotted.mock.calls[0][0]).toEqual({ where: { managerId: "lead", user: { deletedAt: null } }, select: { userId: true } });
+    // And this workspace's rows only (docs/plans/workspace-status-2.md E2, step 2).
+    expect(dotted.mock.calls[0][0]).toEqual({ where: { organizationId: "org", managerId: "lead", user: { deletedAt: null } }, select: { userId: true } });
   });
 
   it("never counts a dotted report who holds no level in this workspace", async () => {

@@ -10,6 +10,8 @@ import {
   statusesForView,
   type PolicyStatus,
 } from "@/lib/policies-list";
+import { countPeopleHere, everyoneHereIds } from "@/lib/access/seated-here";
+import { AUDIENCE_REACH } from "@/lib/access/profile-here";
 
 /**
  * GET /api/policies?view=&status=&category=&q=&sort=&dir=&page=&pageSize=
@@ -75,7 +77,11 @@ export async function GET(req: NextRequest) {
       },
       orderBy,
     }),
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+    // A policy for everyone: the people anchored here who are not removed, as
+    // before, and the people here through a live membership, two halves
+    // (docs/plans/workspace-status-2.md E15, step 8). Its figures count them
+    // and its publish tells them; nobody this workspace ended is told.
+    countPeopleHere({ organizationId: orgId, reach: AUDIENCE_REACH }),
     prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true, email: true } }),
     prisma.policy.groupBy({ by: ["status"], where: { organizationId: orgId }, _count: { _all: true } }),
   ]);
@@ -88,9 +94,9 @@ export async function GET(req: NextRequest) {
     const [assignRows, ackRows, activeUsers] = await Promise.all([
       prisma.policyAssignment.findMany({ where: { policyId: { in: ids } }, select: { policyId: true, userId: true } }),
       prisma.policyAcknowledgment.findMany({ where: { policyId: { in: ids } }, select: { policyId: true, userId: true, version: true } }),
-      prisma.user.findMany({ where: { organizationId: orgId, deletedAt: null }, select: { id: true } }),
+      everyoneHereIds(orgId, AUDIENCE_REACH),
     ]);
-    const active = new Set(activeUsers.map((u) => u.id));
+    const active = new Set(activeUsers);
     const assignees = new Map<string, Set<string>>();
     for (const a of assignRows) { if (active.has(a.userId)) (assignees.get(a.policyId) ?? assignees.set(a.policyId, new Set()).get(a.policyId)!).add(a.userId); }
     const acks = new Map<string, Map<string, number>>();
@@ -206,11 +212,11 @@ export async function POST(req: NextRequest) {
   });
 
   if (finalStatus === "PUBLISHED") {
-    const users = await prisma.user.findMany({ where: { organizationId: orgId, deletedAt: null }, select: { id: true } });
+    const users = await everyoneHereIds(orgId, AUDIENCE_REACH);
     if (users.length > 0) {
       await prisma.notification.createMany({
-        data: users.map((u) => ({
-          userId: u.id,
+        data: users.map((id) => ({
+          userId: id,
           type: "policy_published",
           title: policy.requiresAck ? "New policy to acknowledge" : "New policy published",
           message: `${policy.title}${policy.category ? ` (${policy.category})` : ""}`,

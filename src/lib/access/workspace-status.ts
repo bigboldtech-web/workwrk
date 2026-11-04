@@ -56,12 +56,12 @@
 // brings none back.
 //
 // The routes that end a seat ask first what the end WILL be (endSeatWould,
-// the same read under the same lock), because the reports whose line another
-// workspace relies on move only when the account itself ends (D4,
-// handover.server.ts moveReliedReportsAtEnd), never when the person moves to
-// their other workspace (D3) or leaves this one only (D5): there they still
-// work, and that workspace's line stays (`leavesOnlyHere` says which before
-// the handover runs).
+// the same read under the same lock), and endSeat writes only that end
+// (`expect`). Since workspace-status-2.md step 4 (E4, E6) no line moves with
+// an end: each workspace's handover moves its own reports first, and a line
+// rides on the row that holds the seat (the swap, E3). `leavesOnlyHere`
+// says, before the handover runs, whether their other workspaces are not
+// affected (the dialogs' D17 note).
 //
 // SEATS THE ONE-TIME SQL STEP ENDED WITH THE ACCOUNT (endedWithAccount,
 // D16; step 1 review M1). Before each workspace had a status of its own,
@@ -77,6 +77,20 @@
 // clears its mark, so from then on that workspace alone decides it. For
 // that data the worst case is exactly today's behaviour.
 //
+// A RESTORE AT THE ANCHOR BRINGS SEATS BACK ELSEWHERE, AND THEIR LINES ARE
+// CHECKED THERE (docs/plans/workspace-status-2.md, the final review,
+// integrity M1). When the account comes back (the anchored seat restored or
+// reactivated, or a D6 restore moving it off an ended anchor), every live
+// membership it holds elsewhere works again: the ones the one-time step
+// ended with it, and the kept ones of an account a D4 end removed (that
+// workspace's handovers never saw them, since a kept seat needs its account
+// not removed). Each such workspace's lines are checked as a restore checks
+// its own (manager-candidate.ts staleLinesOf) and what fails is cleared on
+// that membership, in the caller's transaction, each with its Audit row in
+// that workspace (actor the system: nobody there acted):
+// clearLinesBackWithAccount. Before, Pat restored at A came back in B under
+// Dana, whom B had removed, with nothing logged in B.
+//
 // The seat rule itself (live, kept, usable: D2) is workspace-seat.ts,
 // re-exported here.
 
@@ -87,6 +101,8 @@ import { accountIsLive, lockPerson, reanchorUser, sameEmailKey, takenBySameEmail
 import { endOpenInvitations } from "./seat-invitations";
 import { revokeKeysMadeHere, type SeatActor } from "./seat-api-keys";
 import { ENDED_STATUS, liveSeatWhere, usableSeatWhere, workspaceIsOpen, type SeatRow } from "./workspace-seat";
+import { clearedLineSentence, staleLinesOf, type StaleLine } from "./manager-candidate";
+import { removeDottedHere, seatRefOf, writeLineHere } from "./seat-writes";
 
 export type { SeatActor } from "./seat-api-keys";
 
@@ -249,14 +265,13 @@ function outcomeOf(p: EndPlan): EndSeatResult["outcome"] {
 /**
  * What endSeat WILL do to this seat, read the same way under the same row
  * lock, writing nothing: the routes ask it inside their transaction before
- * they write, because the reports whose line another workspace relies on
- * move only when the account itself ends ("account_ended", D4), never when
- * the person moves to their other workspace (D3) or leaves this one only
- * (D5). The lock is held to the end of the transaction, so endSeat answers
- * the same, unless a workspace elsewhere changes status in between (no
- * person lock is taken for that): the routes pass this answer to endSeat as
- * `expect`, which then refuses (SeatPlanChanged) rather than write another
- * end than the one the lines were moved for.
+ * they write (SCIM's words "in this workspace" follow it; batches 8 and 9
+ * moved the lines another workspace relied on only for "account_ended", a
+ * move workspace-status-2 step 4 retired, E6). The lock is held to the end
+ * of the transaction, so endSeat answers the same, unless a workspace
+ * elsewhere changes status in between (no person lock is taken for that):
+ * the routes pass this answer to endSeat as `expect`, which then refuses
+ * (SeatPlanChanged) rather than write another end than the one planned.
  */
 export async function endSeatWould(tx: Tx, input: SeatEndInput): Promise<EndSeatResult["outcome"]> {
   return outcomeOf(await planEnd(tx, input));
@@ -342,13 +357,12 @@ export async function endSeat(
 /**
  * Whether ending this person's seat here leaves their account working
  * somewhere else: a membership seat here (D5), or the anchored seat of
- * someone who holds a usable seat elsewhere (D3: they move there). Then the
- * handover is a leaver's of THIS workspace only (runHandover's
- * `leavesOnlyHere`): a report whose line to them another workspace relies on
- * stays, since they still manage that report there. False for D4 (the
- * account ends with the seat) and for someone with no seat here. A plain
- * read, before the handover; the end itself reads it again under the lock
- * (endSeatWould).
+ * someone who holds a usable seat elsewhere (D3: they move there). The
+ * dialogs then say their other workspaces are not affected (D17). The
+ * handover is this workspace's whatever it answers (workspace-status-2.md
+ * E6). False for D4 (the account ends with the seat) and for someone with
+ * no seat here. A plain read, before the handover; the end itself reads it
+ * again under the lock (endSeatWould).
  */
 export async function leavesOnlyHere(organizationId: string, userId: string, db: Tx | typeof prisma = prisma): Promise<boolean> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, email: true } });
@@ -444,6 +458,75 @@ export async function restoreSeat(
   if (taken.size > 0) return { outcome: "restored", seat: "membership", anchoredIn: user.organizationId, movedFrom: null, anchorEnded: true, alsoRestoredIn: [] };
   await reanchorUser({ userId, to: { organizationId, role: seat.role } }, tx);
   return { outcome: "restored", seat: "membership", anchoredIn: organizationId, movedFrom: user.organizationId, anchorEnded: false, alsoRestoredIn: [] };
+}
+
+/** The lines a restore cleared in one workspace whose seat came back with the account (clearLinesBackWithAccount). */
+export interface LinesClearedElsewhere {
+  organizationId: string;
+  manager: StaleLine | null;
+  dotted: StaleLine[];
+}
+
+/**
+ * The final review, integrity M1 (see the header): after restoreSeat, in the
+ * caller's transaction, under the person's row lock it took. When the
+ * account came back (the anchored seat, or a D6 move here off an ended
+ * anchor), each of its live memberships in another workspace has that
+ * workspace's lines checked (staleLinesOf there) and what fails cleared on
+ * that membership (writeLineHere, removeDottedHere), each with one
+ * reporting_line_changed row in that workspace, actor the system, in words
+ * that say nobody there acted ("Pat Lee is back in this workspace after
+ * their account was restored, with no manager: ...", the final review,
+ * part B). A clear
+ * only removes a line, so it needs no role lock there. Answers what was
+ * cleared, by workspace, so the caller moves open reviews where a manager
+ * line was cleared; nothing of it is said in the caller's workspace (it
+ * names another workspace's people).
+ */
+export async function clearLinesBackWithAccount(
+  tx: Tx,
+  userId: string,
+  restored: Extract<RestoreSeatResult, { outcome: "restored" }>,
+  verb: "Restored" | "Reactivated",
+): Promise<LinesClearedElsewhere[]> {
+  // The account came back only for the anchored seat, or a D6 move here.
+  if (restored.seat !== "anchor" && restored.movedFrom === null) return [];
+  const account = await tx.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, firstName: true, lastName: true } });
+  if (!account) return [];
+  const back = await tx.organizationMembership.findMany({
+    where: { userId, organizationId: { not: account.organizationId }, ...liveSeatWhere() },
+    select: { organizationId: true },
+  });
+  const name = `${account.firstName ?? ""} ${account.lastName ?? ""}`.trim() || "Someone";
+  const out: LinesClearedElsewhere[] = [];
+  for (const organizationId of [...new Set(back.map((m) => m.organizationId))].sort()) {
+    const stale = await staleLinesOf(organizationId, userId, tx);
+    // On the membership that holds the seat there (the account is anchored elsewhere, under the person's lock).
+    const manager = stale.manager && (await writeLineHere(tx, seatRefOf(organizationId, account), null)) ? stale.manager : null;
+    await removeDottedHere(tx, organizationId, stale.dotted.map((d) => ({ userId, managerId: d.managerId })));
+    const cleared = [...(manager ? [manager] : []), ...stale.dotted];
+    for (const line of cleared) {
+      const solid = line === manager;
+      await tx.activityLog.create({
+        data: {
+          type: "reporting_line_changed",
+          actorId: null,
+          actorType: "system",
+          organizationId,
+          // Nobody here acted: the account came back elsewhere (the final review, part B).
+          description: clearedLineSentence(verb === "Restored" ? "RestoredWithAccount" : "ReactivatedWithAccount", name, line, solid),
+          targetType: "user",
+          targetId: userId,
+          severity: "info",
+          oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+          newValue: solid ? { managerId: null } : { dottedManagerId: null },
+          metadata: { [verb === "Restored" ? "onRestore" : "onReactivate"]: true, reason: line.why, withAccount: true },
+        },
+      });
+    }
+    if (cleared.length > 0) out.push({ organizationId, manager, dotted: stale.dotted });
+  }
+  return out;
 }
 
 // ── D7's repair: sign-in, Google sign-in and the session check ──────────

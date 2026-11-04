@@ -21,7 +21,6 @@ const st = vi.hoisted(() => ({
   teammateEnds: [] as unknown[][],
   skillsBack: [] as unknown[][],
   logs: [] as Array<{ type: string; description: string; metadata?: Record<string, unknown>; newValue?: unknown }>,
-  relied: [] as Array<Record<string, unknown>>,
   seatChecks: 0,
   seatsFull: false,
   /** The score reads the record made, with their arguments. */
@@ -55,13 +54,11 @@ vi.mock("@/lib/seats", () => ({
   },
 }));
 // The handover's own reads are handover.server.test.ts's: here nothing is left to hand over.
+// Since workspace-status-2 step 4 (E6) no end moves a line itself: the
+// handover moved this workspace's reports first, and nothing is left for
+// the end (moveReliedReportsAtEnd retired).
 vi.mock("@/lib/people/handover.server", () => ({
   pendingHandover: async () => ({ openTasks: 0, directReports: 0, containers: 0 }),
-  moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
-    st.relied.push(input);
-    return { reportsMoved: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportIds: [] };
-  },
-  followAccountEndLines: async () => undefined,
 }));
 // A restore's line check is manager-candidate.ts's (tested there): no line is stale here.
 vi.mock("@/lib/access/manager-candidate", async (orig) => ({
@@ -128,7 +125,6 @@ beforeEach(() => {
   st.teammateEnds = [];
   st.skillsBack = [];
   st.logs = [];
-  st.relied = [];
   st.seatChecks = 0;
   st.seatsFull = false;
   st.scoreReads = [];
@@ -147,22 +143,29 @@ describe("someone who works here through a membership (D5, D11)", () => {
   it("a deactivation writes only their membership here: their account, their home and their sessions are untouched", async () => {
     key("k-b", "b", "pat");
     key("k-a", "a", "pat");
+    // A's department on the account, B's on the membership (D18).
+    db.seed("department", { id: "dep-a", name: "A's Finance", organizationId: "a" });
+    db.seed("department", { id: "dep-b", name: "B's Delivery", organizationId: "b" });
+    user("pat").departmentId = "dep-a";
+    seatOf("pat", "b")!.departmentId = "dep-b";
     const res = await patch("pat", { status: "INACTIVE" });
     // Before: 404 User not found.
     expect(res.status).toBe(200);
     expect(seatOf("pat", "b")).toMatchObject({ status: "INACTIVE", removedAt: null });
     expect(user("pat")).toMatchObject({ organizationId: "a", status: "ACTIVE", deletedAt: null, tokenVersion: 0, ...legacyLevelRow("COMPANY_ADMIN") });
-    // This workspace's teammate access ends; the reports another workspace relies on never move (they still work there).
+    // This workspace's teammate access ends.
     expect(st.teammateEnds).toEqual([["b", ["pat"], "deactivated", "u-admin"]]);
-    expect(st.relied).toEqual([]);
     // The API keys they made HERE stop working (D15), with an audit row here; A's stays.
     expect(db.row("apiKey", "k-b").revokedAt).toBeInstanceOf(Date);
     expect(db.row("apiKey", "k-a").revokedAt).toBeNull();
     expect(db.tables.activityLog?.filter((r) => r.type === "api_key_revoked").map((r) => [r.organizationId, r.targetId, r.actorId])).toEqual([["b", "k-b", "u-admin"]]);
     const body = await res.json();
     expect(body).toMatchObject({ id: "pat", status: "INACTIVE", ...legacyLevelRow("EMPLOYEE"), profileHere: false, apiKeysRevoked: 1 });
-    // Nothing of their profile (A's job title, department) is sent.
-    expect(body).not.toHaveProperty("departmentId");
+    // Nothing of A's profile (the account's department) is sent: the
+    // placement answered is the one their membership here holds
+    // (workspace-status-2.md step 5).
+    expect(body.departmentId).toBe("dep-b");
+    expect(JSON.stringify(body)).not.toContain("dep-a");
     expect(st.logs.find((l) => l.type === "membership.changed")).toMatchObject({ description: "Deactivated Pat Lee", metadata: { seat: "membership", outcome: "membership_ended", accountMoved: false, apiKeysRevoked: 1 } });
   });
 
@@ -206,16 +209,31 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(st.logs.find((l) => l.type === "org_role.changed")).toMatchObject({ metadata: { tokenVersionBumped: false } });
   });
 
-  it("refuses any profile field with one plain sentence, writing nothing", async () => {
-    for (const body of [{ firstName: "Patricia" }, { departmentId: null }, { managerId: "olga" }, { status: "INACTIVE", phone: "1" }]) {
+  // workspace-status-2.md step 5 (E7): their profile and line here are
+  // written here, on their membership; only their shared identity is not.
+  // Before step 5 every field but the role and the status was refused with
+  // "their details here are read-only".
+  it("refuses their name, phone, photo and birthday with the shared-identity sentence, writing nothing", async () => {
+    for (const body of [{ firstName: "Patricia" }, { status: "INACTIVE", phone: "1" }, { dateOfBirth: "1990-01-01" }, { avatar: "x" }]) {
       const res = await patch("pat", body);
       expect(res.status).toBe(403);
       const json = await res.json();
-      expect(json).toMatchObject({ code: "profile_elsewhere", error: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status." });
+      expect(json).toMatchObject({ code: "identity_shared", error: "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them." });
       expect(json.error).not.toMatch(/--|—/);
     }
     expect(user("pat").firstName).toBe("Pat");
     expect(seatOf("pat", "b")?.status).toBe("ACTIVE");
+  });
+
+  // Reports to, the hours, the working week, the profile fields and the
+  // dotted lines: src/lib/people/workspace-profile-writes.test.ts.
+  it("writes their department on their membership here, never the account", async () => {
+    db.seed("department", { id: "dep-b", name: "B's Delivery", organizationId: "b" });
+    expect((await patch("pat", { departmentId: "dep-b" })).status).toBe(200);
+    expect(seatOf("pat", "b")!.departmentId).toBe("dep-b");
+    expect(user("pat").departmentId ?? null).toBeNull();
+    expect((await patch("pat", { departmentId: null })).status).toBe(200);
+    expect(seatOf("pat", "b")!.departmentId).toBeNull();
   });
 
   it("a removal ends their membership here and never deletes it; a restore brings it back under the seat check", async () => {
@@ -225,7 +243,6 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(seatOf("pat", "b")).toMatchObject({ status: "INACTIVE", removedAt: expect.any(Date) });
     expect(user("pat")).toMatchObject({ organizationId: "a", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     expect(st.teammateEnds).toEqual([["b", ["pat"], "left", "u-admin"]]);
-    expect(st.relied).toEqual([]);
     expect(st.logs.find((l) => l.type === "user_removed")).toMatchObject({ metadata: { seat: "membership", outcome: "membership_ended", accountMoved: false } });
     // A reactivation of a removed seat is refused: a restore brings it back.
     const reactivate = await patch("pat", { status: "ACTIVE" });
@@ -239,7 +256,7 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(st.logs.find((l) => l.type === "user_restored")).toMatchObject({ metadata: { seat: "membership", accountMoved: false } });
   });
 
-  it("the record answers identity, role and status here, and nothing of their profile", async () => {
+  it("the record answers identity, role and status here, and nothing of A's profile", async () => {
     db.seed("department", { id: "dep-a", name: "A's Finance", organizationId: "a" });
     user("pat").departmentId = "dep-a";
     seatOf("pat", "b")!.status = "INACTIVE";
@@ -248,7 +265,10 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ id: "pat", email: "pat@x.test", isDeactivated: true, deletedAt: null, department: null, role: null, minimal: true, profileHere: false });
-    expect(body.access).toMatchObject({ editable: [], peopleData: false, remove: true, restore: false, profileHere: false });
+    expect(body.access).toMatchObject({ peopleData: false, remove: true, restore: false, profileHere: false });
+    // An Admin edits their profile here (step 5), never their shared identity.
+    expect(body.access.editable).toEqual(expect.arrayContaining(["roleId", "departmentId", "officeId", "managerId", "weeklyCapacityHours", "status"]));
+    for (const f of ["firstName", "lastName", "phone", "avatar", "dateOfBirth"]) expect(body.access.editable).not.toContain(f);
     expect(JSON.stringify(body)).not.toContain("Finance");
     // Nobody here at all: still a 404.
     person("ned", "a");
@@ -365,8 +385,7 @@ describe("someone anchored here (D3, D4)", () => {
     // Before: User.status INACTIVE and tokenVersion bumped, so Max lost C too.
     expect(user("max")).toMatchObject({ organizationId: "c", status: "ACTIVE", ...legacyLevelRow("EMPLOYEE"), tokenVersion: 0 });
     expect(seatOf("max", "b")).toMatchObject({ status: "INACTIVE", removedAt: null, role: "MANAGER" });
-    // C relies on his lines there: they are not moved (only an account that ends moves them).
-    expect(st.relied).toEqual([]);
+    // His lines in C are C's own rows (workspace-status-2 E1): untouched.
     expect(db.row("apiKey", "k-b").revokedAt).toBeInstanceOf(Date);
     // The answer is the seat here, not the account in C.
     expect(await res.json()).toMatchObject({ status: "INACTIVE", profileHere: false });
@@ -379,12 +398,13 @@ describe("someone anchored here (D3, D4)", () => {
     expect(user("max")).toMatchObject({ organizationId: "c", tokenVersion: 0 });
   });
 
-  it("with nowhere else, a deactivation ends the account as before, moving the relied lines and signing them out", async () => {
+  it("with nowhere else, a deactivation ends the account as before and signs them out, moving no line itself", async () => {
     person("solo", "b");
+    // A tab from before workspace-status-2 step 4 still sends handoverTo: ignored.
     const res = await patch("solo", { status: "INACTIVE", handoverTo: "olga" });
     expect(res.status).toBe(200);
     expect(user("solo")).toMatchObject({ organizationId: "b", status: "INACTIVE", deletedAt: null, tokenVersion: 1 });
-    expect(st.relied).toEqual([expect.objectContaining({ leaverId: "solo", recipientId: "olga", ends: "deactivated" })]);
+    expect(await res.json()).not.toHaveProperty("reportsAlsoElsewhere");
     expect(st.logs.find((l) => l.type === "membership.changed")).toMatchObject({ metadata: { seat: "anchor", outcome: "account_ended", accountMoved: false } });
     // And a reactivation brings it back, signed out still (no new bump), under the seat check.
     expect((await patch("solo", { status: "ACTIVE" })).status).toBe(200);
@@ -397,7 +417,6 @@ describe("someone anchored here (D3, D4)", () => {
     expect((await remove("max")).status).toBe(200);
     expect(user("max")).toMatchObject({ organizationId: "c", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     expect(seatOf("max", "b")).toMatchObject({ status: "INACTIVE", removedAt: expect.any(Date) });
-    expect(st.relied).toEqual([]);
     expect(st.logs.find((l) => l.type === "user_removed")).toMatchObject({ metadata: { outcome: "moved", accountMoved: true } });
     expect(st.logs.find((l) => l.type === "user_removed")?.metadata).not.toHaveProperty("movedTo");
     // Now he works in B through the membership the move left: B restores it.
@@ -408,9 +427,10 @@ describe("someone anchored here (D3, D4)", () => {
 
   it("a removal with nowhere else ends the account as before; the restore brings it back", async () => {
     person("solo", "b");
-    expect((await remove("solo")).status).toBe(200);
+    const gone = await remove("solo");
+    expect(gone.status).toBe(200);
     expect(user("solo")).toMatchObject({ status: "INACTIVE", deletedAt: expect.any(Date), tokenVersion: 1 });
-    expect(st.relied).toEqual([expect.objectContaining({ leaverId: "solo", ends: "removed" })]);
+    expect(await gone.json()).toEqual({ message: "Solo Lee has been removed" });
     expect((await restore("solo")).status).toBe(200);
     expect(user("solo")).toMatchObject({ status: "ACTIVE", deletedAt: null });
   });
@@ -577,8 +597,11 @@ describe("the record names what this workspace holds (the final review)", () => 
   it("a report who works here through a membership shows the title and department this workspace holds, never the account's (security M1)", async () => {
     placements();
     person("mo", "b", "MANAGER", { phone: null, dateOfBirth: null });
-    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
-    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b" });
+    // Pat reports to Mo HERE, by her membership's line (workspace-status-2
+    // E1); her account's line is A's, to Ann.
+    person("ann", "a", "MANAGER");
+    Object.assign(user("pat"), { managerId: "ann", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { managerId: "mo", departmentId: "dep-b", roleId: "role-b" });
     const body = await (await get("mo")).json();
     // Before: { role: { title: "A Senior Engineer" }, department: { name: "A Platform" } }, A's, to every Member of B.
     expect(body.directReports).toEqual([{ id: "pat", firstName: "Pat", lastName: "Lee", avatar: null, role: { id: "role-b", title: "B Contractor" }, department: { id: "dep-b", name: "B Delivery" } }]);
@@ -611,8 +634,11 @@ describe("the record names what this workspace holds (the final review)", () => 
     person("mo", "b", "MANAGER");
     person("ria", "b", "EMPLOYEE", { managerId: "pat" });
     person("abe", "a", "EMPLOYEE", { managerId: "pat" });
-    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
-    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b", officeId: "off-b", joinDate: new Date("2026-07-01T00:00:00Z") });
+    // Her line here is her membership's (workspace-status-2 E1), to Mo; her
+    // account's is A's, to Ann.
+    person("ann", "a", "MANAGER");
+    Object.assign(user("pat"), { managerId: "ann", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { managerId: "mo", departmentId: "dep-b", roleId: "role-b", officeId: "off-b", joinDate: new Date("2026-07-01T00:00:00Z") });
     for (const [id, organizationId] of [["ku-a", "a"], ["ku-b", "b"]]) db.seed("kudos", { id, message: `from ${organizationId}`, companyValue: null, giverId: "olga", receiverId: "pat", organizationId, createdAt: new Date() });
     const body = await (await get("pat")).json();
     expect(body).toMatchObject({
@@ -630,7 +656,7 @@ describe("the record names what this workspace holds (the final review)", () => 
     expect(body.access.peopleData).toBe(false);
     expect(JSON.stringify(body)).not.toMatch(/A Platform|A Senior Engineer|from a/);
     // A manager with no seat here is never named.
-    user("pat").managerId = "abe";
+    seatOf("pat", "b")!.managerId = "abe";
     expect((await (await get("pat")).json()).manager).toBeNull();
   });
 });

@@ -33,6 +33,7 @@ import {
   type AnnouncementPriority,
 } from "@/lib/announcement-view";
 import { inboxRecordOf, inboxRowEnabled } from "@/lib/inbox-notify-keys";
+import { placementHereOf } from "@/lib/access/profile-here";
 
 /**
  * The announcements feed (spec-talk.md section 2.3 Data).
@@ -123,10 +124,11 @@ export async function GET(req: NextRequest) {
     });
 
     // Audience and lifecycle, in that order, because both need the viewer.
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, departmentId: true, officeId: true },
-    });
+    // Their department and office at their seat here: the membership's for
+    // someone here through one (docs/plans/workspace-status-2.md E15, step 8),
+    // never the account's, which is another workspace's.
+    const placed = await placementHereOf(orgId, userId);
+    const me = placed ? { id: userId, departmentId: placed.departmentId, officeId: placed.officeId } : null;
     const needsTags = rows.some((r) => parseAnnouncementAudience(r.targetAudience).type === "TAGS");
     const needsSpaces = rows.some((r) => parseAnnouncementAudience(r.targetAudience).type === "SPACE");
     const [tagIds, spaceIds] = await Promise.all([

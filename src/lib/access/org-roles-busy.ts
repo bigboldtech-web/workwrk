@@ -24,6 +24,28 @@ export const LOCK_WAIT_MS = 3_000;
  */
 export const LOCKED_TX = { timeout: 10_000 } as const;
 
+/**
+ * The options for one transaction over a batch of people, each written under
+ * their own row lock (the bulk update's placement and manager changes,
+ * docs/plans/workspace-status-2.md, the step 5 review L5): the 20 seconds a
+ * move between workspaces is given (workspace-anchor.ts reanchorUser), and
+ * as long to start. A batch past it is rolled back whole and answered as
+ * "try again" (retryAnswer), never a 500.
+ */
+export const BATCH_TX = { timeout: 20_000, maxWait: 10_000 } as const;
+
+/**
+ * What a writer of people's departments or offices over a batch (the bulk
+ * Change department and Change office, a SCIM Group's member writes) is
+ * told when Postgres broke a deadlock: it takes no role lock and changes no
+ * line, so never "roles or reporting lines" (the final review of
+ * workspace-status-2, product L6). The same 503, code roles_busy.
+ */
+export const PEOPLE_BUSY = "Someone else is changing people in this workspace right now. Try again in a moment.";
+
+/** What a writer whose transaction ran out of its time is told (the same 503, code roles_busy). */
+export const TOOK_TOO_LONG = "That took too long, so nothing was saved. Try again in a moment.";
+
 /** The role lock was not free in time, or too many writers were already waiting. Nothing was written. */
 export class OrgRolesBusy extends Error {
   readonly code = "roles_busy";
@@ -47,11 +69,55 @@ export function isOrgRolesBusy(e: unknown): e is OrgRolesBusy {
   return name === "OrgRolesBusy" || name === "SeatsBusy";
 }
 
-/** A route's answer when a workspace lock was busy (OrgRolesBusy or SeatsBusy), or null for any other error. */
+/**
+ * A route's answer when a workspace lock was busy (OrgRolesBusy or
+ * SeatsBusy), or when Postgres ended the transaction to break a deadlock
+ * (40P01, isDeadlock), or null for any other error. A deadlock wrote
+ * nothing (the whole transaction is rolled back), so it is the same "try
+ * again" (docs/plans/workspace-status-2.md step 4, the step 1 review L5):
+ * with lines per workspace two line writes can cross workspaces (Pat's end
+ * in A takes Pat then Dana while Dana's in B takes Dana then Pat, under two
+ * different role locks), and that is never a 500.
+ */
 export function rolesBusyAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
-  if (!isOrgRolesBusy(e)) return null;
+  if (!isOrgRolesBusy(e)) return isDeadlock(e) ? { status: 503, error: ORG_ROLES_BUSY, code: "roles_busy", retryAfterSeconds: 2 } : null;
   const seats = (e as { name?: unknown }).name === "SeatsBusy";
   return { status: 503, error: seats ? SEATS_BUSY : ORG_ROLES_BUSY, code: "roles_busy", retryAfterSeconds: 2 };
+}
+
+/**
+ * Prisma ended an interactive transaction for its time limit, or could not
+ * start one in time (P2028: "Transaction already closed", "expired
+ * transaction", "Unable to start a transaction in the given time"), however
+ * it is wrapped. The transaction was rolled back whole: nothing was written.
+ */
+export function isTransactionTimeout(e: unknown, depth = 0): boolean {
+  if (!e || typeof e !== "object" || depth > 4) return false;
+  const o = e as { code?: unknown; message?: unknown; cause?: unknown };
+  if (o.code === "P2028") return true;
+  if (typeof o.message === "string" && /Transaction already closed|expired transaction|Unable to start a transaction in the given time/i.test(o.message)) return true;
+  return isTransactionTimeout(o.cause, depth + 1);
+}
+
+/**
+ * rolesBusyAnswer, and a transaction that ran out of its time
+ * (isTransactionTimeout): the same 503 "try again", for the writers over a
+ * batch of people (the bulk update, SCIM Groups: the step 5 review L5).
+ * Nothing was written in any of these. Null for any other error.
+ */
+export function retryAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
+  return rolesBusyAnswer(e) ?? (isTransactionTimeout(e) ? { status: 503, error: TOOK_TOO_LONG, code: "roles_busy", retryAfterSeconds: 2 } : null);
+}
+
+/**
+ * retryAnswer for a writer of placements, which takes no role lock (see
+ * PEOPLE_BUSY): a deadlock says PEOPLE_BUSY; a busy lock and a transaction
+ * past its time are answered as retryAnswer answers them. Null for any
+ * other error.
+ */
+export function placementRetryAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
+  if (!isOrgRolesBusy(e) && isDeadlock(e)) return { status: 503, error: PEOPLE_BUSY, code: "roles_busy", retryAfterSeconds: 2 };
+  return retryAnswer(e);
 }
 
 /** Postgres' "canceling statement due to lock timeout" (55P03), however the driver adapter wraps it. */

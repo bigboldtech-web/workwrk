@@ -50,12 +50,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
 
-  // Ownership check.
+  // Ownership check, in THIS workspace (docs/plans/workspace-status-2.md,
+  // the final review, security M1): a person's week in another workspace is
+  // that workspace's row, never written from here.
   const owner = await prisma.weeklyReview.findUnique({
     where: { id },
-    select: { userId: true, status: true, managerStatus: true, periodStart: true },
+    select: { userId: true, organizationId: true, status: true, managerStatus: true, periodStart: true },
   });
-  if (!owner || owner.userId !== u.id) {
+  if (!owner || owner.userId !== u.id || owner.organizationId !== u.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const refusal = weeklyEditRefusal(owner, parsed.data.action ?? "save");

@@ -5,6 +5,8 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requireP
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import { effectiveDirectReportIds } from "@/lib/access/manager-lines";
+import { standingHere } from "@/lib/access/seated-here";
+import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -174,7 +176,16 @@ export async function POST(req: NextRequest) {
   const user = await prisma.user.findFirst({
     where: { id: userId, organizationId: orgId },
   });
-  if (!user) return jsonError("User not found", 404);
+  if (!user) {
+    // Someone here through a membership is never given a KRA here
+    // (docs/plans/workspace-status-2.md, the step 5 review M1): a KRA
+    // assignment names no workspace, so it would show and count in the
+    // workspace their account is in. Said in words, not "User not found",
+    // since the pickers here offer them.
+    const seat = await standingHere(orgId, String(userId));
+    if (seat?.kind === "membership" && seat.kept) return jsonError(ALIGNMENT_NOT_HERE, 400);
+    return jsonError("User not found", 404);
+  }
 
   // Governance: managers may only assign KRAs to people in their own
   // report tree. Org-wide roles (admin / exec / HR) assign anywhere.
@@ -197,8 +208,10 @@ export async function POST(req: NextRequest) {
     // 100% (from role-seed defaults or legacy data) — they could never
     // save the very edit that rebalances them. We save and warn instead,
     // handing back the running total so the UI can nudge a trim.
+    // This workspace's weights only (docs/plans/workspace-status-2.md, the
+    // final review, product M5): another workspace's KRAs never count here.
     const otherAssignments = await prisma.kRAAssignment.findMany({
-      where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id } },
+      where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id }, kra: { organizationId: orgId } },
     });
     const othersTotal = otherAssignments.reduce((sum, a) => sum + a.weightage, 0);
     const weightTotal = othersTotal + weightage;
@@ -214,10 +227,11 @@ export async function POST(req: NextRequest) {
     return jsonSuccess({ ...assignment, ...weightSignal(weightTotal) });
   }
 
-  // Running total across the person's active KRAs after this add. Over
-  // 100 is warned, never blocked (see the update branch above).
+  // Running total across the person's active KRAs here after this add
+  // (this workspace's only, M5). Over 100 is warned, never blocked (see the
+  // update branch above).
   const existingAssignments = await prisma.kRAAssignment.findMany({
-    where: { userId, status: { not: "ARCHIVED" } },
+    where: { userId, status: { not: "ARCHIVED" }, kra: { organizationId: orgId } },
   });
   const currentTotal = existingAssignments.reduce((sum, a) => sum + a.weightage, 0);
   const weightTotal = currentTotal + weightage;

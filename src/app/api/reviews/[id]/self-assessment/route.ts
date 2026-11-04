@@ -55,18 +55,21 @@ export async function GET(
   });
   const avgKpiScore = agg._avg.score != null ? Math.round(agg._avg.score) : null;
 
-  // SOP compliance
+  // SOP compliance, this workspace's SOPs only (docs/plans/workspace-status-2.md,
+  // the final review, product M5), as the KPI records above and the KRAs below.
   const sopRecords = await prisma.sOPCompliance.findMany({
-    where: { userId, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
+    where: { userId, sop: { organizationId: orgId }, createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate } },
     select: { score: true },
     orderBy: { createdAt: "desc" },
   });
   const sopScores = sopRecords.filter((r) => r.score != null).map((r) => r.score!);
   const avgSopScore = sopScores.length > 0 ? Math.round(sopScores.reduce((a, b) => a + b, 0) / sopScores.length) : null;
 
-  // Get KRA assignments for the user
+  // Get KRA assignments for the user, this workspace's only (M5): an
+  // assignment names no workspace, and someone who joined another workspace
+  // by invitation holds its KRAs too.
   const kraAssignments = await prisma.kRAAssignment.findMany({
-    where: { userId, status: "ACTIVE" },
+    where: { userId, status: "ACTIVE", kra: { organizationId: orgId } },
     include: {
       kra: { select: { id: true, name: true, category: true, weight: true } },
     },
@@ -176,7 +179,8 @@ export async function PATCH(
     return jsonError("Nothing to save: this would empty your written draft. Your draft is unchanged.", 400);
   }
   if (submit) {
-    const kras = await prisma.kRAAssignment.findMany({ where: { userId, status: "ACTIVE" }, select: { kraId: true } });
+    // The KRAs the form showed: this workspace's only (M5, as GET reads them).
+    const kras = await prisma.kRAAssignment.findMany({ where: { userId, status: "ACTIVE", kra: { organizationId: getOrgId(session) } }, select: { kraId: true } });
     const gap = selfReviewGap(selfRatings, kras.map((k) => k.kraId));
     if (gap) return jsonError(gap, 400);
   }

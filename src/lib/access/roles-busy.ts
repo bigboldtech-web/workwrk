@@ -1,10 +1,12 @@
 // The answer every route gives when the workspace's role lock was busy
-// (membership.ts lockOrgRoles, OrgRolesBusy): 503 with code roles_busy, the
-// plain sentence, and Retry-After, never a timeout's bare 500. Nothing was
-// written, so trying again is always safe.
+// (membership.ts lockOrgRoles, OrgRolesBusy), or Postgres ended the
+// transaction to break a deadlock (40P01, workspace-status-2.md step 4): 503
+// with code roles_busy, the plain sentence, and Retry-After, never a
+// timeout's or a deadlock's bare 500. Nothing was written, so trying again
+// is always safe.
 
 import { NextResponse } from "next/server";
-import { rolesBusyAnswer } from "./org-roles-busy";
+import { placementRetryAnswer, retryAnswer, rolesBusyAnswer } from "./org-roles-busy";
 
 /** The 503 for an OrgRolesBusy, or null for any other error (the caller rethrows it). */
 export function rolesBusyResponse(e: unknown): NextResponse | null {
@@ -24,4 +26,32 @@ export function rolesBusyOrThrow(e: unknown): NextResponse {
   const busy = rolesBusyResponse(e);
   if (busy) return busy;
   throw e;
+}
+
+/**
+ * For `.catch()` on a transaction over a batch of people (the step 5 review
+ * L5): the 503 for a busy lock, a deadlock or a transaction that ran out of
+ * its time, each of which wrote nothing; any other error thrown on.
+ */
+export function retryOrThrow(e: unknown): NextResponse {
+  const busy = retryAnswer(e);
+  if (!busy) throw e;
+  return NextResponse.json(
+    { error: busy.error, code: busy.code },
+    { status: busy.status, headers: { "Retry-After": String(busy.retryAfterSeconds) } },
+  );
+}
+
+/**
+ * retryOrThrow for a batch of placement writes (the bulk Change department
+ * and Change office), whose deadlock is told PEOPLE_BUSY, never "roles or
+ * reporting lines" (the final review, product L6).
+ */
+export function placementRetryOrThrow(e: unknown): NextResponse {
+  const busy = placementRetryAnswer(e);
+  if (!busy) throw e;
+  return NextResponse.json(
+    { error: busy.error, code: busy.code },
+    { status: busy.status, headers: { "Retry-After": String(busy.retryAfterSeconds) } },
+  );
 }

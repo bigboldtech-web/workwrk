@@ -399,6 +399,40 @@ describe("Security > Provisioning", () => {
     expect(card).not.toContain('class="text-base text-ink"');
   });
 
+  // The final review of workspace-status-2, product H1: one switch on the
+  // existing card, a Settings row like the Data page's, off by default.
+  it("How provisioning works holds one switch, Let your identity provider set Reports to: off until turned on, with its one line, saved on its own", async () => {
+    const { IDP_REPORTS_TO_HINT, IDP_REPORTS_TO_LABEL } = await import("@/app/(dashboard)/settings/security/security-ui");
+    const { Switch } = await import("@/components/ui/switch");
+    state.query = "tab=provisioning";
+    state.sections = { security: "ready" };
+    state.body = { settings: { security: { minPasswordLength: 12 } } };
+    state.saved = [];
+    const off = sectionById(html(h(WorkspaceSecurityPage)), "security.scimRules");
+    expect(off.match(/role="switch"/g)).toHaveLength(1);
+    expect(off).not.toContain('type="checkbox"');
+    expect(off).toMatch(new RegExp(`role="switch" aria-checked="false" aria-label="${IDP_REPORTS_TO_LABEL}"`));
+    expect(IDP_REPORTS_TO_LABEL).toBe("Let your identity provider set Reports to");
+    // Its line says what turning it on does to people, shown.
+    expect(shown(off)).toContain(IDP_REPORTS_TO_HINT);
+    expect(IDP_REPORTS_TO_HINT).toMatch(/The managers it sends replace Reports to here each time it sends a person/);
+    expect(IDP_REPORTS_TO_HINT).toMatch(/Restarting provisioning in Microsoft Entra sends everyone again/);
+    expect(IDP_REPORTS_TO_HINT).not.toMatch(/-{2}|\u2014|\u2013/);
+    // The card's own words are as they were: the description and the rules under Show more.
+    expect(headerOf(off)).toContain("Removing someone there deactivates them here");
+    state.body = { settings: { security: { identityProviderSetsReportsTo: true } } };
+    expect(sectionById(html(h(WorkspaceSecurityPage)), "security.scimRules")).toMatch(/role="switch" aria-checked="true"/);
+    // A click saves the one key through the security section, nothing else.
+    state.body = { settings: {} };
+    const tab = pageBody(treeOf(WorkspaceSecurityPage, {} as never), "provisioning").find((e) => (e.type as { name?: string }).name === "ProvisioningTab")!;
+    const sw = elements(treeOf(tab.type as (p: unknown) => ReactNode, tab.props)).find((e) => e.type === Switch)!;
+    expect(sw.props["aria-label"]).toBe(IDP_REPORTS_TO_LABEL);
+    (sw.props.onChange as (v: boolean) => void)(true);
+    expect(state.saved).toEqual([{ identityProviderSetsReportsTo: true }]);
+    state.query = "";
+    state.sections = {};
+  });
+
   it("the SCIM endpoint says when its address could not be read, with Try again, and keeps Copy for the address it has", async () => {
     const { ScimEndpoint } = await import("@/app/(dashboard)/settings/security/security-ui");
     const failed = html(h(ScimEndpoint, { url: null, failed: true, onRetry: () => {}, onCopy: () => {} }));

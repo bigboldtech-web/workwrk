@@ -59,7 +59,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { managesNobody } from "@/lib/access/manager-lines";
-import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, reportsHereOf } from "@/lib/access/acting-workspace";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/calendar-event";
@@ -186,14 +187,18 @@ export async function GET(req: Request) {
     // Live reports of this workspace only (docs-found fixes batch 5):
     // anchored here or through a membership here, never removed, as the
     // tree below reads them. A removed report answered a Team pill the tree
-    // then refused, and a dotted line from any workspace did too.
-    // inWorkspaceWhere is safe here (batch 6): each read is narrowed by
-    // "User_managerId_idx" and "UserDottedLine_managerId_idx" first, so its
+    // then refused, and a dotted line from any workspace did too. The lines
+    // are this workspace's (docs/plans/workspace-status-2.md E1, E2, step
+    // 2): the solid ones whose line HERE names the viewer (reportsHereOf,
+    // both halves), the dotted ones this workspace's rows; before, Max had a
+    // Team pill in B through Pat's line in A, and Dana none through hers in
+    // B. inWorkspaceWhere is safe here (batch 6): the dotted read is
+    // narrowed by "UserDottedLine_organizationId_managerId_idx" first, so its
     // OR only filters the viewer's own reports.
     const [agent, direct, dotted] = await Promise.all([
       managesNobody(viewerId, orgId),
-      prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) }, select: { id: true } }),
-      prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } }),
+      reportsHereOf(orgId, [viewerId]).then((rows) => rows.some((r) => r.id !== viewerId)),
+      prisma.userDottedLine.findFirst({ where: { organizationId: orgId, managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } }),
     ]);
     hasTeam = !agent && Boolean(direct || dotted);
   }
@@ -517,10 +522,14 @@ export async function GET(req: Request) {
   const people: Array<{ id: string; name: string; avatar: string | null }> = [];
   const loggedByPersonDay: Record<string, Record<string, number>> = {};
   if (calendar === "team") {
-    const users = await prisma.user.findMany({
-      where: { id: { in: personIds }, organizationId: orgId },
-      select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
-    });
+    // A row for everyone on the team who holds a seat here, of either kind,
+    // read at the seat (seated-here.ts; kept seats, as the tree walks them),
+    // in the tree's order. Before (found by the live proof of
+    // docs/plans/workspace-status-2.md, step 9), the rows were the people
+    // anchored here only, so Dana's Team calendar in B had no row for Pat,
+    // who works in B through a membership, though the tree held her.
+    const here = await peopleHereAmong(orgId, personIds, "kept");
+    const users = personIds.map((id) => here.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
     for (const p of users) {
       people.push({
         id: p.id,

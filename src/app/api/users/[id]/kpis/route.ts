@@ -29,9 +29,12 @@ export async function GET(
   });
   if (!user) return jsonError("User not found", 404);
 
-  // Get all KRA assignments for this user
+  // Get all KRA assignments for this user, this workspace's only
+  // (docs/plans/workspace-status-2.md, the final review, product M5): an
+  // assignment names no workspace, and someone who joined another
+  // workspace by invitation holds its KRAs too.
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId, status: "ACTIVE" },
+    where: { userId, status: "ACTIVE", kra: { organizationId: orgId } },
     include: {
       kra: {
         include: {

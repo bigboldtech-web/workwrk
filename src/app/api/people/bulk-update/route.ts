@@ -1,9 +1,23 @@
 // POST /api/people/bulk-update { userIds, action, payload }: every Directory
 // bulk action is ONE request for the whole selection (spec-teams-people
 // /people, CG-12). Returns { updated, skipped, skippedElsewhere } for the one
-// toast: skippedElsewhere of the skipped work here through a membership,
-// whose details here are read-only for now (docs/plans/workspace-status.md
-// D11, the final review, product L5).
+// toast.
+//
+// EVERYONE WHO WORKS HERE (docs/plans/workspace-status-2.md E7, E10, step 5).
+// The selection is read at the seat each person holds here, not removed:
+// someone anchored here, and someone here through a membership. Change
+// department, change office and change manager write THIS workspace's
+// values on the row that holds the seat (seat-writes.ts writeProfileHere and
+// writeLineHere: the account for someone anchored here, the membership for
+// someone here through one), each under the person's row lock, in id order;
+// a row that no longer holds the seat writes nothing and the person is
+// skipped. Add tag tags them here (a tag assignment is this workspace's
+// row). Assign KRA and assign SOP stay with the people anchored here: a
+// membership person's KRAs and SOPs here are a known limit of the plan, and
+// the notice they send carries no workspace. Before step 5 everyone here
+// through a membership was skipped, counted apart as `skippedElsewhere`
+// (the final review of workspace-status.md, product L5); it is 0 from now
+// on, kept in the answer for one release.
 //
 // Scope, per person: a selected id the caller may not edit (outside their
 // chain, for a manager) is SKIPPED and counted, never written and never an
@@ -31,8 +45,10 @@ import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
-import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
-import { keptSeatWhere } from "@/lib/access/workspace-seat";
+import { holdsOnAccount, seatRefOf, writeLineHere, writeProfileHere, type ProfilePatch, type SeatRef } from "@/lib/access/seat-writes";
+import { placementRetryOrThrow, retryOrThrow } from "@/lib/access/roles-busy";
+import { membershipHereWhere } from "@/lib/access/seated-here";
+import { BATCH_TX } from "@/lib/access/org-roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
 
@@ -55,21 +71,47 @@ export async function POST(req: NextRequest) {
   if (userIds.length > 2000) return err(400, "Up to 2,000 people at a time");
   if (!action) return err(400, "action is required");
 
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds }, organizationId: orgId, deletedAt: null },
-    select: { id: true },
-  });
+  // The seat each selected person holds here, not removed, in two indexed
+  // halves (E7, step 5): people anchored here by their account, people here
+  // through a membership by their membership here (the anchored workspace's
+  // own stale row never counts). Each with the workspace its account was
+  // anchored in when read, so a write lands on that seat's row or nowhere.
+  const [anchored, members] = await Promise.all([
+    prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null }, select: { id: true, organizationId: true } }),
+    prisma.organizationMembership.findMany({ where: membershipHereWhere(orgId, "kept", { id: { in: userIds } }), select: { userId: true, user: { select: { organizationId: true } } } }),
+  ]);
+  const seatOf = new Map<string, SeatRef>();
+  for (const u of anchored) seatOf.set(u.id, seatRefOf(orgId, u));
+  for (const m of members) if (!seatOf.has(m.userId)) seatOf.set(m.userId, seatRefOf(orgId, { id: m.userId, organizationId: m.user.organizationId }));
   // Only the people this caller may edit: everyone for the People team and
-  // Admins, the chain for a manager. Self is skipped for placement moves.
-  const allowed = users
-    .map((u) => u.id)
+  // Admins, the chain here for a manager (relationTo reads this workspace's
+  // tree). Self is skipped for placement moves.
+  const allowed = [...seatOf.keys()]
+    .sort()
     .filter((id) => canWritePersonGroup("placement", relationTo(ctx, id), { managerTierSelf: false, chainWritesMembership: !accessV2Resolver() }) && id !== ctx.userId);
   const skipped = userIds.length - allowed.length;
-  // Of the skipped, the people here through a membership (product L5): said apart in the toast.
-  const anchoredHere = new Set(users.map((u) => u.id));
-  const notAnchored = [...new Set(userIds)].filter((id) => !anchoredHere.has(id));
-  const skippedElsewhere = notAnchored.length ? await prisma.organizationMembership.count({ where: { organizationId: orgId, userId: { in: notAnchored }, ...keptSeatWhere() } }) : 0;
+  // Nobody is skipped for working here through a membership any more (step
+  // 5): 0, kept in the answer for one release (a tab from before reads it).
+  const skippedElsewhere = 0;
   if (allowed.length === 0) return NextResponse.json({ updated: 0, skipped, skippedElsewhere, message: "Nobody in that selection is yours to change." });
+
+  /**
+   * One profile write for each allowed person, in id order, each on the row
+   * that holds their seat as read and under their row lock
+   * (writeProfileHere): the ids written. A person whose seat changed
+   * between the read and the write (a switch, a removal) writes nothing.
+   * A deadlock Postgres broke, or a batch past its 20 seconds (BATCH_TX),
+   * wrote nothing: the 503 "try again", never a 500 (the step 5 review L5).
+   */
+  const placeEach = async (patch: ProfilePatch): Promise<string[] | NextResponse> =>
+    prisma
+      .$transaction(async (tx) => {
+        const done: string[] = [];
+        for (const id of allowed) if (await writeProfileHere(tx, seatOf.get(id)!, patch)) done.push(id);
+        return done;
+        // A deadlock here is "someone else is changing people", never "roles or reporting lines" (the final review, product L6).
+      }, BATCH_TX)
+      .catch(placementRetryOrThrow);
 
   let description = "";
   let updated = allowed.length;
@@ -80,8 +122,9 @@ export async function POST(req: NextRequest) {
       if (!departmentId) return err(400, "departmentId is required");
       const dept = await prisma.department.findFirst({ where: { id: departmentId, organizationId: orgId }, select: { name: true } });
       if (!dept) return err(400, "That department isn't in this workspace");
-      const r = await prisma.user.updateMany({ where: { id: { in: allowed } }, data: { departmentId } });
-      updated = r.count;
+      const placed = await placeEach({ departmentId });
+      if (placed instanceof NextResponse) return placed;
+      updated = placed.length;
       description = `Moved ${updated} ${updated === 1 ? "person" : "people"} to ${dept.name}`;
       break;
     }
@@ -110,15 +153,27 @@ export async function POST(req: NextRequest) {
         // invariant 13), and the loop check runs again under the lock
         // against the line above the manager as it stands now, so two
         // crossing edits can never make a loop (docs-found fixes batch 4).
+        // Each person's line is THIS workspace's (workspace-status-2.md E1,
+        // step 4), written by seat-writes.ts writeLineHere under their row
+        // lock, in id order, on the row that holds their seat as read: the
+        // account for someone anchored here, the membership for someone here
+        // through one (step 5). Before, one updateMany wrote the account's
+        // line with no workspace and no lock, so someone who switched to their
+        // other workspace between the read and this write had that
+        // workspace's line overwritten. Now their write lands nowhere and
+        // they are skipped, as anyone who left the selection is.
         const outcome = await prisma.$transaction(async (tx) => {
           await lockOrgRoles(tx, orgId);
           const again = await managerCandidateIn(orgId, managerId, { db: tx, live: true });
           if (again !== "ok") return { refused: again };
           const above = await lineAbove(orgId, managerId, tx);
-          const go = ok.filter((id) => !above.has(id));
-          if (go.length) await tx.user.updateMany({ where: { id: { in: go } }, data: { managerId } });
-          return { moved: go };
-        }).catch(rolesBusyOrThrow);
+          const moved: string[] = [];
+          for (const id of ok.filter((x) => !above.has(x)).sort()) {
+            if (await writeLineHere(tx, seatOf.get(id)!, managerId)) moved.push(id);
+          }
+          return { moved };
+          // One transaction over the batch: 20 seconds, and a timeout is the 503 "try again" (the step 5 review L5).
+        }, BATCH_TX).catch(retryOrThrow);
         if (outcome instanceof NextResponse) return outcome;
         if ("refused" in outcome) {
           if (outcome.refused === "agent_cannot_manage") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
@@ -140,12 +195,14 @@ export async function POST(req: NextRequest) {
       if (officeId) {
         const office = await prisma.office.findFirst({ where: { id: officeId, organizationId: orgId }, select: { id: true, name: true } });
         if (!office) return err(404, "Office not found");
-        const r = await prisma.user.updateMany({ where: { id: { in: allowed } }, data: { officeId: office.id } });
-        updated = r.count;
+        const placed = await placeEach({ officeId: office.id });
+        if (placed instanceof NextResponse) return placed;
+        updated = placed.length;
         description = `Assigned ${updated} people to office "${office.name}"`;
       } else {
-        const r = await prisma.user.updateMany({ where: { id: { in: allowed } }, data: { officeId: null } });
-        updated = r.count;
+        const placed = await placeEach({ officeId: null });
+        if (placed instanceof NextResponse) return placed;
+        updated = placed.length;
         description = `Removed office assignment from ${updated} people`;
       }
       break;
@@ -165,6 +222,11 @@ export async function POST(req: NextRequest) {
     }
 
     case "assign_kra": {
+      // The people anchored here only (see the header): a membership
+      // person's KRAs here are a known limit, and the notice carries no
+      // workspace. Counted as skipped.
+      const anchoredOnly = allowed.filter((id) => holdsOnAccount(seatOf.get(id)!));
+      updated = anchoredOnly.length;
       const raw: KraEntry[] = Array.isArray(payload.kraEntries)
         ? (payload.kraEntries as KraEntry[])
         : payload.kraId ? [{ kraId: payload.kraId, weightage: payload.weightage }] : [];
@@ -174,7 +236,7 @@ export async function POST(req: NextRequest) {
       if (entries.length === 0) return err(400, "At least one KRA is required");
       const kraIds = [...new Set(entries.map((e) => e.kraId))];
       const [existingAll, kraInfos] = await Promise.all([
-        prisma.kRAAssignment.findMany({ where: { userId: { in: allowed }, kraId: { in: kraIds } }, select: { userId: true, kraId: true } }),
+        prisma.kRAAssignment.findMany({ where: { userId: { in: anchoredOnly }, kraId: { in: kraIds } }, select: { userId: true, kraId: true } }),
         prisma.kRA.findMany({ where: { id: { in: kraIds }, organizationId: orgId }, select: { id: true, name: true } }),
       ]);
       if (kraInfos.length !== kraIds.length) return err(400, "A KRA in that list isn't in this workspace");
@@ -184,7 +246,7 @@ export async function POST(req: NextRequest) {
       const rows: { userId: string; kraId: string; weightage: number; period: string; status: "ACTIVE" }[] = [];
       const notes: { userId: string; type: string; title: string; message: string; link: string }[] = [];
       for (const e of entries) {
-        for (const userId of allowed) {
+        for (const userId of anchoredOnly) {
           if (taken.has(`${userId}:${e.kraId}`)) continue;
           rows.push({ userId, kraId: e.kraId, weightage: e.weightage, period, status: "ACTIVE" });
           notes.push({
@@ -211,8 +273,11 @@ export async function POST(req: NextRequest) {
       if (!sop) return err(404, "SOP not found");
       const content = sop.content as { steps?: unknown[] } | null;
       const stepsTotal = Array.isArray(content?.steps) ? content.steps.length : 0;
+      // The people anchored here only, as assign_kra (see the header).
+      const anchoredOnly = allowed.filter((id) => holdsOnAccount(seatOf.get(id)!));
+      updated = anchoredOnly.length;
       await prisma.sOPAssignment.createMany({
-        data: allowed.map((userId) => ({
+        data: anchoredOnly.map((userId) => ({
           sopId,
           userId,
           assignedBy: ctx.userId,

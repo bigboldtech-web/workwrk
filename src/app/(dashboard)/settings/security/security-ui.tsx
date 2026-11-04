@@ -49,6 +49,18 @@ export const PROVISIONING_MORE = [
   "The last Owner is never removed that way.",
 ] as const;
 
+/**
+ * How provisioning works' one switch (docs/plans/workspace-status-2.md, the
+ * final review, product H1), off unless an Admin turns it on: whether the
+ * identity provider's manager sets Reports to here. Its line says what
+ * turning it on does to people, shown, as the Data page's switches say
+ * theirs: the provider's manager replaces an edit made here at its next
+ * push of each person, and an Entra restart pushes everyone.
+ */
+export const IDP_REPORTS_TO_LABEL = "Let your identity provider set Reports to";
+export const IDP_REPORTS_TO_HINT =
+  "The managers it sends replace Reports to here each time it sends a person. Restarting provisioning in Microsoft Entra sends everyone again.";
+
 /** Single sign-on, under Show upcoming features: the Passwords card's last line. */
 export const SSO_UPCOMING = "Coming soon: single sign-on with SAML and OIDC, once logging in with it is verified end to end.";
 

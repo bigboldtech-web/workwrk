@@ -56,7 +56,7 @@ import { appAudienceAllows } from "@/lib/nav/app-audience";
 import { assetGlyph } from "@/app/(dashboard)/assets/asset-glyph";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ratingLabel } from "@/lib/people/skills-aggregate";
-import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
+import { SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
 import { seniorityLabel } from "@/lib/people/seniority";
 import { describeSchedule } from "@/lib/work-schedule";
 import { fitTabs } from "@/lib/people/fit-tabs";
@@ -66,7 +66,6 @@ import { useMayAssignGoalOwner } from "@/components/okrs/create-goal-modal";
 import { PersonAvatar, ToneChip, personName, type PickPerson } from "./person-bits";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
 import { EditDetailsDialog } from "./edit-details-dialog";
-import { dottedElsewhereWords } from "@/lib/people/named-here";
 import { RemovePersonDialog } from "./remove-person-dialog";
 import { RecordAccessDialog } from "./record-access-dialog";
 import { WorkingOnSection } from "./working-on-section";
@@ -78,6 +77,15 @@ import { goalChip, repeatingDueText } from "@/lib/goals/goal-form";
 interface Access {
   relation: string;
   peopleData: boolean;
+  /**
+   * The profile this workspace holds of them (weekly hours, working week,
+   * profile fields) is on the record: with the rest of their people data, or
+   * on its own for someone here through a membership, whose phone, birthday,
+   * KPIs, reviews and skills are not this workspace's
+   * (docs/plans/workspace-status-2.md E8, step 5). Absent from a server
+   * before step 5: peopleData decides then.
+   */
+  profileData?: boolean;
   editable: string[];
   remove: boolean;
   restore: boolean;
@@ -113,11 +121,7 @@ interface Person {
   department: { id: string; name: string } | null;
   office: { id: string; name: string; city: string | null } | null;
   manager: PickPerson | null;
-  /** Reports to someone in another workspace they work in, never named here (batch 7). */
-  managerElsewhere?: boolean;
   dottedManagers: PickPerson[];
-  /** Dotted lines kept for another workspace they work in, counted, never named (batch 7). */
-  dottedElsewhere?: number;
   directReports: Array<PickPerson & { role: { id: string; title: string } | null; department: { id: string; name: string } | null }>;
   presenceStatus: string | null; presenceUntil: string | null;
   skills: Skill[];
@@ -125,7 +129,7 @@ interface Person {
   kudosReceived: KudosRow[];
   access: Access;
   minimal?: boolean;
-  /** False for someone who works here through a membership: their details here are read-only (PROFILE_ELSEWHERE). */
+  /** False for someone who works here through a membership: their name, phone, photo and birthday are the account's (SHARED_IDENTITY_REFUSAL). */
   profileHere?: boolean;
   phone?: string | null;
   dateOfBirth?: string | null;
@@ -637,6 +641,30 @@ function EditShortcut({ enabled, onOpen }: { enabled: boolean; onOpen: () => voi
 
 /* ─────────────────────────── record card ─────────────────────────── */
 
+/**
+ * Whether the Overview tab lists their open work (Working on): for the
+ * people who read this workspace's profile of them, never on your own
+ * record (that is My Work) or an ended one. For someone here through a
+ * membership that is `profileData`, the rule GET /api/team/person-work
+ * serves by (docs/plans/workspace-status-2.md, the final review, product
+ * M1): My team's "+N" on their row lands here, and their work here is this
+ * workspace's own tasks. Pure; tested.
+ */
+export function workingOnShown(person: { id: string; deletedAt: string | null; access: Pick<Access, "relation" | "peopleData" | "profileData"> }): boolean {
+  return (person.access.profileData ?? person.access.peopleData) && person.access.relation !== "self" && !person.deletedAt;
+}
+
+/**
+ * Whether the record says their name, sign-in address, phone, photo and
+ * birthday are shared with another workspace: only to a viewer who could
+ * edit something of theirs here (the final review, product L2), since it
+ * refuses an edit, and a colleague who can change nothing has nothing to be
+ * refused. Never to the person themselves. Pure; tested.
+ */
+export function sharedIdentityShown(person: { profileHere?: boolean; access: Pick<Access, "relation" | "editable"> }): boolean {
+  return person.profileHere === false && person.access.relation !== "self" && person.access.editable.length > 0;
+}
+
 /** Fields beyond the personal ones (names, phone, date of birth). */
 const PLACEMENT_FIELDS = ["roleId", "departmentId", "officeId", "managerId", "weeklyCapacityHours", "workSchedule", "customFields"];
 
@@ -646,6 +674,8 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
   // An Owner, Admin or manager-tier person holds their own placement writes
   // (yesterday's rule), so the "ask your manager" caption would be wrong.
   const selfPlacement = self && person.access.editable.some((f) => PLACEMENT_FIELDS.includes(f));
+  // The profile this workspace holds (weekly hours, working week, profile fields), E8.
+  const profileData = person.access.profileData ?? person.access.peopleData;
   const birthday = person.dateOfBirth
     ? person.dateOfBirth.startsWith("--")
       ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`2000-${person.dateOfBirth.slice(2)}T12:00:00Z`))
@@ -664,19 +694,14 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
         <RecordRow label="Reports to">
           {person.manager ? (
             <PersonLink person={person.manager} />
-          ) : person.managerElsewhere ? (
-            // A line another workspace counts (batch 7): said, never named, so
-            // nobody here takes it for an empty one.
-            <span className="text-ink-2">Someone in another workspace</span>
           ) : (
             <span className="text-ink-3">Nobody</span>
           )}
         </RecordRow>
-        {person.dottedManagers.length > 0 || (person.dottedElsewhere ?? 0) > 0 ? (
+        {person.dottedManagers.length > 0 ? (
           <RecordRow label="Dotted-line managers">
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
               {person.dottedManagers.map((m) => <PersonLink key={m.id} person={m} />)}
-              {(person.dottedElsewhere ?? 0) > 0 ? <span className="text-ink-2">{dottedElsewhereWords(person.dottedElsewhere ?? 0, person.dottedManagers.length > 0)}</span> : null}
             </span>
           </RecordRow>
         ) : null}
@@ -686,7 +711,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
         {person.access.peopleData && person.phone ? <RecordRow label="Phone">{person.phone}</RecordRow> : null}
         {person.access.peopleData && birthday ? <RecordRow label="Date of birth">{birthday}</RecordRow> : null}
         <RecordRow label="Joined">{formatDate(person.joinDate, datePrefs, "date")}</RecordRow>
-        {person.access.peopleData ? (
+        {profileData ? (
           <RecordRow label="Weekly capacity">
             {person.weeklyCapacityHours != null ? (
               `${person.weeklyCapacityHours}h`
@@ -698,7 +723,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
             )}
           </RecordRow>
         ) : null}
-        {person.access.peopleData && (person.workSchedule || person.orgSchedule) ? (
+        {profileData && (person.workSchedule || person.orgSchedule) ? (
           <RecordRow label="Work schedule">
             {person.workSchedule ? (
               describeSchedule(person.workSchedule)
@@ -707,7 +732,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
             )}
           </RecordRow>
         ) : null}
-        {person.access.peopleData
+        {profileData
           ? (person.profileFields ?? [])
               .filter((f) => f.value || person.access.editable.includes("customFields"))
               .map((f) => (
@@ -716,13 +741,14 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
                 </RecordRow>
               ))
           : null}
-        {person.access.peopleData ? (
+        {/* This workspace's tags, with the profile it holds of them: someone here through a membership too, so a tag the bulk bar put on can be taken off (the step 5 review L3). */}
+        {profileData ? (
           <RecordRow label="Tags"><TagPicker entityType="USER" entityId={person.id} canEdit={person.access.tags} /></RecordRow>
         ) : null}
       </dl>
-      {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3). */}
-      {person.profileHere === false ? <p className="pb-1 pt-2 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}
-      {self && !selfPlacement && person.profileHere !== false ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
+      {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3): since workspace-status-2 step 5 (E8) only their name, phone, photo and birthday are not this workspace's. */}
+      {sharedIdentityShown(person) ? <p className="pb-1 pt-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}
+      {self && !selfPlacement ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
       {self && selfPlacement && onEditPlacement ? (
         <p className="pb-1 pt-2 text-sm text-ink-2">
           You can change your own placement.{" "}
@@ -784,7 +810,7 @@ function OverviewTab({ person }: { person: Person }) {
       </Section>
       {/* The people who manage this person see what they are working on
           (My team's "+2" lands here). Not on your own record: that is My Work. */}
-      {person.access.peopleData && person.access.relation !== "self" && !person.deletedAt ? <WorkingOnSection userId={person.id} /> : null}
+      {workingOnShown(person) ? <WorkingOnSection userId={person.id} /> : null}
       {person.access.peopleData && person.score ? (
         <Section title="Score">
           <div className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-4">

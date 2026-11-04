@@ -134,7 +134,7 @@ describe(`prisma/sql/${FILE}`, () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
     // Then only a person's status in each workspace (docs/plans/workspace-status.md).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-recurring-goals-kpi-identity.sql", "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql"]);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-10-27-recurring-goals-kpi-identity.sql", "2026-10-27-item-completions.sql", "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Recurring goals, step 1 .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });

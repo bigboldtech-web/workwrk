@@ -1,8 +1,11 @@
-// POST /api/people/bulk-update says how many of the skipped work here
-// through a membership (docs/plans/workspace-status.md, the final review,
-// product L5): their details here are read-only for now, so Members' toast
-// says why they were skipped, apart from the people not the caller's to
-// change. Run on the in-memory database.
+// POST /api/people/bulk-update and the people it skips. The final review of
+// docs/plans/workspace-status.md (product L5) counted the people here
+// through a membership apart, as `skippedElsewhere`, because their details
+// here were read-only. Since docs/plans/workspace-status-2.md step 5 (E7,
+// E10) the bulk placement changes reach them, on their membership here, so
+// only the people not the caller's to change are skipped, and
+// `skippedElsewhere` is 0 (kept in the answer for one release). Run on the
+// in-memory database.
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,13 +38,22 @@ beforeEach(() => {
   db.seed("organizationMembership", { id: "m-pat-b", userId: "pat", organizationId: "b" });
 });
 
-describe("bulk Change department and the people it skips (product L5)", () => {
-  it("moves the people anchored here and counts the membership people it skipped, apart", async () => {
+describe("bulk Change department and the people it skips (product L5, workspace-status-2 step 5)", () => {
+  it("moves the people anchored here and the people here through a membership, each on their own row here, and skips only the caller", async () => {
     const res = await move(["bea", "pat", "u-admin"]);
     const body = await res.json();
-    // Before: { skipped: 2 } and no reason, so Members said "1 moved".
-    expect(body).toMatchObject({ updated: 1, skipped: 2, skippedElsewhere: 1 });
+    // Before step 5: { updated: 1, skipped: 2, skippedElsewhere: 1 }, Pat skipped.
+    expect(body).toMatchObject({ updated: 2, skipped: 1, skippedElsewhere: 0 });
     expect(db.row("user", "bea").departmentId).toBe("dep-b");
+    // Pat's B department is on her B membership; her account (A's) is untouched.
+    expect(db.row("organizationMembership", "m-pat-b").departmentId).toBe("dep-b");
     expect(db.row("user", "pat").departmentId).toBeNull();
+  });
+
+  it("skips someone this workspace removed through their membership, writing nothing", async () => {
+    db.row("organizationMembership", "m-pat-b").removedAt = new Date("2026-10-01");
+    const body = await (await move(["bea", "pat"])).json();
+    expect(body).toMatchObject({ updated: 1, skipped: 1, skippedElsewhere: 0 });
+    expect(db.row("organizationMembership", "m-pat-b").departmentId ?? null).toBeNull();
   });
 });

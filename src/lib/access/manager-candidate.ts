@@ -14,18 +14,27 @@
 // (docs-found fixes batch 5). "Removed" is a removed account (deletedAt) or
 // someone who holds no level here.
 //
-// A restore or a reactivation clears only lines this workspace owns
-// (batch 6): User.managerId and UserDottedLine are one row each, read by
-// every workspace the person belongs to, so a line to someone who holds no
-// level here but works with the person in another workspace is that
-// workspace's, and is kept (staleLinesOf).
+// THE SEAT HERE (docs/plans/workspace-status-2.md E4, E5, step 2): a
+// manager's state and a line's next step are read at the seat each person
+// holds here (seatsHeldFor). "Deactivated" is the seat's, so Rita, whom B
+// deactivated through her membership, is refused in B as deactivated, never
+// as "not in this workspace"; and the loop walk (lineAbove) climbs THIS
+// workspace's lines, the account's line where someone is anchored here and
+// the membership's otherwise, so B's loop check never reads A's lines.
+//
+// A restore or a reactivation checks the person's lines HERE (E4, step 4):
+// the line their seat here holds and this workspace's dotted rows, each
+// against the manager's seat here. Since E1 and E2 every line is one
+// workspace's, so a line of another workspace is never read here, never
+// kept for it and never cleared by it (staleLinesOf).
 //
 // Server-only (prisma), with no request imports.
 
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, lineStandingsElsewhere } from "./acting-workspace";
+import { levelsHeldIn, personSeatIn, seatsHeldFor, type HeldSeat } from "./acting-workspace";
+import { ENDED_STATUS } from "./workspace-seat";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -38,6 +47,12 @@ export type ManagerCandidate = "ok" | "not_found" | "agent_cannot_manage" | "ina
  * `live` also refuses a deactivated person ("inactive"): someone joining or
  * coming back never lands under a manager who has left, and a deactivated
  * person holds no reports (invariant 13, pendingHandover).
+ *
+ * At the seat here (E4): a seat this workspace removed, or none, is
+ * "not_found"; a seat it deactivated, through a membership as when anchored
+ * here, or an account ended where it is anchored, is "inactive". Before, a
+ * manager deactivated here through a membership read as "not in this
+ * workspace", since only their account's status was read.
  */
 export async function managerCandidateIn(
   organizationId: string,
@@ -45,13 +60,13 @@ export async function managerCandidateIn(
   opts: { db?: Db; live?: boolean } = {},
 ): Promise<ManagerCandidate> {
   const db = opts.db ?? prisma;
-  const m = await db.user.findFirst({ where: { id: managerId, deletedAt: null }, select: { organizationId: true, accessLevel: true, status: true } });
+  const m = await db.user.findFirst({ where: { id: managerId, deletedAt: null }, select: { organizationId: true, accessLevel: true, status: true, managerId: true } });
   // In this workspace at the tier held here: a manager who switched to
   // another workspace still manages their people here (batch 5).
-  const level = m ? await levelHeldIn(managerId, organizationId, m, db) : null;
-  if (!m || level === null) return "not_found";
-  if (isAgentOf(level)) return "agent_cannot_manage";
-  if (opts.live && m.status === "INACTIVE") return "inactive";
+  const seat = m ? (await seatsHeldFor(organizationId, [{ ...m, id: managerId }], db)).get(managerId) : undefined;
+  if (!m || !seat) return "not_found";
+  if (isAgentOf(seat.level)) return "agent_cannot_manage";
+  if (opts.live && (seat.deactivated || m.status === "INACTIVE")) return "inactive";
   return "ok";
 }
 
@@ -76,21 +91,32 @@ const LOOP_WALK_CAP = 64;
  * `managerId` and everyone above them on the solid line, as the lines stand
  * in `db` now: one small read per step, inside the caller's transaction.
  * Making anyone in this set report to `managerId` would close a loop.
+ *
+ * THIS WORKSPACE'S LINES (E5): each step reads the line the person's seat
+ * here holds (seatsHeldFor), so the locked check walks exactly the graph
+ * the check before the lock walks (person-access.server.ts managerMapFor,
+ * acting-workspace.ts workspacePeopleLines): the account's line for someone
+ * anchored here, the membership's for anyone else. Before, it climbed the
+ * account's line, which for a membership person is another workspace's: a
+ * B edit was refused as a loop through Pat's A line, and a loop through her
+ * B line went unseen.
  */
 export async function lineAbove(organizationId: string, managerId: string, db: Db = prisma): Promise<Set<string>> {
   const seen = new Set<string>();
   let cursor: string | null = managerId;
   while (cursor && !seen.has(cursor) && seen.size < LOOP_WALK_CAP) {
     seen.add(cursor);
-    const row: { managerId: string | null; organizationId: string; accessLevel: AccessLevel } | null = await db.user.findFirst({
-      where: { id: cursor, deletedAt: null },
-      select: { managerId: true, organizationId: true, accessLevel: true },
+    const id: string = cursor;
+    const row: { managerId: string | null; organizationId: string; accessLevel: AccessLevel; status: string } | null = await db.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { managerId: true, organizationId: true, accessLevel: true, status: true },
     });
-    // The line goes on through anyone who holds a level here (batch 5), and
+    // The line goes on through anyone who holds a seat here (batch 5), and
     // stops where it leaves the workspace. Through someone deactivated here
     // too, by their membership as when anchored here (kept seats, step 1
     // review M2): a loop through them is still a loop.
-    cursor = row && (await levelHeldIn(cursor, organizationId, row, db, { keptSeats: true })) !== null ? row.managerId : null;
+    const seat: HeldSeat | undefined = row ? (await seatsHeldFor(organizationId, [{ ...row, id }], db)).get(id) : undefined;
+    cursor = seat ? seat.managerId : null;
   }
   return seen;
 }
@@ -108,10 +134,9 @@ export async function wouldLoopIn(organizationId: string, subjectId: string, man
 }
 
 /**
- * Why a stored reporting line no longer holds: the manager's account was
- * removed, they are deactivated, they hold the Agent tier here, or
- * ("elsewhere", batch 6) they hold no level here nor in any other workspace
- * the person works in, so no workspace reads the line.
+ * Why a stored reporting line here no longer holds (E4): the manager's seat
+ * here was removed, they are deactivated here, they hold the Agent tier
+ * here, or ("elsewhere") they hold no seat here at all.
  */
 export type StaleLineReason = "agent" | "removed" | "inactive" | "elsewhere";
 
@@ -119,7 +144,7 @@ export interface StaleLine {
   managerId: string;
   /**
    * The manager's name, for the log; null when nothing is left to name, and
-   * always null for "elsewhere": someone who holds no level here is never
+   * always null for "elsewhere": someone who holds no seat here is never
    * named here (batch 7).
    */
   name: string | null;
@@ -127,86 +152,78 @@ export interface StaleLine {
 }
 
 /**
- * The reporting lines a person would come back with that no longer hold
- * (DELETE /api/users/[id]?restore=true). Removal keeps a person's lines, and
- * while they were gone their manager may have moved to the Agent tier, been
- * deactivated or left: rule 6 never counted them, because removed people
- * are left out of reportCountOf. So a restore asks again, in its own
- * transaction under the role lock.
+ * The reporting lines a person would come back with HERE that no longer
+ * hold (DELETE /api/users/[id]?restore=true, PATCH's reactivation, SCIM
+ * active:true). Removal and deactivation keep a person's lines on their
+ * seat, and while they were gone their manager may have moved to the Agent
+ * tier (rule 6 never counted them: removed people are left out of
+ * reportCountOf), been deactivated or left. So a restore asks again, in its
+ * own transaction under the role lock.
  *
- * WHOSE LINE IT IS COMES FIRST (batch 7). A manager who holds no level here
- * is never asked about here: whether their account was removed or
- * deactivated is another workspace's business, and saying so would tell this
- * one who they are. Before, a removed or deactivated manager was answered
- * first, so a line the person's other workspace had was cleared with "Dana
- * Ray is no longer in the workspace", untrue (she was never here) and naming
- * her. Now, for such a manager:
+ * THE LINES HERE (docs/plans/workspace-status-2.md E1, E2, E4, step 4): the
+ * line the person's seat here holds (personSeatIn, in any state: the
+ * account's line for someone anchored here, the membership's otherwise) and
+ * the dotted rows whose workspace is this one, each manager judged at the
+ * seat they hold HERE. Another workspace's line of the same person is never
+ * read, so it is never cleared here: before, a restore in B read the
+ * account's line (A's) and every workspace's dotted rows, cleared A's line
+ * and deleted A's copy of a dotted line, and never checked Pat's own B line
+ * (B restored her under Rita, removed in B). A line is cleared for:
  *
- *   kept          another workspace the person works in reads the line
- *                 (acting-workspace.ts lineStandingsElsewhere: "relied" or
- *                 "shared"), a deactivated manager there included (batch 8):
- *                 there the line waits for that workspace's own handover (an
- *                 Owner the identity provider deactivated keeps their reports
- *                 on purpose until someone hands them over), so a restore or
- *                 a reactivation here never clears it
- *   "elsewhere"   no workspace reads it (no answer for a removed or Guest
- *                 manager, or one who works in none of the person's
- *                 workspaces): cleared, and never named
+ *   "removed"     the manager's seat here was removed, or their account was
+ *                 (deletedAt)
+ *   "inactive"    they are deactivated here, at their seat here or where
+ *                 their account is anchored (their solid line only: a
+ *                 deactivated person holds no reports, invariant 13; a
+ *                 deactivation keeps dotted lines, so a restore does too)
+ *   "agent"       they hold the Agent tier here
+ *   "elsewhere"   they hold no seat here at all: cleared, and never named
  *
- * For a manager who holds a level here (anchored here, or a membership here,
- * batch 5), a line is cleared only for:
- *
- *   "removed"     their account was removed (deletedAt)
- *   "inactive"    they are deactivated (their solid line only: a deactivated
- *                 person holds no reports, invariant 13; a deactivation keeps
- *                 dotted lines, so a restore does too)
- *   "agent"       they hold the Agent tier here, unless another workspace
- *                 the person works in relies on the line (the manager holds
- *                 a level there that is no Agent)
- *
- * What fails is answered here; the caller clears it and logs it. A
- * reactivation asks the same (PATCH /api/users/[id], SCIM active:true).
+ * What fails is answered here; the caller clears it on the row that holds
+ * the seat (seat-writes.ts writeLineHere, removeDottedHere) and logs it.
  */
 export async function staleLinesOf(organizationId: string, userId: string, db: Db = prisma): Promise<{ manager: StaleLine | null; dotted: StaleLine[] }> {
-  const [row, dottedRows] = await Promise.all([
-    db.user.findUnique({ where: { id: userId }, select: { managerId: true } }),
-    db.userDottedLine.findMany({ where: { userId }, select: { managerId: true } }),
+  const [seat, dottedRows] = await Promise.all([
+    // Any state: a restore reads a removed seat, a reactivation a deactivated one.
+    personSeatIn(organizationId, userId, db),
+    // This workspace's dotted lines only (E2).
+    db.userDottedLine.findMany({ where: { userId, organizationId }, select: { managerId: true } }),
   ]);
-  const ids = [...new Set([row?.managerId ?? null, ...dottedRows.map((d) => d.managerId)].filter((x): x is string => !!x))];
+  const solid = seat?.managerId ?? null;
+  const ids = [...new Set([solid, ...dottedRows.map((d) => d.managerId)].filter((x): x is string => !!x))];
   const people = ids.length
     ? await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, organizationId: true, deletedAt: true, accessLevel: true, status: true, firstName: true, lastName: true } })
     : [];
   const byId = new Map(people.map((p) => [p.id, p]));
-  // The level each holds HERE: anchored here, or through a membership here.
-  const heldHere = await levelsHeldFor(organizationId, people, db);
-  // How each line stands in the other workspaces the person works in, a
-  // deactivated or removed manager included (`leaving`): a removed one is
-  // left out below, from their row (batch 8).
-  const there = await lineStandingsElsewhere(organizationId, ids.map((managerId) => ({ personId: userId, managerId })), db, { leaving: true });
+  // The seat each manager anchored elsewhere holds here, in any state (a
+  // removed one is "removed", never "elsewhere": they were of this
+  // workspace, so they may be named).
+  const elsewhere = people.filter((p) => p.organizationId !== organizationId).map((p) => p.id);
+  const memberships = elsewhere.length
+    ? await db.organizationMembership.findMany({ where: { organizationId, userId: { in: elsewhere } }, select: { userId: true, role: true, status: true, removedAt: true } })
+    : [];
+  const heldThrough = new Map(memberships.map((m) => [m.userId, m]));
   const nameOf = (id: string) => {
     const p = byId.get(id);
     return p ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || null : null;
   };
-  const why = (managerId: string, solid: boolean): StaleLineReason | null => {
+  const why = (managerId: string, isSolid: boolean): StaleLineReason | null => {
     const p = byId.get(managerId);
-    const held = heldHere.get(managerId);
-    const standing = p && !p.deletedAt ? there.get(lineKey({ personId: userId, managerId }))?.standing : undefined;
-    // No level here: whose line it is decides, before anything about them.
-    // A deactivated manager there still holds it there (batch 8).
-    if (!p || held === undefined) return standing ? null : "elsewhere";
-    // As linesElsewhere answers it for someone who holds a level here: a
-    // deactivated manager is relied on nowhere, so the solid line is cleared
-    // ("inactive") and an Agent's dotted line is the Agent's to clear.
-    const elsewhere = p.status === "INACTIVE" ? undefined : standing;
-    if (p.deletedAt) return "removed";
-    if (solid && p.status === "INACTIVE") return "inactive";
-    return isAgentOf(held) && elsewhere !== "relied" ? "agent" : null;
+    if (!p) return "elsewhere";
+    const anchoredHere = p.organizationId === organizationId;
+    const m = anchoredHere ? null : heldThrough.get(managerId);
+    // No seat here at all: never named.
+    if (!anchoredHere && !m) return "elsewhere";
+    if (p.deletedAt || m?.removedAt) return "removed";
+    const deactivated = String(p.status) === ENDED_STATUS || String(m?.status ?? "") === ENDED_STATUS;
+    if (isSolid && deactivated) return "inactive";
+    return isAgentOf(anchoredHere ? p.accessLevel : m!.role) ? "agent" : null;
   };
   const line = (managerId: string, w: StaleLineReason): StaleLine => ({ managerId, name: w === "elsewhere" ? null : nameOf(managerId), why: w });
   let manager: StaleLine | null = null;
-  if (row?.managerId) {
-    const w = why(row.managerId, true);
-    if (w) manager = line(row.managerId, w);
+  if (solid) {
+    const w = why(solid, true);
+    if (w) manager = line(solid, w);
   }
   const dotted: StaleLine[] = [];
   for (const d of [...new Set(dottedRows.map((x) => x.managerId))]) {
@@ -219,8 +236,8 @@ export async function staleLinesOf(organizationId: string, userId: string, db: D
 /**
  * The words for why a line was cleared, to follow "because" or a colon
  * ("Dana Ray is on the Agent tier, and an Agent can't be anyone's manager").
- * "No longer in the workspace" is said only of a removed account of someone
- * who held a level here (batch 6). A manager who holds no level here is
+ * "No longer in the workspace" is said only of someone whose seat here, or
+ * whose account, was removed (batch 6). A manager who holds no seat here is
  * never named (batch 7): "the manager on their record doesn't work in this
  * workspace", which is true whether or not they ever did.
  */
@@ -233,12 +250,41 @@ export function staleLineWords(line: StaleLine): string {
 }
 
 /**
- * The audit sentence for one line a restore or a reactivation cleared:
- * "Reactivated Max Chen with no manager: Dana Ray is deactivated".
+ * How a seat came back with a line that no longer held, for its audit
+ * sentence: an Admin's (or the identity provider's) restore or reactivation
+ * here; the person's own return by invitation ("Rejoined": they are the
+ * actor, never "Restored" by themselves); or the account restored or
+ * reactivated in another workspace, which brought this seat back with
+ * nobody here acting ("RestoredWithAccount", "ReactivatedWithAccount").
+ * The final review of workspace-status-2, product L7 and the part A clears.
  */
-export function clearedLineSentence(verb: "Restored" | "Reactivated", name: string, line: StaleLine, solid: boolean): string {
-  if (solid) return `${verb} ${name} with no manager: ${staleLineWords(line)}`;
+export type ClearedHow = "Restored" | "Reactivated" | "Rejoined" | "RestoredWithAccount" | "ReactivatedWithAccount";
+
+/** The sentence's opening, and whether it ends on a clause (so "with no manager" follows a comma). */
+function clearedLead(how: ClearedHow, name: string): { lead: string; clause: boolean } {
+  switch (how) {
+    case "Rejoined":
+      return { lead: `${name} rejoined from an invitation`, clause: false };
+    case "RestoredWithAccount":
+      return { lead: `${name} is back in this workspace after their account was restored`, clause: true };
+    case "ReactivatedWithAccount":
+      return { lead: `${name} is back in this workspace after their account was reactivated`, clause: true };
+    default:
+      return { lead: `${how} ${name}`, clause: false };
+  }
+}
+
+/**
+ * The audit sentence for one line a restore, a reactivation or a return by
+ * invitation cleared: "Reactivated Max Chen with no manager: Dana Ray is
+ * deactivated", "Pat Lee rejoined from an invitation with no manager: Dana
+ * Ray is no longer in the workspace".
+ */
+export function clearedLineSentence(how: ClearedHow, name: string, line: StaleLine, solid: boolean): string {
+  const { lead, clause } = clearedLead(how, name);
+  const sep = clause ? ", " : " ";
+  if (solid) return `${lead}${sep}with no manager: ${staleLineWords(line)}`;
   // Never named (batch 7): someone who holds no level here.
-  if (line.why === "elsewhere") return `${verb} ${name} without a dotted line to someone who doesn't work in this workspace`;
-  return `${verb} ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
+  if (line.why === "elsewhere") return `${lead}${sep}without a dotted line to someone who doesn't work in this workspace`;
+  return `${lead}${sep}without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
 }

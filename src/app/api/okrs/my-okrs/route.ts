@@ -3,6 +3,7 @@ import { settleOnRead } from "@/lib/goals/goal-periods.server";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, enrichKeyResultGroups, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { memberVisibilityOr } from "@/lib/goal-audience";
+import { placementHereOf } from "@/lib/access/profile-here";
 import { getUserTagIds } from "@/lib/user-tags";
 import type { Prisma } from "@/generated/prisma";
 
@@ -33,11 +34,10 @@ export async function GET(req: Request) {
     return `Q${q} ${d.getFullYear()}`;
   })();
 
-  // Get the user's department + role (both feed audience resolution)
-  const me = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { departmentId: true, roleId: true },
-  });
+  // The user's department + role (both feed audience resolution), at their
+  // seat here: the membership's for someone here through one, never the
+  // account's (docs/plans/workspace-status-2.md E15, step 8).
+  const me = await placementHereOf(orgId, userId);
 
   const or: Prisma.OKRWhereInput[] = [
     { level: "COMPANY" },

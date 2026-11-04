@@ -44,6 +44,16 @@ import "server-only";
 // membership person's row counts their reports here only (reportsHere, the
 // step 4 review L6); a sort by name stays in the database. Names compare by
 // collation in memory (L9).
+//
+// THE LINES ARE THIS WORKSPACE'S (docs/plans/workspace-status-2.md E1, E2,
+// step 3). A row's manager is the line its seat here holds: the account's
+// for someone anchored here, the membership's own for someone here through
+// one, never the account's line of another workspace. So are the Reports to
+// filter (each half by its own row's line), No manager, every row's report
+// count (reportsHere: the reports HERE, both halves, never the cross-workspace
+// directReports count) and so the sort by reports, which is always made in
+// memory now, and the chart's managerId and dotted lines (this workspace's
+// rows only), which the Org chart's own loop check walks.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -57,7 +67,7 @@ import { directoryWhere, parseDirectoryQuery, type DirectoryQuery } from "./dire
 import { isPeopleAdmin, peopleCtx, readsPeopleDataOf, relationTo, type PeopleCtx } from "./person-access.server";
 import { canWritePersonGroup, visibleStatus } from "./person-fields";
 import { managersWithSeatHere, ownHere, placementsHere } from "@/lib/access/profile-here";
-import { liveHereAmong } from "@/lib/access/manager-lines";
+import { reportsHereOf } from "@/lib/access/acting-workspace";
 import { keptSeatWhere } from "@/lib/access/workspace-seat";
 import { JOIN_ROW_SELECT, joinedHere } from "@/lib/access/joined-here";
 
@@ -75,6 +85,8 @@ export interface DirectorySeat {
   departmentId: string | null;
   roleId: string | null;
   officeId: string | null;
+  /** Their manager HERE: the line their membership holds (workspace-status-2.md E1), never the account's. */
+  managerId: string | null;
 }
 
 /**
@@ -83,9 +95,10 @@ export interface DirectorySeat {
  * the deactivated ones only with the Deactivated filter, as for people
  * anchored here. A filter on a department, job title or office matches the
  * membership's own (this workspace's) ids, one on seniority its job role's
- * level here (product H1); No manager reads the manager their row shows;
- * New joiners their join date here. The filters on the person (search,
- * tags, Reports to) are prismaWhere's, for both kinds.
+ * level here (product H1); Reports to and No manager read the line their
+ * membership holds here (E1), as their row shows it; New joiners their join
+ * date here. The filters on the person (search, tags) are prismaWhere's,
+ * for both kinds.
  */
 export async function directorySeats(ctx: PeopleCtx, q: DirectoryQuery): Promise<Map<string, DirectorySeat>> {
   const w = directoryWhere(q);
@@ -96,7 +109,7 @@ export async function directorySeats(ctx: PeopleCtx, q: DirectoryQuery): Promise
       ...(w.deleted === "only" ? { removedAt: { not: null } } : keptSeatWhere()),
       ...(w.status === "inactive" ? { status: "INACTIVE" as const } : w.status === "not-inactive" ? { status: { not: "INACTIVE" as const } } : {}),
     },
-    select: { userId: true, role: true, status: true, removedAt: true, joinDate: true, departmentId: true, roleId: true, officeId: true, ...JOIN_ROW_SELECT, user: { select: { managerId: true, createdAt: true } } },
+    select: { userId: true, role: true, status: true, removedAt: true, joinDate: true, departmentId: true, roleId: true, officeId: true, managerId: true, ...JOIN_ROW_SELECT, user: { select: { createdAt: true } } },
   });
   // Their join date here: the one stored on the membership (D18), else when
   // they joined here (access/joined-here.ts, the step 4 review H1).
@@ -110,8 +123,8 @@ export async function directorySeats(ctx: PeopleCtx, q: DirectoryQuery): Promise
       departmentId: r.departmentId,
       roleId: r.roleId,
       officeId: r.officeId,
+      managerId: r.managerId ?? null,
     },
-    managerId: r.user?.managerId ?? null,
   }));
   // The placement filters, by what the membership holds here (product H1).
   if (w.departmentId) seats = seats.filter((m) => m.seat.departmentId === w.departmentId);
@@ -123,9 +136,11 @@ export async function directorySeats(ctx: PeopleCtx, q: DirectoryQuery): Promise
     seats = seats.filter((m) => !!m.seat.roleId && levels.has(roles.get(m.seat.roleId)?.level ?? ""));
   }
   if (w.joinedAfter) seats = seats.filter((m) => m.seat.joinedHere.getTime() >= w.joinedAfter!.getTime());
+  // Reports to: the line their membership holds here (E1).
+  if (w.managerId) seats = seats.filter((m) => m.seat.managerId === w.managerId);
   if (w.noManager) {
-    const shown = await managersWithSeatHere(ctx.organizationId, seats.map((m) => m.managerId));
-    seats = seats.filter((m) => !(m.managerId && shown.has(m.managerId)));
+    const shown = await managersWithSeatHere(ctx.organizationId, seats.map((m) => m.seat.managerId));
+    seats = seats.filter((m) => !(m.seat.managerId && shown.has(m.seat.managerId)));
   }
   return new Map(seats.map((m) => [m.seat.userId, m.seat]));
 }
@@ -147,9 +162,12 @@ export function prismaWhere(ctx: PeopleCtx, q: DirectoryQuery, extraIds: string[
   if (w.noManager) where.managerId = null;
   if (w.joinedAfter) where.joinDate = { gte: w.joinedAfter };
   if (w.seniority) where.role = { level: { in: w.seniority as Prisma.EnumAccessLevelFilter["in"] } };
+  // Reports to, for the people anchored here: their account's line, which is
+  // this workspace's (E1). A membership person matches by the line their
+  // membership holds here (directorySeats), never by their account's.
+  const anchoredAnd: Prisma.UserWhereInput[] = [];
+  if (w.managerId) anchoredAnd.push({ managerId: w.managerId });
   const and: Prisma.UserWhereInput[] = [];
-  // Reports to: the line stored on the account, for both kinds.
-  if (w.managerId) and.push({ managerId: w.managerId });
   if (w.q) {
     const words = w.q.split(/\s+/).filter(Boolean).slice(0, 4);
     for (const word of words) {
@@ -165,30 +183,45 @@ export function prismaWhere(ctx: PeopleCtx, q: DirectoryQuery, extraIds: string[
     }
   }
   if (extraIds) and.push({ id: { in: extraIds } });
-  if (seats && seats.size > 0) return { AND: [{ OR: [where, { id: { in: [...seats.keys()] } }] }, ...and] };
-  if (and.length) where.AND = and;
+  if (seats && seats.size > 0) {
+    if (anchoredAnd.length) where.AND = anchoredAnd;
+    return { AND: [{ OR: [where, { id: { in: [...seats.keys()] } }] }, ...and] };
+  }
+  if (anchoredAnd.length || and.length) where.AND = [...anchoredAnd, ...and];
   return where;
 }
 
-/** Whether a query with membership people among its matches is ordered in memory (see the header). */
+/**
+ * Whether a query is ordered in memory (see the header): one with membership
+ * people among its matches, ordered by a date or a group here; and every
+ * sort by reports, since a row's report count is its reports HERE
+ * (reportsHere), which no database order can read (a relation's count is
+ * every workspace's account lines).
+ */
 export function orderedInMemory(q: DirectoryQuery, seats: ReadonlyMap<string, DirectorySeat>): boolean {
-  return seats.size > 0 && (q.group !== "none" || q.sort === "recent" || q.sort === "tenure" || q.sort === "reports");
+  return q.sort === "reports" || (seats.size > 0 && (q.group !== "none" || q.sort === "recent" || q.sort === "tenure"));
 }
 
 /**
- * How many of each of these people's direct reports hold a seat here, not
- * removed (manager-lines.ts liveHereAmong): the count a membership person's
- * row shows, never their account's reports in another workspace (the step 4
- * review L6). Two reads.
+ * How many people report to each of these people HERE, not removed here
+ * (acting-workspace.ts reportsHereOf, kept seats: the line each report's
+ * seat here holds, both halves): the count every row shows, never the
+ * accounts whose line names them in another workspace (the step 4 review
+ * L6 for a membership person; workspace-status-2.md E1, step 3, for
+ * everyone). Two indexed reads.
  */
 export async function reportsHere(organizationId: string, managerIds: readonly string[]): Promise<Map<string, number>> {
-  const ids = [...new Set(managerIds)].filter(Boolean);
-  if (ids.length === 0) return new Map();
-  const reports = await prisma.user.findMany({ where: { managerId: { in: ids }, deletedAt: null }, select: { id: true, managerId: true } });
-  const here = await liveHereAmong(organizationId, reports.map((r) => r.id));
   const out = new Map<string, number>();
-  for (const r of reports) if (r.managerId && here.has(r.id)) out.set(r.managerId, (out.get(r.managerId) ?? 0) + 1);
+  for (const r of await reportsHereOf(organizationId, managerIds)) out.set(r.managerId, (out.get(r.managerId) ?? 0) + 1);
   return out;
+}
+
+/** The names of the managers a page of rows shows (each already held to a seat here). */
+async function managerCards(ids: Iterable<string>): Promise<Map<string, { id: string; firstName: string; lastName: string; avatar: string | null }>> {
+  const want = [...new Set(ids)];
+  if (want.length === 0) return new Map();
+  const rows = await prisma.user.findMany({ where: { id: { in: want } }, select: { id: true, firstName: true, lastName: true, avatar: true } });
+  return new Map(rows.map((r) => [r.id, r]));
 }
 
 /** Names in the order Postgres's collation gives them, near enough (the step 4 review L9): case and accents set aside, numbers by value. */
@@ -209,11 +242,10 @@ export async function directoryOrder(ctx: PeopleCtx, q: DirectoryQuery, where: P
       department: { select: { name: true, organizationId: true } },
       office: { select: { name: true, organizationId: true } },
       role: { select: { title: true, organizationId: true } },
-      _count: { select: { directReports: { where: { deletedAt: null } } } },
     },
   });
-  // A membership person's reports here only (L6).
-  const memberReports = q.sort === "reports" ? await reportsHere(org, keys.filter((k) => k.organizationId !== org && seats.has(k.id)).map((k) => k.id)) : new Map<string, number>();
+  // Everyone's reports here (L6; workspace-status-2 E1).
+  const reports = q.sort === "reports" ? await reportsHere(org, keys.map((k) => k.id)) : new Map<string, number>();
   // What the memberships among them hold here, for the groups (product H1).
   const memberSeats = keys.map((k) => (k.organizationId === org ? undefined : seats.get(k.id))).filter((m): m is DirectorySeat => !!m);
   const placed = q.group !== "none" ? await placementsHere(org, memberSeats) : null;
@@ -227,7 +259,7 @@ export async function directoryOrder(ctx: PeopleCtx, q: DirectoryQuery, where: P
       : q.group === "office" ? { id: office ? (m ? m.officeId : k.officeId) : null, name: office?.name ?? null }
       : q.group === "title" ? { id: title ? (m ? m.roleId : k.roleId) : null, name: title?.title ?? null }
       : { id: null, name: null };
-    return { id: k.id, first: k.firstName ?? "", last: k.lastName ?? "", joined: (m ? m.joinedHere : k.joinDate).getTime(), reports: m ? memberReports.get(k.id) ?? 0 : k._count?.directReports ?? 0, group };
+    return { id: k.id, first: k.firstName ?? "", last: k.lastName ?? "", joined: (m ? m.joinedHere : k.joinDate).getTime(), reports: reports.get(k.id) ?? 0, group };
   });
   // As Postgres orders text ascending: nulls last, by the collation (L9).
   const text = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : NAMES.compare(a, b));
@@ -256,13 +288,12 @@ export function orderFor(q: DirectoryQuery): Prisma.UserOrderByWithRelationInput
           : [];
   // id breaks ties so page N and page N+1 never overlap or skip a person.
   const tail: Prisma.UserOrderByWithRelationInput[] = [{ firstName: "asc" }, { lastName: "asc" }, { id: "asc" }];
+  // A sort by reports never reaches here: it is made in memory (orderedInMemory).
   switch (q.sort) {
     case "recent":
       return [...group, { joinDate: "desc" }, { id: "asc" }];
     case "tenure":
       return [...group, { joinDate: "asc" }, { id: "asc" }];
-    case "reports":
-      return [...group, { directReports: { _count: "desc" } }, ...tail];
     default:
       return [...group, ...tail];
   }
@@ -307,8 +338,6 @@ export async function directoryList(req: NextRequest): Promise<Response> {
     department: { select: { id: true, name: true, color: true, organizationId: true } },
     role: { select: { id: true, title: true, level: true, organizationId: true } },
     office: { select: { id: true, name: true, city: true, organizationId: true } },
-    manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-    _count: { select: { directReports: { where: { deletedAt: null } } } },
   } as const;
   let users: Prisma.UserGetPayload<{ select: typeof select }>[];
   let total: number;
@@ -342,9 +371,13 @@ export async function directoryList(req: NextRequest): Promise<Response> {
   const session = await getServerSession(authOptions);
   const canInvite = session?.user && !ctx.isAgent ? await hasPermission(session, "people", "create") : false;
   const tagsByUser = await getUserTagsMap(ctx.organizationId, users.map((u) => u.id));
-  const managersHere = await managersWithSeatHere(ctx.organizationId, users.map((u) => u.managerId));
-  // A membership person's reports here only (L6).
-  const memberReports = await reportsHere(ctx.organizationId, users.filter((u) => u.organizationId !== ctx.organizationId && seats.has(u.id)).map((u) => u.id));
+  // The line each row's seat here holds (E1): the account's where anchored
+  // here, the membership's otherwise; named only with a seat here.
+  const lineOf = (u: (typeof users)[number]) => (u.organizationId === ctx.organizationId ? u.managerId : seats.get(u.id)?.managerId ?? null);
+  const managersHere = await managersWithSeatHere(ctx.organizationId, users.map(lineOf));
+  const managers = await managerCards(managersHere);
+  // Everyone's reports here (L6; workspace-status-2 E1).
+  const reports = await reportsHere(ctx.organizationId, users.map((u) => u.id));
   // What the memberships on the page hold here (product H1).
   const placed = await placementsHere(ctx.organizationId, users.map((u) => (u.organizationId === ctx.organizationId ? undefined : seats.get(u.id))).filter((m): m is DirectorySeat => !!m));
   const rows = users.map((u) => {
@@ -354,7 +387,8 @@ export async function directoryList(req: NextRequest): Promise<Response> {
     const m = u.organizationId === ctx.organizationId ? undefined : seats.get(u.id);
     const status = m ? m.status : String(u.status);
     const role = m ? (m.roleId ? placed.role.get(m.roleId) ?? null : null) : ownHere(u.role, ctx.organizationId);
-    const managerHere = !!u.managerId && managersHere.has(u.managerId);
+    const line = lineOf(u);
+    const managerHere = !!line && managersHere.has(line);
     return {
       id: u.id,
       firstName: u.firstName,
@@ -365,15 +399,15 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       // people data; everyone else learns only whether it is deactivated.
       status: visibleStatus(status, peopleData),
       isDeactivated: status === "INACTIVE",
-      managerId: managerHere ? u.managerId : null,
+      managerId: managerHere ? line : null,
       joinDate: m ? m.joinedHere : u.joinDate,
       deletedAt: privileged ? (m ? m.removedAt : u.deletedAt) : null,
       isAgent: (m ? m.role : u.accessLevel) === "AGENT",
       department: m ? (m.departmentId ? placed.department.get(m.departmentId) ?? null : null) : ownHere(u.department, ctx.organizationId),
       role: role ? { id: role.id, title: role.title, seniority: role.level } : null,
       office: m ? (m.officeId ? officeCard(placed.office.get(m.officeId)) : null) : ownHere(u.office, ctx.organizationId),
-      manager: managerHere ? u.manager : null,
-      directReports: m ? memberReports.get(u.id) ?? 0 : u._count.directReports,
+      manager: managerHere && line ? managers.get(line) ?? null : null,
+      directReports: reports.get(u.id) ?? 0,
       tags: tagsByUser.get(u.id) ?? [],
       presenceStatus: p?.presenceStatus ?? null,
       presenceUntil: p?.presenceUntil ?? null,
@@ -383,10 +417,13 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       // (security L2).
       ...(peopleData && !m ? { phone: u.phone } : {}),
       // A row is selectable (and editable) only where the viewer holds the
-      // placement write: a dotted-line manager reads, never edits. Nobody
-      // edits the placement of someone here through a membership (D11).
-      canEdit: !m && u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id), { chainWritesMembership: !accessV2Resolver() }),
-      // False for someone here through a membership: their placement here is shown read-only (D18, product H1).
+      // placement write: a dotted-line manager reads, never edits. Someone
+      // here through a membership too: their placement here is written on
+      // their membership, by the same doors as anyone's
+      // (docs/plans/workspace-status-2.md E7, E8, step 5; before, nobody
+      // edited it, D11).
+      canEdit: u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id), { chainWritesMembership: !accessV2Resolver() }),
+      // False for someone here through a membership (D11): their name, phone, photo and birthday are the account's.
       profileHere: !m,
     };
   });
@@ -409,9 +446,9 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
   // workspace's state.
   const memberSeats = await prisma.organizationMembership.findMany({
     where: { organizationId: ctx.organizationId, ...keptSeatWhere(), user: { organizationId: { not: ctx.organizationId } } },
-    select: { userId: true, role: true, status: true, departmentId: true, roleId: true, officeId: true },
+    select: { userId: true, role: true, status: true, departmentId: true, roleId: true, officeId: true, managerId: true },
   });
-  const seatOf = new Map(memberSeats.map((m) => [m.userId, { role: String(m.role), status: String(m.status), departmentId: m.departmentId, roleId: m.roleId, officeId: m.officeId }]));
+  const seatOf = new Map(memberSeats.map((m) => [m.userId, { role: String(m.role), status: String(m.status), departmentId: m.departmentId, roleId: m.roleId, officeId: m.officeId, managerId: m.managerId ?? null }]));
   // What the memberships hold here (product H1).
   const placed = await placementsHere(ctx.organizationId, memberSeats);
   const anchored: Prisma.UserWhereInput = { organizationId: ctx.organizationId, deletedAt: null };
@@ -434,7 +471,8 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
         role: { select: { title: true, organizationId: true } },
         department: { select: { name: true, organizationId: true } },
         office: { select: { organizationId: true } },
-        dottedLineToManagers: { select: { managerId: true } },
+        // This workspace's dotted lines only (E2).
+        dottedLineToManagers: { where: { organizationId: ctx.organizationId }, select: { managerId: true } },
       },
       orderBy: [{ firstName: "asc" }, { id: "asc" }],
       take: CHART_CAP,
@@ -442,9 +480,12 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
     prisma.user.count({ where }),
   ]);
   const presence = await presenceFor(users.map((u) => u.id));
+  // The line each person's seat here holds (E1): the account's where
+  // anchored here, the membership's otherwise.
+  const lineOf = (u: (typeof users)[number]) => (u.organizationId === ctx.organizationId ? u.managerId : seatOf.get(u.id)?.managerId ?? null);
   // A manager, solid or dotted, only while they hold a seat here (D18; the
   // step 4 review L6: a dotted line to someone of another workspace is no id here).
-  const managersHere = await managersWithSeatHere(ctx.organizationId, users.flatMap((u) => [u.managerId, ...u.dottedLineToManagers.map((d) => d.managerId)]));
+  const managersHere = await managersWithSeatHere(ctx.organizationId, users.flatMap((u) => [lineOf(u), ...u.dottedLineToManagers.map((d) => d.managerId)]));
   return NextResponse.json(
     {
       data: users.map((u) => {
@@ -455,12 +496,13 @@ async function chartList(ctx: PeopleCtx): Promise<Response> {
         const role = m ? (m.roleId ? placed.role.get(m.roleId) ?? null : null) : ownHere(u.role, ctx.organizationId);
         const dept = m ? (m.departmentId ? placed.department.get(m.departmentId) ?? null : null) : ownHere(u.department, ctx.organizationId);
         const office = m ? (m.officeId ? placed.office.get(m.officeId) ?? null : null) : ownHere(u.office, ctx.organizationId);
+        const line = lineOf(u);
         return {
           id: u.id,
           firstName: u.firstName,
           lastName: u.lastName,
           avatar: u.avatar,
-          managerId: u.managerId && managersHere.has(u.managerId) ? u.managerId : null,
+          managerId: line && managersHere.has(line) ? line : null,
           isAgent: (m ? m.role : u.accessLevel) === "AGENT",
           status: visibleStatus(status, readsPeopleDataOf(ctx, u.id)),
           isDeactivated: status === "INACTIVE",

@@ -15,6 +15,7 @@ import { compositeScore, effectiveReviewerId, ratingsTo100, reviewerAfterMove, s
 import { logActivity } from "@/lib/activity";
 import { effectiveDirectReportIds, effectiveManagersOf } from "@/lib/access/manager-lines";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { linesHereOf } from "@/lib/access/acting-workspace";
 
 export interface CycleViewerCtx {
   userId: string;
@@ -53,16 +54,16 @@ export async function reviewerFacts(
 ): Promise<{ managerOf: Map<string, string | null>; agentReviewers: Set<string>; selfStamped: Set<string> }> {
   // Who is stamped as their own reviewer and has no manager stored at all:
   // the launch rule for someone with nobody above (a one-admin workspace's
-  // founder), who writes their own manager half (writerFrom).
+  // founder), who writes their own manager half (writerFrom). No line HERE
+  // (docs/plans/workspace-status-2.md E1, step 2): the line their seat here
+  // holds, never their account's for someone here through a membership.
   const selfIds = [...new Set(reviews.filter((r) => r.reviewerId === r.subjectId).map((r) => r.subjectId))];
   const [managerOf, agentReviewers, unmanaged] = await Promise.all([
     effectiveManagersOf(organizationId, reviews.map((r) => r.subjectId)),
     agentIdsIn(organizationId, [...new Set(reviews.map((r) => r.reviewerId))]),
-    selfIds.length
-      ? prisma.user.findMany({ where: { id: { in: selfIds }, managerId: null }, select: { id: true } })
-      : Promise.resolve([] as { id: string }[]),
+    selfIds.length ? linesHereOf(organizationId, selfIds) : Promise.resolve(new Map<string, string | null>()),
   ]);
-  return { managerOf, agentReviewers, selfStamped: new Set(unmanaged.map((u) => u.id)) };
+  return { managerOf, agentReviewers, selfStamped: new Set([...unmanaged].filter(([, line]) => line === null).map(([id]) => id)) };
 }
 
 /** A review as the writer rule reads it. */
@@ -192,8 +193,10 @@ export async function reviewMetrics(userId: string, organizationId: string, wind
       where: { userId, kpi: { organizationId }, createdAt: { gte: window.start, lte: window.end } },
       select: { score: true },
     }),
+    // This workspace's SOPs only, as the KPIs (docs/plans/workspace-status-2.md,
+    // the final review, product M5): a compliance row names no workspace of its own.
     prisma.sOPCompliance.findMany({
-      where: { userId, createdAt: { gte: window.start, lte: window.end } },
+      where: { userId, sop: { organizationId }, createdAt: { gte: window.start, lte: window.end } },
       select: { score: true },
     }),
     prisma.oKR.findMany({ where: { organizationId, ownerId: userId }, select: { id: true } }),
@@ -229,12 +232,12 @@ export async function reviewMetrics(userId: string, organizationId: string, wind
   };
 }
 
-/** Mean SOP compliance per person inside a window (for calibration rows). */
-export async function sopScoresFor(userIds: string[], window: { start: Date; end: Date }): Promise<Map<string, number>> {
+/** Mean SOP compliance per person inside a window (for calibration rows), on this workspace's SOPs only (M5, as reviewMetrics). */
+export async function sopScoresFor(organizationId: string, userIds: string[], window: { start: Date; end: Date }): Promise<Map<string, number>> {
   if (!userIds.length) return new Map();
   const rows = await prisma.sOPCompliance.groupBy({
     by: ["userId"],
-    where: { userId: { in: userIds }, createdAt: { gte: window.start, lte: window.end }, score: { not: null } },
+    where: { userId: { in: userIds }, sop: { organizationId }, createdAt: { gte: window.start, lte: window.end }, score: { not: null } },
     _avg: { score: true },
   });
   return new Map(rows.filter((r) => r._avg.score != null).map((r) => [r.userId, Math.round(r._avg.score as number)] as const));

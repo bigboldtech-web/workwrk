@@ -20,7 +20,7 @@ import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { effectiveManagersOf } from "@/lib/access/manager-lines";
-import { chainQueueWhere, managerQueueWhereFor, type KpiSnapshot, type KraProgressEntry } from "@/lib/weekly-review";
+import { chainQueueWhere, entriesHere, managerQueueWhereFor, type KpiSnapshot, type KraProgressEntry } from "@/lib/weekly-review";
 import {
   ACTED_DAYS,
   WEEKLY_PAGE_SIZE,
@@ -34,6 +34,7 @@ import {
   type WeeklyScope,
 } from "./weekly-queue";
 import { ownHere } from "@/lib/access/profile-here";
+import { personSeatIn } from "@/lib/access/acting-workspace";
 
 export interface WeeklyQueueCtx {
   userId: string;
@@ -120,7 +121,6 @@ const SUBJECT_SELECT = {
   lastName: true,
   email: true,
   avatar: true,
-  managerId: true,
   presenceStatus: true,
   presenceUntil: true,
   // With its workspace: the job title named only when this one's (D18; the
@@ -232,7 +232,14 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
   ]);
 
   const managerOf = await fallbackManagersOf(ctx, rows);
-  const out: WeeklyQueueRow[] = rows.map((r) => {
+  // Each row's KRA progress of this workspace only (the final review,
+  // security M1; weekly-review.ts entriesHere), as the drawer reads it.
+  const krasHere = await entriesHere(rows.map((r) => ({
+    organizationId: ctx.organizationId,
+    kpiSnapshots: [] as KpiSnapshot[],
+    kraProgress: (Array.isArray(r.kraProgress) ? r.kraProgress : []) as unknown as KraProgressEntry[],
+  })));
+  const out: WeeklyQueueRow[] = rows.map((r, i) => {
     const st = weeklyStatusOf(r);
     const draft = r.status === "DRAFT";
     return {
@@ -256,7 +263,7 @@ export async function listWeeklyQueue(ctx: WeeklyQueueCtx, q: WeeklyQuery, opts:
       statusTone: st.tone,
       // A draft is the author's unfinished writing: nothing of it leaves.
       highlights: draft ? "" : firstLine(r.highlights),
-      kras: draft ? { onTrack: 0, total: 0 } : weeklyKraSummary(Array.isArray(r.kraProgress) ? (r.kraProgress as Array<{ progressPct?: unknown }>) : []),
+      kras: draft ? { onTrack: 0, total: 0 } : weeklyKraSummary(krasHere[i].kraProgress),
       submittedAt: r.submittedAt ? r.submittedAt.toISOString() : null,
       reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
       canDecide: canDecideFor(ctx, r, managerOf.get(r.userId) ?? null),
@@ -327,8 +334,18 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
   if (!isSubject && row.user.deletedAt) return null;
 
   const draft = row.status === "DRAFT";
-  const kraRows = (Array.isArray(row.kraProgress) ? row.kraProgress : []) as unknown as KraProgressEntry[];
-  const kpiRows = (Array.isArray(row.kpiSnapshots) ? row.kpiSnapshots : []) as unknown as KpiSnapshot[];
+  // This workspace's entries only (docs/plans/workspace-status-2.md, the
+  // final review, security M1): a row written while one row served every
+  // workspace may hold another workspace's KPI snapshots and KRA progress,
+  // with their notes. Before, they showed here as "A removed KPI" with their
+  // value and note. A KPI or KRA deleted since still reads as removed.
+  const [here] = await entriesHere([{
+    organizationId: row.organizationId,
+    kraProgress: (Array.isArray(row.kraProgress) ? row.kraProgress : []) as unknown as KraProgressEntry[],
+    kpiSnapshots: (Array.isArray(row.kpiSnapshots) ? row.kpiSnapshots : []) as unknown as KpiSnapshot[],
+  }]);
+  const kraRows = here.kraProgress;
+  const kpiRows = here.kpiSnapshots;
   const [kras, kpis] = draft && !isSubject
     ? [[], []]
     : await Promise.all([
@@ -354,7 +371,10 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
 
   const st = weeklyStatusOf(row);
   const canDecide = !isSubject && canDecideFor(ctx, row, (await fallbackManagersOf(ctx, [row])).get(row.userId) ?? null);
-  const directManagerId = row.user.managerId ?? row.managerId;
+  // The subject's manager HERE (docs/plans/workspace-status-2.md E1): the
+  // line their seat here holds, never their account's for someone here
+  // through a membership; the recorded manager when they have none.
+  const directManagerId = (await personSeatIn(ctx.organizationId, row.userId))?.managerId ?? row.managerId;
   return {
     id: row.id,
     userId: row.userId,

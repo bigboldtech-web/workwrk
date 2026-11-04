@@ -621,11 +621,12 @@ describe("one person in two workspaces, end to end", () => {
 // those people would have dropped out of these reads on the deploy. A new
 // caller fails this test until it is listed here with its reason.
 describe("every caller of inWorkspaceWhere says which people it means", () => {
-  const CALLERS: Record<string, { deactivatedToo: string; count: number; why: string }> = {
-    "src/app/api/calendar/events/route.ts": { deactivatedToo: "true", count: 2, why: "the Team pill: reports not removed, as the anchored rows it reads (deletedAt only)" },
+  // `deactivatedToo` is the option every call passes, or each call's in order.
+  const CALLERS: Record<string, { deactivatedToo: string | string[]; count: number; why: string }> = {
+    "src/app/api/calendar/events/route.ts": { deactivatedToo: "true", count: 1, why: "the Team pill's dotted half: reports not removed, as the anchored rows it reads (deletedAt only); its solid half is reportsHereOf (workspace-status-2 step 2)" },
     "src/app/api/users/[id]/agent-reports/route.ts": { deactivatedToo: "true", count: 1, why: "moving an Agent's reports: anyone here not removed, a deactivated person included" },
-    "src/app/api/users/[id]/record-access/route.ts": { deactivatedToo: "true", count: 2, why: "the solid line walks through a deactivated manager and stops at a removed one, as for anchored rows" },
-    "src/lib/people/teams-counts.ts": { deactivatedToo: "true", count: 2, why: "the Teams badge counts reports not removed, as the anchored rows it reads" },
+    "src/app/api/users/[id]/record-access/route.ts": { deactivatedToo: ["true", "default", "default"], count: 3, why: "the solid line walks through a deactivated manager and stops at a removed one, as for anchored rows; the managers it names, and the dotted managers, are the ones whose seat here is live (the final review of workspace-status-2, security L2: a deactivated seat reads nothing)" },
+    "src/lib/people/teams-counts.ts": { deactivatedToo: "true", count: 1, why: "the Teams badge's dotted half counts reports not removed, as the anchored rows it reads; its solid half is reportsHereOf (workspace-status-2 step 2)" },
     "src/lib/people/team-scope.server.ts": { deactivatedToo: "!!opts.includeDeactivated", count: 1, why: "My team's chain, with deactivated people only when asked, as its workspacePeopleLines half" },
     "src/lib/goals/goal-period-notify.server.ts": { deactivatedToo: "default", count: 1, why: "live people only (status not INACTIVE): an ended membership is none" },
     "src/lib/people/employed.server.ts": { deactivatedToo: "default", count: 1, why: "employed people only (status not INACTIVE): an ended membership is none" },
@@ -654,10 +655,12 @@ describe("every caller of inWorkspaceWhere says which people it means", () => {
     for (const [file, c] of Object.entries(CALLERS)) {
       const calls = [...readFileSync(path.join(ROOT, file), "utf8").matchAll(/\binWorkspaceWhere\(([^)]*\)?)\)/g)].map((x) => x[1]);
       expect(calls, file).toHaveLength(c.count);
-      for (const call of calls) {
-        if (c.deactivatedToo === "default") expect(call, file).not.toContain("deactivatedToo");
-        else expect(call, file).toContain(`{ deactivatedToo: ${c.deactivatedToo} }`);
-      }
+      calls.forEach((call, i) => {
+        const option = Array.isArray(c.deactivatedToo) ? c.deactivatedToo[i] : c.deactivatedToo;
+        if (option === "default") expect(call, file).not.toContain("deactivatedToo");
+        else expect(call, file).toContain(`{ deactivatedToo: ${option} }`);
+      });
+      if (Array.isArray(c.deactivatedToo)) expect(c.deactivatedToo, file).toHaveLength(c.count);
     }
   });
 });

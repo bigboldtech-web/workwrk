@@ -13,7 +13,8 @@
 //              ceiling), 90 days absolute (both raised from 12 hours and 30
 //              days on 2026-10-22), two-factor "off" (enrolled people are still
 //              asked by ENFORCE_MFA_AT_LOGIN, the env floor), 8 failures
-//              lock for 15 minutes (src/lib/login-throttle.ts)
+//              lock for 15 minutes (src/lib/login-throttle.ts); the identity
+//              provider does not set Reports to
 //   retention  trash 60 days, audit log 365 days
 //   data       self export on, AI on
 //   users      the org domain, no auto join, Member, no default Spaces, 7 days
@@ -132,6 +133,25 @@ export function securityWrite(stored: Record<string, unknown>, saved: Record<str
   const merged: Record<string, unknown> = { ...stored, ...saved };
   if (saved.sessionIdleMinutes !== undefined) merged.sessionIdleChosen = true;
   return merged;
+}
+
+/* ───────────────────────── Security › Provisioning ───────────────────────── */
+
+/** The key of "Let your identity provider set Reports to", in the security section beside the sign-in policy. */
+export const IDP_SETS_REPORTS_TO = "identityProviderSetsReportsTo" as const;
+
+/**
+ * Whether this workspace lets its identity provider set Reports to (Security
+ * > Provisioning; docs/plans/workspace-status-2.md, the final review, product
+ * H1). Off unless an Admin turned it on: until then SCIM ignores the
+ * enterprise extension's manager on every push, and the manager sent writes
+ * nothing of the line (src/lib/scim-manager.ts scimManagerAsked), so an
+ * Entra restart never replaces the Reports to Admins set here. A
+ * reactivation's clears and a deprovision's handover are not the provider's
+ * manager, and happen either way. Pure; tested.
+ */
+export function idpSetsReportsToOf(settings: unknown): boolean {
+  return rec(rec(settings).security)[IDP_SETS_REPORTS_TO] === true;
 }
 
 /** An AI app connection's life when the workspace stored no session lifetime. */

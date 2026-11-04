@@ -245,9 +245,9 @@ export default function PeopleDirectoryClient() {
 
   async function bulk(action: string, payload: Record<string, unknown>, done: (n: number) => string) {
     const userIds = [...selected];
-    const r = await apiFetch<{ updated: number; skipped: number; skippedElsewhere?: number }>("/api/people/bulk-update", { method: "POST", json: { userIds, action, payload } });
+    const r = await apiFetch<{ updated: number; skipped: number }>("/api/people/bulk-update", { method: "POST", json: { userIds, action, payload } });
     if (!r.ok) { toast(r.error || "Couldn't change them", { tone: "danger", action: { label: "Try again", onClick: () => void bulk(action, payload, done) } }); return; }
-    toast(`${done(r.data.updated)}${bulkSkippedWords(r.data.skipped, r.data.skippedElsewhere ?? 0)}`);
+    toast(`${done(r.data.updated)}${bulkSkippedWords(r.data.skipped)}`);
     setSelected(new Set());
     void load();
   }

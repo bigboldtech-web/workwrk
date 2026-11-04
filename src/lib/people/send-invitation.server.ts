@@ -128,10 +128,18 @@ export async function sendInvitation(req: InvitationRequest): Promise<Invitation
   // "Reports to" names a live person of this workspace who may manage:
   // never an Agent (access 2.4), never someone of another workspace. It was
   // stored as sent, and the acceptance wrote it straight onto the new person.
+  // Live at the seat here (docs/plans/workspace-status-2.md E4, the step 2
+  // review L2): a manager this workspace deactivated, anchored here or
+  // through a membership, is refused now, in words. Before, the invitation
+  // was stored and the acceptance (managerOnAccept, live) dropped the
+  // manager without telling anyone, so the new person joined under nobody.
   if (typeof req.managerId === "string" && req.managerId) {
-    const candidate = await managerCandidateIn(orgId, req.managerId);
+    const candidate = await managerCandidateIn(orgId, req.managerId, { live: true });
     if (candidate === "not_found") return { ok: false, status: 400, error: "That manager isn't in this workspace" };
     if (candidate === "agent_cannot_manage") return { ok: false, status: 400, error: "An Agent can't be anyone's manager", code: "agent_cannot_manage" };
+    if (candidate === "inactive") {
+      return { ok: false, status: 400, error: "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", code: "manager_inactive" };
+    }
   }
 
   // Already in this workspace, as their own account or as a membership

@@ -8,12 +8,16 @@
 //
 // Department/role rows store the department/role, NEVER a frozen list of
 // people: membership is resolved on every read, so a new hire inherits
-// their team's goals and a leaver drops out automatically. "Active" uses
-// the same filter as seedKraToRoleHolders (status ACTIVE) plus
-// deletedAt: null, the org-wide soft-delete rule.
+// their team's goals and a leaver drops out automatically. "Active" is an
+// ACTIVE seat here (seated-here.ts "active": for someone anchored here,
+// status ACTIVE and not removed, as seedKraToRoleHolders reads them; for
+// someone here through a membership, that seat ACTIVE and their account not
+// ended), each placed by the department and job title their seat here holds
+// (docs/plans/workspace-status-2.md E15, step 8).
 
 import { prisma } from "@/lib/prisma";
-import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
+import { byName, peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
+import { peoplePlacedHere, placementHereOf } from "@/lib/access/profile-here";
 import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { canEditGoal, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
@@ -54,9 +58,6 @@ export interface GoalAudienceSummary {
 }
 
 const MEMBER_PREVIEW = 5;
-
-/** Leaver safety, mirrors seedKraToRoleHolders' ACTIVE filter. */
-const ACTIVE_USER = { status: "ACTIVE", deletedAt: null } as const;
 
 const keyOf = (e: GoalAudienceRef) => `${e.type}:${e.id}`;
 
@@ -126,33 +127,24 @@ export async function resolveGoalMembersBatch(
     }
   }
 
-  const or: Prisma.UserWhereInput[] = [];
-  if (userIds.size > 0) or.push({ id: { in: [...userIds] } });
-  if (deptIds.size > 0) or.push({ departmentId: { in: [...deptIds] } });
-  if (roleIds.size > 0) or.push({ roleId: { in: [...roleIds] } });
-  if (or.length === 0) {
+  if (userIds.size === 0 && deptIds.size === 0 && roleIds.size === 0) {
     for (const o of okrs) result.set(o.id, []);
     return result;
   }
 
-  const users = await prisma.user.findMany({
-    where: { organizationId: orgId, ...ACTIVE_USER, OR: or },
-    select: { id: true, firstName: true, lastName: true, avatar: true, departmentId: true, roleId: true },
-    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-  });
-  // People named by id (the owner, a person assigned by name, a tag's
-  // holders) who work here through a membership, ACTIVE at that seat
-  // (docs/plans/workspace-status-2.md E12, step 6): the audience picker
-  // offers them. An audience by department or job role still reads the
-  // people anchored here until step 8 (E15) reads placements for both kinds,
-  // so here they join no such group.
-  const anchoredFound = new Set(users.map((u) => u.id));
-  const elsewhere = [...userIds].filter((id) => !anchoredFound.has(id));
-  if (elsewhere.length > 0) {
-    for (const p of (await peopleHereAmong(orgId, elsewhere, "active")).values()) {
-      if (p.seat.kind === "membership") users.push({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, departmentId: null, roleId: null });
-    }
-  }
+  // Everyone the audience names, ACTIVE at their seat here (E12, step 6):
+  // people named by id (the owner, a person assigned by name, a tag's
+  // holders), and the people placed in an assigned department or job title,
+  // each by the placement their seat here holds (docs/plans/workspace-status-2.md
+  // E15, step 8): the account's for someone anchored here, the membership's
+  // for someone here through one. Two indexed halves for the placed people
+  // (peoplePlacedHere), then everyone at their seat by id. Before, a
+  // department or job title audience read the people anchored here only.
+  const placed = deptIds.size > 0 || roleIds.size > 0 ? await peoplePlacedHere(orgId, { departmentIds: [...deptIds], roleIds: [...roleIds] }, "active") : [];
+  const here = await peopleHereAmong(orgId, [...userIds, ...placed.map((p) => p.id)], "active");
+  const users = [...here.values()]
+    .sort(byName())
+    .map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, avatar: p.avatar, departmentId: p.seat.departmentId, roleId: p.seat.roleId }));
 
   const byId = new Map(users.map((u) => [u.id, u]));
   const byDept = new Map<string, typeof users>();
@@ -298,10 +290,9 @@ export async function canSeeGoal(
   const callerId = getUserId(session);
   if (okr.ownerId === callerId) return true;
 
-  const me = await prisma.user.findUnique({
-    where: { id: callerId },
-    select: { departmentId: true, roleId: true },
-  });
+  // Their department and job title at their seat here (E15, step 8): the
+  // membership's for someone here through one, never the account's.
+  const me = await placementHereOf(getOrgId(session), callerId);
   if (okr.level === "DEPARTMENT" && okr.departmentId && me?.departmentId === okr.departmentId) return true;
 
   // The caller in the goal's audience, matched on their own user row,
@@ -328,7 +319,7 @@ export async function canSeeGoal(
     // them), never to everyone with a report: the same rule GET lists by.
     if (!okr.ownerId && seesUnownedGoals({ manager: isManager(session) })) return true;
     if (okr.ownerId && tree.has(okr.ownerId)) return true;
-    const teamOr = await teamAudienceVisibilityOr(teamIds);
+    const teamOr = await teamAudienceVisibilityOr(getOrgId(session), teamIds);
     if (teamOr.length > 0 && (await prisma.oKR.count({ where: { id: okr.id, OR: teamOr } })) > 0) return true;
   }
   return false;
@@ -385,9 +376,8 @@ export async function goalVisibilityOr(
   if (isOrgWideAlignment(session)) return null;
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
-  const me = pre.me !== undefined
-    ? pre.me
-    : await prisma.user.findUnique({ where: { id: callerId }, select: { departmentId: true, roleId: true } });
+  // Their department and job title at their seat here (E15, step 8).
+  const me = pre.me !== undefined ? pre.me : await placementHereOf(orgId, callerId);
   const tagIds = pre.tagIds ?? (await getUserTagIds(orgId, callerId));
   const treeIds = pre.treeIds ?? (await getTeamUserIds(orgId, callerId));
   const hasTree = isManager(session) || treeIds.length > 1;
@@ -399,7 +389,7 @@ export async function goalVisibilityOr(
     // Unowned goals only for the manager tier (seesUnownedGoals): one
     // report must not open every ownerless goal in the org.
     if (seesUnownedGoals({ manager: isManager(session) })) visible.push({ ownerId: null });
-    visible.push(...(await teamAudienceVisibilityOr(treeIds)));
+    visible.push(...(await teamAudienceVisibilityOr(orgId, treeIds)));
   }
   return visible;
 }
@@ -407,17 +397,18 @@ export async function goalVisibilityOr(
 /**
  * WHERE fragments for a manager's list: goals whose audience covers anyone
  * in their report tree, directly, or through the department/role a team
- * member currently sits in.
+ * member currently sits in HERE: the placement each one's seat in this
+ * workspace holds, ACTIVE there (docs/plans/workspace-status-2.md E15, step
+ * 8; before, the account's, another workspace's for someone here through a
+ * membership).
  */
 export async function teamAudienceVisibilityOr(
+  organizationId: string,
   teamIds: string[],
 ): Promise<Prisma.OKRWhereInput[]> {
   if (teamIds.length === 0) return [];
   const or: Prisma.OKRWhereInput[] = [{ assignees: { some: { userId: { in: teamIds } } } }];
-  const rows = await prisma.user.findMany({
-    where: { id: { in: teamIds }, ...ACTIVE_USER },
-    select: { departmentId: true, roleId: true },
-  });
+  const rows = [...(await peopleHereAmong(organizationId, teamIds, "active")).values()].map((p) => p.seat);
   const deptIds = [...new Set(rows.map((r) => r.departmentId).filter((x): x is string => !!x))];
   const roleIds = [...new Set(rows.map((r) => r.roleId).filter((x): x is string => !!x))];
   if (deptIds.length > 0) or.push({ assignees: { some: { departmentId: { in: deptIds } } } });

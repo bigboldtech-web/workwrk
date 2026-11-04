@@ -32,6 +32,16 @@
 // a manager who last switched to another workspace, on any device, still
 // works here and is still on these lines.
 //
+// THE LINE IS THIS WORKSPACE'S (docs/plans/workspace-status-2.md E1, E2, E5,
+// step 2). A person's manager here is held by the row that holds their seat
+// here: User.managerId for someone anchored here, the membership's own
+// managerId for anyone else (acting-workspace.ts seatsHeldFor, and
+// reportsHereOf for "who reports to X here"), and a dotted line counts here
+// only when it names this workspace (UserDottedLine.organizationId). Pat,
+// anchored at A under Max and working at B under Dana, is Max's report in A
+// and Dana's in B, and never the other way round: the account's line is
+// A's, and B never reads it.
+//
 // An Admin sees the stored lines on the Members drawer and can move them
 // (/api/users/[id]/agent-reports, the handover's own report routing).
 //
@@ -41,7 +51,8 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere, seatsHeldFor } from "./acting-workspace";
+import { ENDED_STATUS } from "./workspace-seat";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, reportsHereOf, seatsHeldFor, type ReportHere } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 
@@ -84,8 +95,19 @@ async function factsHere(organizationId: string, rows: readonly LineRow[], db: D
   const held = await seatsHeldFor(organizationId, rows, db);
   return rows.flatMap((r): Array<[string, LineFacts]> => {
     const seat = held.get(r.id);
-    return seat ? [[r.id, { managerId: r.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated }]] : [];
+    // The line here is the seat's (E1): the account's only where they are
+    // anchored here. Inactive: the seat deactivated here, or, for someone here
+    // through a membership, an account that has ended where it is anchored
+    // (D12: it cannot sign in anywhere, so it can take no reports here; the
+    // step 4 review L1), as managerCandidateIn's live check reads it.
+    const ended = r.organizationId !== organizationId && r.status === "INACTIVE";
+    return seat ? [[r.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated || ended }]] : [];
   });
+}
+
+/** The line facts of people who report to someone here (reportsHereOf's answers): their line here, the tier and the status held here. */
+function reportFacts(rows: readonly ReportHere[]): Array<[string, LineFacts]> {
+  return rows.map((r) => [r.id, { managerId: r.managerId, agent: isAgentOf(r.level), inactive: r.deactivated }]);
 }
 
 /**
@@ -101,8 +123,8 @@ async function factsHere(organizationId: string, rows: readonly LineRow[], db: D
  */
 export async function lineFactsAround(organizationId: string, personId: string, alsoFrom: readonly string[], db: Db = prisma): Promise<Map<string, LineFacts>> {
   const facts = new Map<string, LineFacts>();
-  const reports = await db.user.findMany({ where: { managerId: personId, deletedAt: null }, select: LINE_SELECT });
-  for (const [id, f] of await factsHere(organizationId, reports, db)) facts.set(id, f);
+  // Their reports HERE, both halves (E1): never a report whose line names them in another workspace.
+  for (const [id, f] of reportFacts(await reportsHereOf(organizationId, [personId], db))) facts.set(id, f);
   const walked = new Set<string>();
   let wave = [...new Set([personId, ...alsoFrom])];
   for (let step = 0; step < WALK_STEPS && wave.length; step += 1) {
@@ -148,27 +170,61 @@ export async function liveHereAmong(organizationId: string, ids: readonly string
 export async function effectiveManagersOf(organizationId: string, userIds: readonly string[], db: Db = prisma): Promise<Map<string, string | null>> {
   const ids = [...new Set(userIds)].filter(Boolean);
   if (ids.length === 0) return new Map();
-  const rows = await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, managerId: true, organizationId: true, accessLevel: true } });
-  const here = await levelsHeldFor(organizationId, rows, db);
-  const people = rows.filter((r) => here.has(r.id));
+  const rows = await db.user.findMany({ where: { id: { in: ids } }, select: LINE_SELECT });
+  // Who is answered: anyone anchored here, and a membership person while
+  // their seat here is live (levelsHeldFor's rule, read from the seats);
+  // each with THEIR LINE HERE (E1), never the account's for a membership.
+  const seats = await seatsHeldFor(organizationId, rows, db);
+  const people = rows.flatMap((r) => {
+    const seat = seats.get(r.id);
+    return seat && (r.organizationId === organizationId || !seat.deactivated) ? [{ id: r.id, managerId: seat.managerId }] : [];
+  });
+  return managersPastAgents(organizationId, people, db);
+}
+
+/**
+ * The walk up past Agents behind effectiveManagersOf (and the digests'
+ * memberManagersOf): for each person and the manager their line here
+ * names, that manager, or past an Agent the next one up who is none, read
+ * at the seat each holds here: their line here and their tier here. A
+ * manager anchored elsewhere counts only while their membership here is
+ * live (D12); someone who holds no seat here is never a manager here.
+ *
+ * NOR IS A MANAGER WHOSE ACCOUNT HAS ENDED (docs/plans/workspace-status-2.md,
+ * the final review, integrity M2), as staleLinesOf judges a line: removed
+ * where they are anchored (deletedAt) or deactivated there (the account's
+ * status INACTIVE), whether that is here or in another workspace. E4 keeps
+ * a line on its manager's ended seat, so a restore can bring it back under
+ * its check; read as a manager, it would send a review, a timesheet or a
+ * weekly review to someone who cannot sign in anywhere. Before, Max, whose
+ * account a D4 end removed in B while A was suspended, was still Pat's
+ * manager in A for every read, with nobody in A told: the person now has
+ * none, as with no line (the launcher reviews; membership.ts
+ * unattendedRecipient answers the same).
+ */
+export async function managersPastAgents(
+  organizationId: string,
+  people: ReadonlyArray<{ id: string; managerId: string | null }>,
+  db: Db = prisma,
+): Promise<Map<string, string | null>> {
   const facts = new Map<string, LineFacts>();
   const foreign = new Set<string>();
   let frontier = [...new Set(people.map((p) => p.managerId).filter((m): m is string => !!m))];
   for (let round = 0; round < ROUNDS && frontier.length; round += 1) {
-    const got = await db.user.findMany({
-      where: { id: { in: frontier }, deletedAt: null },
-      select: { id: true, managerId: true, accessLevel: true, status: true, organizationId: true },
-    });
-    const elsewhere = got.filter((g) => g.organizationId !== organizationId).map((g) => g.id);
-    const heldThere = elsewhere.length ? await levelsHeldIn(organizationId, elsewhere, db) : new Map<string, string>();
+    // Every manager named, ended or not: an ended one is answered as none, never as stored.
+    const got = await db.user.findMany({ where: { id: { in: frontier } }, select: { ...LINE_SELECT, deletedAt: true } });
+    const live = got.filter((g) => g.deletedAt == null && g.status !== ENDED_STATUS);
+    for (const g of got) if (!live.includes(g)) foreign.add(g.id); // their account has ended: never a manager
+    const seats = await seatsHeldFor(organizationId, live, db);
     const walked: string[] = [];
-    for (const g of got) {
-      const level = g.organizationId === organizationId ? g.accessLevel : heldThere.get(g.id);
-      if (level === undefined) {
+    for (const g of live) {
+      const seat = seats.get(g.id);
+      // A membership seat counts only while it is live here (levelsHeldIn's rule).
+      if (!seat || (g.organizationId !== organizationId && seat.deactivated)) {
         foreign.add(g.id); // holds nothing here: never a manager here
         continue;
       }
-      facts.set(g.id, { managerId: g.managerId, agent: isAgentOf(level), inactive: g.status === "INACTIVE" });
+      facts.set(g.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated });
       walked.push(g.id);
     }
     frontier = [...new Set(walked.map((id) => facts.get(id)!).filter((f) => f.agent && f.managerId && !facts.has(f.managerId)).map((f) => f.managerId as string))];
@@ -196,12 +252,9 @@ export async function effectiveDirectReportIds(organizationId: string, managerId
   const walked = new Set<string>([managerId]);
   let frontier = [managerId];
   for (let round = 0; round < ROUNDS && frontier.length; round += 1) {
-    const rows = await db.user.findMany({
-      where: { managerId: { in: frontier }, deletedAt: null },
-      select: LINE_SELECT,
-    });
+    // Who reports to them HERE (E1), both halves.
     const next: string[] = [];
-    for (const [id, k] of await factsHere(organizationId, rows, db)) {
+    for (const [id, k] of reportFacts(await reportsHereOf(organizationId, frontier, db))) {
       if (id === managerId) continue;
       out.add(id);
       if (k.agent && !walked.has(id)) {
@@ -227,12 +280,9 @@ async function walkThroughAgents(organizationId: string, seeds: ReadonlyMap<stri
   const walked = new Set<string>(seeds.keys());
   let frontier = new Map(seeds);
   for (let round = 0; round < ROUNDS && frontier.size; round += 1) {
-    const rows = await db.user.findMany({
-      where: { managerId: { in: [...frontier.keys()] }, deletedAt: null },
-      select: LINE_SELECT,
-    });
+    // Who reports to them HERE (E1), both halves.
     const next = new Map<string, string>();
-    for (const [id, k] of await factsHere(organizationId, rows, db)) {
+    for (const [id, k] of reportFacts(await reportsHereOf(organizationId, [...frontier.keys()], db))) {
       const owner = k.managerId ? frontier.get(k.managerId) : undefined;
       if (owner === undefined || id === owner) continue;
       const set = out.get(owner) ?? new Set<string>();
@@ -280,10 +330,9 @@ export async function listedUnderAgents(organizationId: string, agentIds: readon
 export async function reportsThroughAgents(organizationId: string, managerId: string, db: Db = prisma): Promise<string[]> {
   const all = await effectiveDirectReportIds(organizationId, managerId, db);
   if (all.length === 0) return [];
-  // Their own stored reports, wherever each is anchored: only who is listed
-  // under an Agent below them is kept (`all` holds only people here).
-  const stored = await db.user.findMany({ where: { managerId, deletedAt: null }, select: { id: true } });
-  const own = new Set(stored.map((s) => s.id));
+  // Their own stored reports here (E1): only who is listed under an Agent
+  // below them is kept.
+  const own = new Set((await reportsHereOf(organizationId, [managerId], db)).map((r) => r.id));
   return all.filter((id) => !own.has(id));
 }
 
@@ -294,7 +343,8 @@ export async function reportsThroughAgents(organizationId: string, managerId: st
  */
 export async function countedDottedReportIds(organizationId: string, managerId: string, db: Db = prisma): Promise<string[]> {
   if (await managesNobody(managerId, organizationId, db)) return [];
-  const rows = await db.userDottedLine.findMany({ where: { managerId, user: { deletedAt: null } }, select: { userId: true } });
+  // This workspace's dotted lines only (E2).
+  const rows = await db.userDottedLine.findMany({ where: { organizationId, managerId, user: { deletedAt: null } }, select: { userId: true } });
   const ids = [...new Set(rows.map((r) => r.userId))].filter((id) => id !== managerId);
   const here = await liveHereAmong(organizationId, ids, db);
   return ids.filter((id) => here.has(id));
@@ -306,8 +356,9 @@ export async function countedDottedReportIds(organizationId: string, managerId: 
  * removed.
  */
 export async function countedDottedManagerIds(organizationId: string, userId: string, db: Db = prisma): Promise<string[]> {
+  // This workspace's dotted lines only (E2).
   const rows = await db.userDottedLine.findMany({
-    where: { userId, manager: { deletedAt: null } },
+    where: { organizationId, userId, manager: { deletedAt: null } },
     select: { managerId: true },
   });
   const ids = [...new Set(rows.map((r) => r.managerId))];
@@ -346,12 +397,13 @@ export async function agentsWithStoredReports(
   if (agentIds.length === 0) return new Map();
   // The live people listed under them who hold a level here, each once per
   // kind (batch 5: the people anchored here alone missed anyone who had
-  // switched away, so the drawer offered no move for them).
+  // switched away, so the drawer offered no move for them): their lines
+  // HERE (E1, E2), the solid ones both halves of reportsHereOf.
   const [solid, dotted] = await Promise.all([
-    db.user.findMany({ where: { managerId: { in: agentIds }, deletedAt: null }, select: { id: true, managerId: true } }),
-    db.userDottedLine.findMany({ where: { managerId: { in: agentIds }, user: { deletedAt: null } }, select: { userId: true, managerId: true } }),
+    reportsHereOf(organizationId, agentIds, db),
+    db.userDottedLine.findMany({ where: { organizationId, managerId: { in: agentIds }, user: { deletedAt: null } }, select: { userId: true, managerId: true } }),
   ]);
-  const here = await liveHereAmong(organizationId, [...solid.map((u) => u.id), ...dotted.map((d) => d.userId)], db);
+  const here = new Set([...solid.map((u) => u.id), ...(await liveHereAmong(organizationId, dotted.map((d) => d.userId), db))]);
   const out = new Map<string, { solid: number; dotted: number }>();
   const bump = (agent: string, kind: "solid" | "dotted", person: string, seen: Set<string>) => {
     const key = `${agent}\n${person}`;
@@ -368,101 +420,11 @@ export async function agentsWithStoredReports(
   return out;
 }
 
-/**
- * Is this stored dotted line another workspace's (pure; batch 6's rule)? The
- * manager holds no level here and the line counts in another workspace the
- * person works in (relied or shared), or holds the Agent tier here, where the
- * line counts for nobody, and another workspace relies on it.
- */
-function dottedIsOthers(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): boolean {
-  return levelHere === undefined ? !!there : isAgentOf(levelHere) && there === "relied";
-}
-
-/**
- * A person's dotted lines that are another workspace's, by manager
- * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the
- * manager holds no level here and holds one in another workspace the person
- * works in, or holds the Agent tier here (the line counts for nobody here)
- * and is no Agent in another workspace the person works in, where the line
- * counts. A UserDottedLine is one row every workspace the person belongs to
- * reads, so this workspace never checks, replaces or deletes these
- * (PUT /api/users/[id]/dotted-lines).
- */
-export async function othersDottedLines(organizationId: string, userId: string, db: Db = prisma): Promise<Set<string>> {
-  const rows = await db.userDottedLine.findMany({ where: { userId }, select: { managerId: true } });
-  const managers = [...new Set(rows.map((r) => r.managerId))];
-  if (managers.length === 0) return new Set();
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, managers, db),
-    linesElsewhere(organizationId, managers.map((managerId) => ({ personId: userId, managerId })), db),
-  ]);
-  return new Set(managers.filter((managerId) => dottedIsOthers(held.get(managerId), there.get(lineKey({ personId: userId, managerId })))));
-}
-
-/**
- * Whose a stored Reports to is (pure; batch 7, and batch 8 for the Agent).
- * Another workspace the person works in relies on the line, and here either
- * the manager holds no level ("unnamed": this workspace is never told who)
- * or holds the Agent tier, where the line counts for nobody ("agent": they
- * are a person of this workspace, so they may be named). The dotted lines'
- * rule (dottedIsOthers), for the solid line: only "relied" counts here, since
- * a line the other workspace reads only through an Agent there counts for
- * nobody there either.
- */
-function managerLineStanding(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): OthersManagerLine | null {
-  if (there !== "relied") return null;
-  if (levelHere === undefined) return "unnamed";
-  return isAgentOf(levelHere) ? "agent" : null;
-}
-
-/** A Reports to another workspace relies on: "unnamed" when the manager holds no level here, "agent" when they hold the Agent tier here. */
-export type OthersManagerLine = "unnamed" | "agent";
-
-/**
- * Is the person's stored Reports to another workspace's line (batch 7)?
- * User.managerId is one column, so a write here changes it there too. The
- * person record says "Reports to someone in another workspace" for an
- * unnamed one, and PATCH Reports to asks before it replaces either.
- * Batch 8: an Agent here who manages the person in another workspace counts
- * too. Before, only a manager with no level here did, so an Admin moving a
- * report off an Agent here (the Members drawer tells them to) rewrote that
- * workspace's live line with no question, while the Agent move and the
- * dotted lines' rule kept it.
- */
-export async function managerLineIsOthers(organizationId: string, userId: string, managerId: string | null, db: Db = prisma): Promise<OthersManagerLine | null> {
-  if (!managerId) return null;
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, [managerId], db),
-    linesElsewhere(organizationId, [{ personId: userId, managerId }], db),
-  ]);
-  return managerLineStanding(held.get(managerId), there.get(lineKey({ personId: userId, managerId })));
-}
-
-/**
- * The lines on a person's record that are another workspace's (batch 7), in
- * one pass: whether the stored manager is (managerLineIsOthers's rule, an
- * Agent here included since batch 8), and which dotted lines are
- * (othersDottedLines's rule). GET /api/users/[id] leaves those out of the
- * names it shows and says how many there are instead; a manager it names
- * (an Agent here) stays named (named-here.ts).
- */
-export async function recordLinesOfOthers(
-  organizationId: string,
-  userId: string,
-  managerId: string | null,
-  dottedManagerIds: readonly string[],
-  db: Db = prisma,
-): Promise<{ managerElsewhere: boolean; dottedKept: Set<string> }> {
-  const dotted = [...new Set(dottedManagerIds)];
-  const ids = [...new Set([...(managerId ? [managerId] : []), ...dotted])];
-  if (ids.length === 0) return { managerElsewhere: false, dottedKept: new Set() };
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, ids, db),
-    linesElsewhere(organizationId, ids.map((m) => ({ personId: userId, managerId: m })), db),
-  ]);
-  const standing = (m: string) => there.get(lineKey({ personId: userId, managerId: m }));
-  return {
-    managerElsewhere: !!managerId && managerLineStanding(held.get(managerId), standing(managerId)) !== null,
-    dottedKept: new Set(dotted.filter((m) => dottedIsOthers(held.get(m), standing(m)))),
-  };
-}
+// The relied-line helpers retired with workspace-status-2.md step 4 (E6):
+// othersDottedLines (the dotted-lines PUT's keep list), managerLineIsOthers
+// (PATCH Reports to's 409 manager_elsewhere) and, in step 3,
+// recordLinesOfOthers (the record's "Reports to someone in another
+// workspace" and its count of dotted lines kept for another workspace). Since
+// E1 and E2 every line is one workspace's, on the row that holds the seat
+// there, so a write here never reaches another workspace's line and nothing
+// is kept, asked or said about one.

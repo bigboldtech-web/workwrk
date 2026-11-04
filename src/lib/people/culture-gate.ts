@@ -18,7 +18,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
 import { candorInvitedFor, surveyTargetedFor } from "./teams-counts";
@@ -86,13 +85,12 @@ export async function cultureGate(key: "kudos" | "candor" | "surveys", callbackU
     return base;
   }
 
-  const me = await prisma.user.findUnique({
-    where: { id: viewer.userId },
-    select: { officeId: true, departmentId: true },
-  });
+  // Their office and department at their seat here, as the viewer reads
+  // them (the membership's for someone here through one), never the
+  // account's (docs/plans/workspace-status-2.md E15, step 8), as Candor's above.
   const targeted = await surveyTargetedFor(viewer.userId, viewer.organizationId, {
-    officeId: me?.officeId ?? null,
-    departmentId: me?.departmentId ?? null,
+    officeId: viewer.officeId ?? null,
+    departmentId: viewer.departmentId ?? null,
   });
   if (!targeted) notFound();
   return base;

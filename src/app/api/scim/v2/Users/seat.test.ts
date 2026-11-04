@@ -137,7 +137,9 @@ describe("the member's seat here, through the resource (D14)", () => {
     // Before: the membership deleted, and Dana's tokenVersion bumped (signed out of A).
     expect(db.row("organizationMembership", "m-dana-b")).toMatchObject({ status: "INACTIVE", removedAt: null });
     expect(db.row("user", "dana")).toMatchObject({ organizationId: "a", status: "ACTIVE", tokenVersion: 0 });
-    expect(st.handovers[0]).toMatchObject({ fromId: "dana", leavesOnlyHere: true });
+    // This workspace's handover, as every one is since workspace-status-2 step 4 (E6).
+    expect(st.handovers[0]).toMatchObject({ fromId: "dana" });
+    expect(st.handovers[0]).not.toHaveProperty("leavesOnlyHere");
     const on = await PUT(new NextRequest("https://app.test/x", { method: "PUT", body: JSON.stringify({ userName: "other@x.test", name: { givenName: "Other", familyName: "Name" }, active: true }) }), params("dana"));
     // Before: answered as stored, nothing brought back.
     expect(on.status).toBe(200);
@@ -161,10 +163,17 @@ describe("the member's seat here, through the resource (D14)", () => {
 // in the same transaction; a closed workspace takes nobody back; and the
 // anchored door after a real D3 move answers as for a member.
 describe("one way back for a deactivated seat, whichever door (step 4 review)", () => {
-  /** Dana reports to Mo, who left B; she has an open review with him. */
+  /**
+   * Dana reports to Mo in B, and Mo left B; she has an open review with him.
+   * Her line in B is her membership's (workspace-status-2.md E1); her
+   * account's line is A's, to Amy, and B never touches it (step 4: before,
+   * B's reactivation read and cleared the account's line).
+   */
   const staleLine = () => {
     person("mo", "b", { status: "INACTIVE", firstName: "Mo", lastName: "Gone" });
-    db.row("user", "dana").managerId = "mo";
+    person("amy", "a", { firstName: "Amy", lastName: "Ash" });
+    db.row("organizationMembership", "m-dana-b").managerId = "mo";
+    db.row("user", "dana").managerId = "amy";
     db.seed("reviewCycle", { id: "rc1", organizationId: "b", status: "ACTIVE" });
     db.seed("review", { id: "rv1", cycleId: "rc1", subjectId: "dana", reviewerId: "mo", status: "PENDING" });
     db.row("organizationMembership", "m-dana-b").status = "INACTIVE";
@@ -179,7 +188,8 @@ describe("one way back for a deactivated seat, whichever door (step 4 review)", 
       staleLine();
       expect((await bringBack()).status).toBe(door === "POST" ? 201 : 200);
       expect(db.row("organizationMembership", "m-dana-b").status).toBe("ACTIVE");
-      expect(db.row("user", "dana").managerId).toBeNull();
+      expect(db.row("organizationMembership", "m-dana-b").managerId).toBeNull();
+      expect(db.row("user", "dana").managerId).toBe("amy");
       // Before (POST): the line cleared with no row, and the review left with Mo.
       expect(lineRows()).toHaveLength(1);
       expect(lineRows()[0]).toMatchObject({ actorType: "scim", targetId: "dana", oldValue: { managerId: "mo" } });
@@ -193,7 +203,8 @@ describe("one way back for a deactivated seat, whichever door (step 4 review)", 
     const { scimReactivateSeat } = await import("@/lib/scim-reactivate");
     expect(await scimReactivateSeat("b", "dana")).toMatchObject({ ok: true, restored: false });
     // Before (PATCH): the line cleared and kept, unlogged.
-    expect(db.row("user", "dana").managerId).toBe("mo");
+    expect(db.row("organizationMembership", "m-dana-b").managerId).toBe("mo");
+    expect(db.row("user", "dana").managerId).toBe("amy");
     expect(lineRows()).toEqual([]);
     expect(db.row("review", "rv1").reviewerId).toBe("mo");
   });

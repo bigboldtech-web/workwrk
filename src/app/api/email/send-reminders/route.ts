@@ -14,6 +14,7 @@ import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, sweepMembershipSelect, taskPeople } from "@/lib/reminder-sweep";
 import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead, type DigestManager } from "@/lib/access/digest-recipients";
+import { everyoneHereIds, membershipHereWhere, seatedHereAmong } from "@/lib/access/seated-here";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -195,6 +196,20 @@ async function handle(req: NextRequest) {
     let reminders = 0;
     for (const organizationId of await liveWorkspaceIds()) {
       const byManager = new Map<string, { mgr: DigestManager; names: string[] }>();
+      const nameUnderManagers = async (people: ReadonlyArray<{ id: string; firstName: string; lastName: string }>) => {
+        const mgrOf = await digestManagersOf(organizationId, people.map((p) => p.id));
+        for (const p of people) {
+          const mgr = mgrOf.get(p.id);
+          if (!mgr) continue;
+          const e = byManager.get(mgr.id) ?? { mgr, names: [] };
+          e.names.push(`${p.firstName} ${p.lastName}`);
+          byManager.set(mgr.id, e);
+        }
+      };
+      // Everyone here with a line HERE, both halves
+      // (docs/plans/workspace-status-2.md E1, step 2): the people anchored
+      // here by their account's line, then the people here through a live
+      // membership by its line. Before, the people anchored here alone.
       await eachPage(
         ({ take, last }) => prisma.user.findMany({
           where: { organizationId, ...LIVE_PERSON, managerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
@@ -202,16 +217,16 @@ async function handle(req: NextRequest) {
           orderBy: { id: "asc" },
           take,
         }),
-        async (people) => {
-          const mgrOf = await digestManagersOf(organizationId, people.map((p) => p.id));
-          for (const p of people) {
-            const mgr = mgrOf.get(p.id);
-            if (!mgr) continue;
-            const e = byManager.get(mgr.id) ?? { mgr, names: [] };
-            e.names.push(`${p.firstName} ${p.lastName}`);
-            byManager.set(mgr.id, e);
-          }
-        },
+        nameUnderManagers,
+      );
+      await eachPage(
+        ({ take, last }) => prisma.organizationMembership.findMany({
+          where: { ...membershipHereWhere(organizationId, "live"), managerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
+          select: { id: true, user: { select: { id: true, firstName: true, lastName: true } } },
+          orderBy: { id: "asc" },
+          take,
+        }),
+        (rows) => nameUnderManagers(rows.map((r) => r.user)),
       );
       await Promise.all(
         [...byManager.values()].map(({ mgr, names }) => {
@@ -507,21 +522,25 @@ async function handle(req: NextRequest) {
   // ──────────────────────────────────────
   if (type === "all" || type === "kpi-recording") {
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    // The KRAs and KPI numbers of the workspace the account is in, where
+    // the email's link opens (docs/plans/workspace-status-2.md, the final
+    // review, product M5): an assignment names no workspace, and someone who
+    // joined another workspace by invitation holds its KRAs too, which that
+    // workspace's My KRAs shows and this one's never does.
     const assignments = await prisma.kRAAssignment.findMany({
       where: { status: "ACTIVE", user: { ...LIVE_PERSON, organization: LIVE_ORG } },
-      select: { userId: true, user: { select: { id: true, email: true, firstName: true, organizationId: true } } },
+      select: { userId: true, kra: { select: { organizationId: true } }, user: { select: { id: true, email: true, firstName: true, organizationId: true } } },
     });
     const uniqueUsers = new Map<string, any>();
-    for (const a of assignments) uniqueUsers.set(a.userId, a.user);
+    for (const a of assignments) if (a.kra.organizationId === a.user.organizationId) uniqueUsers.set(a.userId, a.user);
 
     // Fetch all users' existing KPI records for the period in ONE query
     // instead of N per-user counts (previously: 500 users = 500 round trips).
     const usersWithRecords = new Set(
       (await prisma.kPIRecord.findMany({
         where: { userId: { in: Array.from(uniqueUsers.keys()) }, period: currentPeriod },
-        select: { userId: true },
-        distinct: ["userId"],
-      })).map((r) => r.userId),
+        select: { userId: true, kpi: { select: { organizationId: true } }, user: { select: { organizationId: true } } },
+      })).filter((r) => r.kpi.organizationId === r.user.organizationId).map((r) => r.userId),
     );
 
     const toRemind = Array.from(uniqueUsers.entries()).filter(([userId]) => !usersWithRecords.has(userId));
@@ -557,15 +576,25 @@ async function handle(req: NextRequest) {
     // Fan out across policies, and within each policy fan out across users.
     const perPolicyCounts = await Promise.all(
       policies.map(async (p) => {
-        const [allUsers, ackRows] = await Promise.all([
-          prisma.user.findMany({
-            where: { organizationId: p.organizationId, ...LIVE_PERSON },
-            select: { id: true, email: true },
-          }),
+        // The policy's audience as its dashboard and ledger read it (the
+        // step 8 review L1): its assignees when it has any, else everyone
+        // here, each at their seat, the two halves
+        // (docs/plans/workspace-status-2.md E15). Live seats, the rule this
+        // reminder had for the people anchored here (LIVE_PERSON) and the
+        // one every audience needs of a membership person, so nobody this
+        // workspace ended is emailed. Before, everyone anchored here, even
+        // for a policy assigned to three people, and nobody here through a
+        // membership.
+        const [assigned, ackRows] = await Promise.all([
+          prisma.policyAssignment.findMany({ where: { policyId: p.id }, select: { userId: true } }),
           prisma.policyAcknowledgment.findMany({
             where: { policyId: p.id }, select: { userId: true },
           }),
         ]);
+        const audience = assigned.length
+          ? [...(await seatedHereAmong(p.organizationId, assigned.map((a) => a.userId), "live"))]
+          : await everyoneHereIds(p.organizationId, "live");
+        const allUsers = audience.length ? await prisma.user.findMany({ where: { id: { in: audience } }, select: { id: true, email: true } }) : [];
         const acked = new Set(ackRows.map((a) => a.userId));
         const pending = allUsers.filter((u) => !acked.has(u.id));
         const results = await Promise.all(

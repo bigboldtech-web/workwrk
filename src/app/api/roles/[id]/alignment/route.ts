@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { kpiDirection, KPI_ORDER } from "@/lib/alignment";
+import { membershipsPlacedHere } from "@/lib/access/profile-here";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -49,6 +50,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
   if (!role) return jsonError("Role not found", 404);
+  // Everyone who holds the title here: the people anchored here
+  // (Role.users) and the people here through a membership whose membership
+  // holds it, kept seats (docs/plans/workspace-status-2.md E15, step 8). The
+  // template's KRAs reach the people anchored here only: none is assigned to
+  // someone here through a membership (the step 5 review M1), so
+  // `assignmentCount` below never counts them.
+  const placedThrough = await membershipsPlacedHere(orgId, { roleId: id });
 
   return jsonSuccess({
     role: {
@@ -59,8 +67,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       department: role.department,
     },
     // How many people hold this role today (direct assignment + scoped
-    // role instances). Each of them inherits this same template.
-    holders: { users: role._count.users, instances: role._count.instances },
+    // role instances). Each of them anchored here inherits this same template.
+    holders: { users: role._count.users + placedThrough, instances: role._count.instances },
     kras: role.kraTemplates.map((kra) => ({
       id: kra.id,
       name: kra.name,

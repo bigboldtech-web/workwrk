@@ -35,6 +35,8 @@ vi.mock("@/lib/prisma", () => {
       organizationMembership: {
         findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
           st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
+        // The membership half of "who reports to X here" (reportsHereOf): nobody here holds a line through one.
+        findMany: async () => [],
       },
       weeklyReview: {
         findUnique: async (a: { where: { id?: string } }) => (a.where.id ? { id: a.where.id, userId: "ida", organizationId: "org" } : null),
@@ -72,8 +74,11 @@ describe("the direct queue", () => {
 
   it("holds, for the manager above, the people listed under the Agent", async () => {
     const where = (await managerQueueWhereFor("mona", "org")) as { AND: [unknown, { OR: unknown[] }] };
-    expect(where.AND[1].OR).toContainEqual({ user: { managerId: "mona", deletedAt: null } });
-    expect(where.AND[1].OR).toContainEqual({ userId: { in: ["ida"] }, user: { deletedAt: null } });
+    // Her report here (sam, by his line here: docs/plans/workspace-status-2.md
+    // E1) and the person listed under him (ida), by id.
+    expect(where.AND[1].OR).toContainEqual({ userId: { in: ["sam", "ida"] }, user: { deletedAt: null } });
+    // The rows recorded to her whose subject has no line here.
+    expect(where.AND[1].OR).toContainEqual({ managerId: "mona", user: { deletedAt: null, OR: [{ organizationId: "org", managerId: null }, { organizationId: { not: "org" }, organizationMemberships: { some: { organizationId: "org", removedAt: null, managerId: null } } }] } });
   });
 
   // Docs-found fixes batch 4: the queue is read for one workspace, at the

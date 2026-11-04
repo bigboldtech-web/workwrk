@@ -30,7 +30,8 @@ export async function GET() {
   const orgId = (session.user as { organizationId: string }).organizationId;
 
   const missing = await prisma.user.count({
-    where: { organizationId: orgId, kraAssignments: { none: {} } },
+    // None of this workspace's KRAs (docs/plans/workspace-status-2.md, the final review, product M5).
+    where: { organizationId: orgId, kraAssignments: { none: { kra: { organizationId: orgId } } } },
   });
   return NextResponse.json({ missing });
 }

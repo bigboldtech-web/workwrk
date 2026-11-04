@@ -37,7 +37,7 @@ import { LEGACY_ADMIN_LEVELS } from "./legacy-levels";
 import { isAgentOf } from "./org-role";
 import { prisma } from "@/lib/prisma";
 import { isLockTimeout, LOCK_WAIT_MS, OrgRolesBusy } from "./org-roles-busy";
-import { levelsHeldIn, seatsHeldFor } from "./acting-workspace";
+import { levelsHeldIn, personSeatIn, reportsHereOf, seatsHeldFor } from "./acting-workspace";
 import { liveSeatWhere } from "./workspace-seat";
 import { JOIN_ROW_SELECT, joinedHere, joinRowsHere } from "./joined-here";
 import { lockPerson } from "./workspace-anchor";
@@ -463,17 +463,27 @@ async function applyRoleChangeIn(
  * them here, so a manager could be made an Agent with that report under them.
  * A report deactivated through their membership here counts too (kept
  * seats, step 1 review M2), as one deactivated while anchored here does.
+ *
+ * THIS WORKSPACE'S LINES (docs/plans/workspace-status-2.md E1, E2, E5,
+ * step 2): the solid reports are the people whose line HERE names them
+ * (reportsHereOf: the account's line for people anchored here, the
+ * membership's otherwise), the dotted ones this workspace's rows. Before,
+ * the solid read named no workspace at all, so rule 6 in B counted Pat's
+ * line to Max in A, and B could not make Max an Agent though nobody reports
+ * to him in B.
  */
 export async function reportCountOf(db: Db, organizationId: string, managerId: string): Promise<number> {
   const [solid, dotted] = await Promise.all([
-    db.user.findMany({ where: { managerId, deletedAt: null }, select: { id: true } }),
-    db.userDottedLine.findMany({ where: { managerId, user: { deletedAt: null } }, select: { userId: true } }),
+    reportsHereOf(organizationId, [managerId], db),
+    db.userDottedLine.findMany({ where: { organizationId, managerId, user: { deletedAt: null } }, select: { userId: true } }),
   ]);
-  const ids = new Set<string>([...solid.map((u) => u.id), ...dotted.map((d) => d.userId)]);
+  const ids = new Set<string>(solid.map((r) => r.id));
+  const dottedIds = new Set(dotted.map((d) => d.userId).filter((id) => !ids.has(id) && id !== managerId));
   ids.delete(managerId);
-  if (ids.size === 0) return 0;
-  const held = await levelsHeldIn(organizationId, [...ids], db, { keptSeats: true });
-  return [...ids].filter((id) => held.has(id)).length;
+  if (dottedIds.size === 0) return ids.size;
+  // A dotted report counts while they hold a seat here not removed (kept seats).
+  const held = await levelsHeldIn(organizationId, [...dottedIds], db, { keptSeats: true });
+  return ids.size + [...dottedIds].filter((id) => held.has(id)).length;
 }
 
 /** The words an audit row uses for a role: "Owner", "Admin", or the tier ("Manager"). */
@@ -619,19 +629,23 @@ export async function transferOwnership(
  *
  * THE SEAT HERE (docs/plans/workspace-status.md D12, D14). The person may
  * work here through a membership (SCIM's end of a membership seat hands
- * their work here over too): their line is the account's, one per account,
- * and is walked here as anyone's. A manager is read at the seat they hold
- * here (seatsHeldFor): one this workspace deactivated through their
- * membership is walked past, as a deactivated manager anchored here is (the
- * account ended where it is anchored is deactivated too), and one it
- * removed ends the walk, as a removed account does. Before, the person had
- * to be anchored here (a membership person's work always went to the first
+ * their work here over too). A manager is read at the seat they hold here
+ * (seatsHeldFor): one this workspace deactivated through their membership
+ * is walked past, as a deactivated manager anchored here is (the account
+ * ended where it is anchored is deactivated too), and one it removed ends
+ * the walk, as a removed account does. Before, the person had to be
+ * anchored here (a membership person's work always went to the first
  * Owner), and a manager deactivated here through a membership ended the
  * walk.
+ *
+ * THE LINE HERE (docs/plans/workspace-status-2.md E1, step 2). Every step is
+ * this workspace's line: the person's seat here, whatever its state (an
+ * ended seat keeps its line, E4), and each manager's seat here. Before, the
+ * walk climbed the account's line, so Pat's B work went to Max, her manager
+ * in A, rather than to Dana, who leads her in B.
  */
 export async function unattendedRecipient(organizationId: string, personId: string, db: Db = prisma): Promise<string | null> {
-  const person = await db.user.findUnique({ where: { id: personId }, select: { managerId: true } });
-  let cursor = person?.managerId ?? null;
+  let cursor = (await personSeatIn(organizationId, personId, db))?.managerId ?? null;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor) && seen.size < 64) {
     seen.add(cursor);
@@ -640,7 +654,7 @@ export async function unattendedRecipient(organizationId: string, personId: stri
     const m = await db.user.findFirst({ where: { id: cursor, deletedAt: null }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
     const seat = m ? (await seatsHeldFor(organizationId, [m], db)).get(m.id) : undefined;
     if (!m || !seat || m.id === personId) break;
-    if (isAgentOf(seat.level) || seat.deactivated || m.status === "INACTIVE") { cursor = m.managerId; continue; }
+    if (isAgentOf(seat.level) || seat.deactivated || m.status === "INACTIVE") { cursor = seat.managerId; continue; }
     return m.id;
   }
   const admins = (await liveAdminsOf(db, organizationId)).filter((a) => a.id !== personId);

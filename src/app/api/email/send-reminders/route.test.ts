@@ -90,13 +90,16 @@ vi.mock("@/lib/prisma", () => {
         const rows = Object.values(all).filter((u) => (where.deletedAt === null ? !u.deletedAt : true));
         // A digest's people who work here through a membership (docs-found
         // fixes batch 5, digest-recipients.ts memberManagersOf): live,
-        // anchored elsewhere, a member here, with their stored manager.
+        // anchored elsewhere, a member here. Their stored manager here is on
+        // their membership (docs/plans/workspace-status-2.md E1, below); the
+        // account's line is their own workspace's, which this database
+        // never holds.
         if (where.organizationMemberships) {
           const here = where.organizationMemberships.some.organizationId;
           return where.id.in
             .map((id) => all[id])
             .filter((u) => u && liveRow(u) && u.organizationId !== here && u.organizationMemberships.length > 0)
-            .map((u) => ({ id: u.id, managerId: storedManagerOf(u.id) }));
+            .map((u) => ({ ...u, ...legacyLevelRow(levelOf(u.id)), managerId: null }));
         }
         // The monthly evaluation before batch 4: every manager with a live report.
         if (where.directReports) {
@@ -118,8 +121,22 @@ vi.mock("@/lib/prisma", () => {
       },
     },
     organizationMembership: {
-      findMany: async ({ where }: { where: { organizationId: string; userId: { in: string[] } } }) =>
-        where.userId.in.filter((id) => (directory()[id]?.organizationMemberships.length ?? 0) > 0).map((userId) => ({ userId, role: levelOf(userId) })),
+      // By person (the levels and lines held here), or, for the monthly
+      // evaluation, every live membership here with a line, a page at a time.
+      // A member's stored manager here is the line on their membership (E1).
+      findMany: async ({ where }: { where: { organizationId: string; userId?: { in: string[] }; managerId?: unknown; id?: { gt: string } } }) => {
+        const members = Object.values(directory()).filter((u) => u.organizationId !== where.organizationId && u.organizationMemberships.length > 0);
+        if (!where.userId) {
+          return members
+            .filter((u) => liveRow(u) && storedManagerOf(u.id) && u.organizationMemberships.every((m) => (m.status ?? "ACTIVE") !== "INACTIVE" && !m.removedAt))
+            .map((u) => ({ id: u.organizationMemberships[0].id, user: { id: u.id, firstName: u.firstName, lastName: u.lastName } }))
+            .filter((r) => !where.id?.gt || r.id > where.id.gt)
+            .sort((a, b) => (a.id < b.id ? -1 : 1));
+        }
+        return where.userId.in
+          .filter((id) => (directory()[id]?.organizationMemberships.length ?? 0) > 0)
+          .map((userId) => ({ userId, role: levelOf(userId), managerId: storedManagerOf(userId) }));
+      },
     },
     userPreference: {
       findMany: async ({ where }: { where: { userId: { in: string[] } } }) =>
@@ -182,7 +199,10 @@ vi.mock("@/lib/policy-remind", () => ({ remindPolicyAssignmentsDue: async () => 
 vi.mock("@/lib/cron-auth", () => ({ cronRefusal: () => null }));
 // The line each person reports on, read as manager-lines.ts reads it: the
 // stored manager, or past an Agent the next one up who is none.
-vi.mock("@/lib/access/manager-lines", () => ({
+// effectiveManagersOf is scripted; the walk past Agents the member read
+// shares with it (managersPastAgents) is the real one, over the rows above.
+vi.mock("@/lib/access/manager-lines", async () => ({
+  ...(await vi.importActual<object>("@/lib/access/manager-lines")),
   effectiveManagersOf: async (organizationId: string, ids: readonly string[]) => {
     const all = directory();
     const out = new Map<string, string | null>();
@@ -566,6 +586,17 @@ describe("the digests, for people who work here through a membership, and the re
     db.sops = [{ id: "as5", title: "Partner onboarding", organizationId: "o1", userId: "u5", dueDate: lastWeek() }];
     await run("overdue-sops");
     expect(db.sent.map((m) => m.to).sort()).toEqual(["m1@example.test", "u5@example.test"]);
+  });
+
+  it("names a member in the monthly evaluation reminder of their manager here (workspace-status-2 step 2)", async () => {
+    // Dana works here through a membership, and her line here names Mia.
+    // Before: the reminder read the people anchored here alone, by their
+    // account's line, so Mia never heard Dana's name.
+    db.people = { u5: person("u5", "Dana", "partner", true) };
+    await run("monthly-evaluation");
+    const mia = db.sent.find((m) => m.to === "m1@example.test");
+    expect(mia?.html).toContain("Dana Lead");
+    expect(mia?.organizationId).toBe("o1");
   });
 
   it("walks a member's line past an Agent here, and tells no one outside this workspace, nor the person themselves", async () => {
