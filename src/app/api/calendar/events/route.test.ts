@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { itemTestDb, installItemTestDb, type ItemTestDb } from "@/lib/item-test-db";
+import { legacyLevelRow } from "@/lib/access/test-fixtures";
 
 vi.mock("next-auth", async () => {
   const { legacyTestSession } = await import("@/lib/access/test-fixtures");
@@ -16,7 +17,9 @@ vi.mock("next-auth", async () => {
 });
 vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/item-test-db")).itemTestPrisma }));
-vi.mock("@/lib/reporting-line", () => ({ getEffectiveReportTree: async () => ["u-mgr", "u-rep"] }));
+// The viewer's tree (reporting-line.ts's walk), set per test.
+const team = vi.hoisted(() => ({ tree: ["u-mgr", "u-rep"] }));
+vi.mock("@/lib/reporting-line", () => ({ getEffectiveReportTree: async () => team.tree }));
 vi.mock("@/lib/access/manager-lines", () => ({ managesNobody: async () => false }));
 // Who reports to the viewer here (the Team pill, workspace-status-2 step 2), and what it was asked.
 const pill = vi.hoisted(() => ({ reports: [] as unknown[], asked: [] as unknown[][] }));
@@ -43,6 +46,7 @@ function task(id: string, boardId: string, ownerId: string, metadata: unknown = 
 }
 
 beforeEach(() => {
+  team.tree = ["u-mgr", "u-rep"];
   pill.reports = [U_REP_HERE];
   pill.asked = [];
   readable.clear();
@@ -101,5 +105,51 @@ describe("the Team pill (docs/plans/workspace-status-2.md step 2)", () => {
     expect(pill.asked).toContainEqual(["org-1", ["u-mgr"]]);
     pill.reports = [U_REP_HERE];
     expect(await pillFor()).toBe(true);
+  });
+});
+
+describe("the Team calendar's People (docs/plans/workspace-status-2.md step 9, the live proof's L46)", () => {
+  // Each person as Postgres answers the reads: by id, and by workspace when
+  // the read names one. Pat's account is anchored in org-2 (A); she works in
+  // org-1 (B) through a membership, as a report of the viewer there. Rex's
+  // membership in org-1 was removed.
+  const since = new Date("2025-01-01");
+  const person = (id: string, firstName: string, organizationId: string) => ({
+    id, firstName, lastName: "Ng", email: `${id}@x.test`, avatar: null, organizationId, ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE",
+    deletedAt: null, departmentId: null, roleId: null, officeId: null, joinDate: since, createdAt: since,
+  });
+  const people = [person("u-mgr", "Dana", "org-1"), person("u-rep", "Lee", "org-1"), person("u-pat", "Pat", "org-2"), person("u-rex", "Rex", "org-2")];
+  const seat = (userId: string, removedAt: Date | null) => ({
+    userId, organizationId: "org-1", role: "EMPLOYEE", status: "ACTIVE", removedAt, departmentId: null, roleId: null, officeId: null, joinDate: null, createdAt: since, isPrimary: false,
+  });
+  const seats = [seat("u-pat", null), seat("u-rex", new Date("2026-10-01"))];
+  type Where = { id?: { in?: string[] }; userId?: { in?: string[] }; organizationId?: string };
+
+  beforeEach(() => {
+    team.tree = ["u-mgr", "u-rep", "u-pat", "u-rex"];
+    db.prisma.user = {
+      findFirst: async () => ({ id: "u-rep" }),
+      findMany: async (args?: Record<string, unknown>) => {
+        const where = args?.where as Where | undefined;
+        return people.filter((p) => (where?.id?.in ?? []).includes(p.id) && (where?.organizationId === undefined || p.organizationId === where.organizationId));
+      },
+    };
+    db.prisma.organizationMembership = {
+      findMany: async (args?: Record<string, unknown>) => {
+        const where = args?.where as Where | undefined;
+        return seats.filter((m) => m.organizationId === where?.organizationId && (where?.userId?.in ?? []).includes(m.userId));
+      },
+    };
+  });
+
+  it("gives a report here through a membership a row, and never someone whose seat here was removed", async () => {
+    // Before: the rows were read as `{ id: { in }, organizationId: orgId }`,
+    // the people anchored here only, so Dana's Team calendar in B had no row
+    // for Pat (her account is A's) though the tree held her.
+    const res = await GET(new Request("http://x/api/calendar/events?calendar=team&kinds=task&from=2026-09-14T00:00:00Z&to=2026-09-21T00:00:00Z"));
+    const body = (await res.json()) as { calendar: string; people: Array<{ id: string; name: string }> };
+    expect(body.calendar).toBe("team");
+    expect(body.people.map((p) => p.id)).toEqual(["u-mgr", "u-rep", "u-pat"]);
+    expect(body.people.find((p) => p.id === "u-pat")?.name).toBe("Pat Ng");
   });
 });

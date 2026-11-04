@@ -35,7 +35,7 @@
 // Lives under src/lib/access/: it decides which row holds a seat.
 
 import { Prisma } from "@/generated/prisma";
-import { lockPerson } from "./workspace-anchor";
+import { lockPeople, lockPerson } from "./workspace-anchor";
 
 type Tx = Prisma.TransactionClient;
 
@@ -206,6 +206,56 @@ export async function writeProfileHere(tx: Tx, seat: SeatRef, patch: ProfilePatc
     ? await tx.user.updateMany({ where: accountHolds(seat), data: data as Prisma.UserUncheckedUpdateManyInput })
     : await tx.organizationMembership.updateMany({ where: membershipHolds(seat), data: data as Prisma.OrganizationMembershipUncheckedUpdateManyInput });
   return n.count > 0;
+}
+
+/**
+ * One department here for many people at once (a SCIM Group's member add,
+ * remove and replace, scim-groups.ts): the rows and guards writeProfileHere
+ * applies to each person's seat, in one statement per half instead of one
+ * transaction per person (the step 9 live proof: a Group PUT of 5,000 took
+ * about 21 seconds that way).
+ * - The people are locked first, in id order, in one statement (lockPeople),
+ *   so a move landing meanwhile waits, or lands first and the guards below
+ *   see it, exactly as for one person.
+ * - The account half: accounts anchored HERE and not removed (accountHolds).
+ * - The membership half: memberships here not removed whose account is
+ *   anchored elsewhere and not ended (membershipHereWhere's kept seat; the
+ *   account read under its lock, so where it is anchored is the place it
+ *   was read in). The anchored workspace's own stale membership row is never
+ *   written.
+ * - Never a row already in `departmentId`; with `onlyFrom`, only a row still
+ *   in that department (a remove never takes someone out of a department
+ *   they were moved to since).
+ * Answers the ids written, sorted. Someone with no seat here, or a removed
+ * one, is written nowhere, as before.
+ */
+export async function placeDepartmentHere(
+  tx: Tx,
+  input: { organizationId: string; userIds: readonly string[]; departmentId: string | null; onlyFrom?: string },
+): Promise<string[]> {
+  const { organizationId, departmentId, onlyFrom } = input;
+  const ids = [...new Set(input.userIds)].filter(Boolean).sort();
+  if (ids.length === 0) return [];
+  await lockPeople(tx, ids);
+  // NULL is never "already there" for a department, and NOT (v = x) is not
+  // true for a NULL v, so the empty department is named on its own.
+  const placed = {
+    AND: [
+      ...(onlyFrom !== undefined ? [{ departmentId: onlyFrom }] : []),
+      departmentId === null ? { departmentId: { not: null } } : { OR: [{ departmentId: null }, { departmentId: { not: departmentId } }] },
+    ],
+  };
+  const accounts = await tx.user.updateManyAndReturn({
+    where: { id: { in: ids }, organizationId, deletedAt: null, ...placed },
+    data: { departmentId },
+    select: { id: true },
+  });
+  const memberships = await tx.organizationMembership.updateManyAndReturn({
+    where: { userId: { in: ids }, organizationId, removedAt: null, user: { organizationId: { not: organizationId }, deletedAt: null }, ...placed },
+    data: { departmentId },
+    select: { userId: true },
+  });
+  return [...accounts.map((r) => r.id), ...memberships.map((r) => r.userId)].sort();
 }
 
 /** One dotted line to write (E2): its manager, and the note, weight and dates it carries. */

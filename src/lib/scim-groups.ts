@@ -16,23 +16,27 @@
 // elsewhere. A seat removed here is neither listed nor written: its row is
 // the record for a restore (D8), and an identity provider never sees as a
 // member someone it cannot take out. Every write goes through
-// seat-writes.ts writeProfileHere, under the person's row lock, on the row
-// that holds the seat; a person with no seat here (or a removed one) is
+// seat-writes.ts placeDepartmentHere, under the people's row locks, on the
+// row that holds each seat; a person with no seat here (or a removed one) is
 // skipped, as before for anyone not anchored here.
 //
-// A member's write is one small transaction (their lock, their seat read,
-// the write). A deadlock Postgres broke, or a transaction past its time,
-// wrote nothing for that person: the route answers the 503 an identity
-// provider retries (groupWriteRetry), never a 500 (the step 5 review L5).
+// A request's member writes are ONE transaction (the step 9 live proof: one
+// per member made a Group PUT of 5,000 take about 21 seconds): the people
+// locked in id order in one statement, then each half written by one
+// guarded statement, with the same rows and guards as writeProfileHere on
+// each seat. A deadlock Postgres broke, or a transaction past its time
+// (BATCH_TX, 20 seconds), wrote nothing: the route answers the 503 an
+// identity provider retries (groupWriteRetry), never a 500 (the step 5
+// review L5), and the retry writes it all.
 //
 // Server only (prisma).
 
 import { prisma } from "@/lib/prisma";
 import { anchoredHereWhere, membershipHereWhere } from "@/lib/access/seated-here";
-import { lockPerson } from "@/lib/access/workspace-anchor";
-import { seatRefOf, writeProfileHere } from "@/lib/access/seat-writes";
+import { lockPeople } from "@/lib/access/workspace-anchor";
+import { placeDepartmentHere } from "@/lib/access/seat-writes";
 import { membershipsPlacedHere } from "@/lib/access/profile-here";
-import { retryAnswer } from "@/lib/access/org-roles-busy";
+import { BATCH_TX, retryAnswer } from "@/lib/access/org-roles-busy";
 
 /** A group member as SCIM lists them. */
 export interface GroupMember {
@@ -77,58 +81,35 @@ export async function groupMemberCountHere(organizationId: string, departmentId:
   return anchored + members;
 }
 
-/**
- * Sets one person's department HERE to `next` (null takes them out), on the
- * row that holds their seat here, under their row lock. With `onlyFrom`, only
- * while their department here is still that one (a remove from a group never
- * takes someone out of another department they were moved to since). False
- * when nothing was written: no seat here (or a removed one), already there,
- * or no longer in `onlyFrom`.
- */
-async function placeHere(organizationId: string, userId: string, next: string | null, onlyFrom?: string): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
-    await lockPerson(tx, userId);
-    const account = await tx.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, deletedAt: true, departmentId: true } });
-    if (!account) return false;
-    let held: string | null;
-    if (account.organizationId === organizationId) {
-      if (account.deletedAt) return false;
-      held = account.departmentId ?? null;
-    } else {
-      const m = await tx.organizationMembership.findFirst({ where: { ...membershipHereWhere(organizationId, "kept"), userId }, select: { departmentId: true } });
-      if (!m) return false;
-      held = m.departmentId ?? null;
-    }
-    if (onlyFrom !== undefined && held !== onlyFrom) return false;
-    if (held === next) return false;
-    return writeProfileHere(tx, seatRefOf(organizationId, account), { departmentId: next });
-  });
-}
-
-/** Places these people in the department here (a group's member add). Answers how many moved. */
+/** Places these people in the department here (a group's member add), in one transaction. Answers how many moved. */
 export async function addToGroupHere(organizationId: string, departmentId: string, userIds: readonly string[]): Promise<number> {
-  let n = 0;
-  for (const id of [...new Set(userIds)].sort()) if (await placeHere(organizationId, id, departmentId)) n += 1;
-  return n;
+  const moved = await prisma.$transaction((tx) => placeDepartmentHere(tx, { organizationId, userIds, departmentId }), BATCH_TX);
+  return moved.length;
 }
 
-/** Takes these people out of the department here, each only while they are still in it (a group's member remove). Answers how many. */
+/** Takes these people out of the department here, each only while they are still in it (a group's member remove), in one transaction. Answers how many. */
 export async function removeFromGroupHere(organizationId: string, departmentId: string, userIds: readonly string[]): Promise<number> {
-  let n = 0;
-  for (const id of [...new Set(userIds)].sort()) if (await placeHere(organizationId, id, null, departmentId)) n += 1;
-  return n;
+  const moved = await prisma.$transaction((tx) => placeDepartmentHere(tx, { organizationId, userIds, departmentId: null, onlyFrom: departmentId }), BATCH_TX);
+  return moved.length;
 }
 
 /**
  * A group's full member replace (SCIM PUT): everyone here in the department
  * and not named is taken out (left with no department: which other one to
- * fall back to is not known), and everyone named is placed in it.
+ * fall back to is not known), and everyone named is placed in it. One
+ * transaction: everyone it touches is locked first, in id order, in one
+ * statement, so the two writes after it take no lock out of that order.
  */
 export async function replaceGroupHere(organizationId: string, departmentId: string, userIds: readonly string[]): Promise<void> {
-  const keep = new Set(userIds);
+  const keep = [...new Set(userIds)];
+  const named = new Set(keep);
   const current = (await groupMembersHere(organizationId, [departmentId])).get(departmentId) ?? [];
-  await removeFromGroupHere(organizationId, departmentId, current.map((m) => m.id).filter((id) => !keep.has(id)));
-  await addToGroupHere(organizationId, departmentId, [...keep]);
+  const out = current.map((m) => m.id).filter((id) => !named.has(id));
+  await prisma.$transaction(async (tx) => {
+    await lockPeople(tx, [...out, ...keep]);
+    await placeDepartmentHere(tx, { organizationId, userIds: out, departmentId: null, onlyFrom: departmentId });
+    await placeDepartmentHere(tx, { organizationId, userIds: keep, departmentId });
+  }, BATCH_TX);
 }
 
 /**

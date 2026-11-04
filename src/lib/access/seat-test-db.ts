@@ -33,7 +33,10 @@
 // from a transaction, so a test can prove an order (the person's lock before
 // the first read) and that a read inside a transaction went through it, not
 // around it. Raw statements: the person's row lock logs "lock:<id>"
-// ("tx.lock:<id>" in a transaction), set_config and pg_advisory locks are
+// ("tx.lock:<id>" in a transaction), and the row locks of many people in one
+// statement (workspace-anchor.ts lockPeople) log "lock:<id>" for each, in the
+// order Postgres takes them (the ids sorted COLLATE "C", byte order, as
+// JavaScript sorts them); set_config and pg_advisory locks are
 // logged; any other $executeRaw throws (not modelled), and so does every
 // $queryRaw unless the test answers it (`onQueryRaw`, given the statement as
 // Postgres receives it, nested fragments inline, with its values).
@@ -698,6 +701,16 @@ export function createSeatDb(): SeatDb {
 
   const raw = (via: string) => async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.join("?").replace(/\s+/g, " ").trim();
+    if (/^SELECT 1 FROM "User" WHERE "id" = ANY\(\?::text\[\]\) ORDER BY "id" COLLATE "C" FOR NO KEY UPDATE$/.test(text)) {
+      if (!Array.isArray(values[0])) throw new Error("seat-test-db: the people's row locks need a list of ids");
+      const ids = [...new Set(values[0] as string[])].sort();
+      for (const id of ids) {
+        db.raw.push(`lock:${id}`);
+        db.log.push(`${via}lock:${id}`);
+        await db.onCall?.(`${via}lock:${id}`);
+      }
+      return ids.length;
+    }
     let entry: string;
     if (/^SELECT 1 FROM "User" WHERE "id" = \? FOR NO KEY UPDATE$/.test(text)) entry = `lock:${String(values[0])}`;
     else if (/^SELECT (set_config|pg_advisory_xact_lock)\(/.test(text) || /^SET LOCAL /.test(text)) entry = text;

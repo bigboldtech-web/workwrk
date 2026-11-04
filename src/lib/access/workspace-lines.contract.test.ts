@@ -222,7 +222,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/performance/review-cycle.ts": { kinds: ["line"], mark: "a", why: "pure: the caller passes the manager" },
   "src/lib/person-alignment.ts": { kinds: ["profile"], mark: "c", why: "a person's alignment page: a membership person's people data here is a known limit" },
   "src/lib/reporting-line.ts": { kinds: ["line", "dotted"], mark: "a", why: "the solid walk joins each step to the two halves of the lines here (a LATERAL subquery), dottedRowsHere reads this workspace's rows; getReportingChain, which named no workspace and had no caller, is gone (step 2)" },
-  "src/lib/scim-groups.ts": { kinds: ["profile"], mark: "a", why: "SCIM Groups' members read at the seat here, both halves (the account's department where anchored here, the membership's otherwise), and written through writeProfileHere on the row that holds the seat (E9 ii, step 5)" },
+  "src/lib/scim-groups.ts": { kinds: ["profile"], mark: "a", why: "SCIM Groups' members read at the seat here, both halves (the account's department where anchored here, the membership's otherwise), and written through seat-writes.ts placeDepartmentHere on the rows that hold the seats, one transaction per request (E9 ii, step 5; step 9)" },
   "src/lib/scim-manager.ts": { kinds: ["line"], mark: "a", why: "SCIM's manager attribute: the line the seat here holds (personSeatIn), written through writeLineHere on the row that holds it under the role lock, E4 and E5; a resource names the manager only while they hold a seat here (E9 i, step 7)" },
   "src/lib/scim-reactivate.ts": { kinds: ["line"], mark: "a", why: "the stale-line clears through writeLineHere on the row that holds the seat now and removeDottedHere for this workspace's rows (step 4); the push's manager through scim-manager.ts in the same transaction (step 7)" },
   "src/lib/sop-compliance.ts": { kinds: ["profile"], mark: "a", why: "compliance grouped and filtered by the department each person's seat here holds (seatPlacementsHere, idsPlacedHere, E15, step 8); no SOP is assigned to a membership person since the step 5 review M1" },
@@ -239,6 +239,7 @@ const ENTRIES: Record<string, Entry> = {
   "scripts/live-proof-ai-teammates-phase5.ts": { kinds: ["line"], mark: "a", why: "a local-only proof: sets the lines of accounts anchored in its own workspace" },
   "scripts/live-proof-mcp.ts": { kinds: ["line"], mark: "a", why: "a local-only proof: sets the lines of accounts anchored in its own workspace" },
   "scripts/live-proof-workspace-status.ts": { kinds: ["profile"], mark: "a", why: "phase 1's local-only proof: reads placements at each seat" },
+  "scripts/live-proof-workspace-lines.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "step 9's local-only proof: reads each workspace's lines, dotted lines and placements at each seat, and plants its throwaway scale workspaces' people by raw inserts" },
   "scripts/reconcile-role-kras.mjs": { kinds: ["profile"], mark: "c", why: "a job title's holders (Role.users), anchored only on purpose, as alignment-assign.ts: no KRA is assigned to a membership person (the step 5 review M1, kept by step 8)" },
   "scripts/report-app-floors.ts": { kinds: ["line", "dotted"], mark: "a", why: "the same preview as app-floor-impact.server.ts, from this workspace's lines: the account's, a live membership's, and this workspace's dotted rows (step 2)" },
   "scripts/report-escalation-thresholds.ts": { kinds: ["line", "profile"], mark: "a", why: "a job title's holders here, two halves (the account's job title and line for people anchored here, the membership's for anyone else), and the named person at their seat here (E15, step 8)" },
@@ -255,7 +256,7 @@ const WRITERS: Record<string, Writer> = {
   "src/app/api/users/[id]/route.ts": { writes: "none", functions: ["PATCH"], why: "its data object, written with update({ data: write }), holds the personal columns only (names, phone, photo, birthday) of someone anchored here; the profile goes through writeProfileHere and every line through writeLineHere and removeDottedHere (steps 4 and 5)" },
   "src/app/api/users/route.ts": { writes: "made", functions: ["POST"], why: "makes an account here, with its line and placement" },
   "src/lib/access/membership.ts": { writes: "none", functions: ["applyRoleChangeIn", "transferOwnership"], why: "its data holds the level, the org role, the Admin scopes and the token version only" },
-  "src/lib/access/seat-writes.ts": { writes: "seat", functions: ["moveLinesHere", "removeDottedHere", "writeDottedHere", "writeLineHere", "writeProfileHere"], why: "the one place a line or a profile is written for a seat (E16)" },
+  "src/lib/access/seat-writes.ts": { writes: "seat", functions: ["moveLinesHere", "placeDepartmentHere", "removeDottedHere", "writeDottedHere", "writeLineHere", "writeProfileHere"], why: "the one place a line or a profile is written for a seat (E16)" },
   "src/lib/access/workspace-anchor.ts": { writes: "moved", functions: ["reanchorUser"], why: "the swap (E3, D18): the membership left keeps the account's line and profile, the account takes the target's" },
   "src/lib/access/workspace-status.ts": { writes: "none", functions: ["endSeat", "restoreSeat", "restoreSeatsEndedWithAccount"], why: "its data holds the seat's status, removal, mark and the token version only; a move goes through reanchorUser" },
   "src/lib/agents/previews.ts": { writes: "none", functions: ["prepareOne"], why: "sets an invitation's manager (the Invitation row, applied at acceptance), never a person's line" },
@@ -699,9 +700,18 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       // Bulk: both halves, each written on the row that holds the seat.
       ["src/app/api/people/bulk-update/route.ts", /membershipHereWhere\(orgId, "kept", \{ id: \{ in: userIds \} \}\)/, 1],
       ["src/app/api/people/bulk-update/route.ts", /writeProfileHere\(tx, seatOf\.get\(id\)!, patch\)/, 1],
-      // SCIM Groups: both halves, written through writeProfileHere.
-      ["src/lib/scim-groups.ts", /writeProfileHere\(tx, seatRefOf\(organizationId, account\), \{ departmentId: next \}\)/, 1],
-      ["src/lib/scim-groups.ts", /membershipHereWhere\(organizationId, "kept"\)/, 2],
+      // SCIM Groups: both halves, written through placeDepartmentHere in one
+      // transaction per request (step 9; before, writeProfileHere per member).
+      ["src/lib/scim-groups.ts", /placeDepartmentHere\(tx, \{ organizationId, userIds(: out|: keep)?, departmentId(: null, onlyFrom: departmentId)? \}\)/, 4],
+      ["src/lib/scim-groups.ts", /prisma\.\$transaction\(/, 3],
+      ["src/lib/scim-groups.ts", /await lockPeople\(tx, \[\.\.\.out, \.\.\.keep\]\);/, 1],
+      ["src/lib/scim-groups.ts", /membershipHereWhere\(organizationId, "kept"\)/, 1],
+      ["src/lib/scim-groups.ts", /writeProfileHere|lockPerson\(/, 0],
+      // The batch write's guards: writeProfileHere's on each seat.
+      ["src/lib/access/seat-writes.ts", /await lockPeople\(tx, ids\);/, 1],
+      ["src/lib/access/seat-writes.ts", /where: \{ id: \{ in: ids \}, organizationId, deletedAt: null, \.\.\.placed \}/, 1],
+      ["src/lib/access/seat-writes.ts", /where: \{ userId: \{ in: ids \}, organizationId, removedAt: null, user: \{ organizationId: \{ not: organizationId \}, deletedAt: null \}, \.\.\.placed \}/, 1],
+      ["src/lib/access/workspace-anchor.ts", /ORDER BY "id" COLLATE "C" FOR NO KEY UPDATE/, 1],
       ["src/lib/scim-groups.ts", /membershipsPlacedHere\(organizationId, \{ departmentId \}\)/, 1],
       // Workload's capacity edit by PATCH's door, and a teammate's working days at the seat.
       ["src/app/api/team/workload/route.ts", /canEditCapacity: canWritePersonField\("weeklyCapacityHours"/, 1],

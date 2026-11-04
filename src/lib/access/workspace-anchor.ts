@@ -147,6 +147,20 @@ export async function lockPerson(db: Db, userId: string): Promise<void> {
   await db.$executeRaw`SELECT 1 FROM "User" WHERE "id" = ${userId} FOR NO KEY UPDATE`;
 }
 
+/**
+ * The row locks of many people in one statement, taken in id order: the
+ * order every writer that locks several people takes them one by one
+ * (moveLinesHere, the bulk update: a JavaScript sort of the ids, which is
+ * byte order, so the statement sorts COLLATE "C"). A batch writer
+ * (seat-writes.ts placeDepartmentHere) takes them here, one statement in
+ * place of one per person.
+ */
+export async function lockPeople(db: Db, userIds: readonly string[]): Promise<void> {
+  const ids = [...new Set(userIds)].filter(Boolean).sort();
+  if (ids.length === 0) return;
+  await db.$executeRaw`SELECT 1 FROM "User" WHERE "id" = ANY(${ids}::text[]) ORDER BY "id" COLLATE "C" FOR NO KEY UPDATE`;
+}
+
 /** The key takenBySameEmail answers a (workspace, email) pair by: the address in any case. */
 export function sameEmailKey(organizationId: string, email: string): string {
   return `${organizationId}\n${email.trim().toLowerCase()}`;

@@ -627,10 +627,15 @@ describe("the step 5 review lows", () => {
     expect(await res.json()).toMatchObject({ code: "roles_busy", error: "That took too long, so nothing was saved. Try again in a moment." });
     expect(account("lee").departmentId).toBe("dep-b-del");
     expect(seatOf("pat", "b").departmentId).toBe("dep-b-del");
-    failInside("tx.organizationMembership.findFirst", "40P01", "deadlock detected");
-    const scimRes = await groupPatch(scim("PATCH", "/api/scim/v2/Groups/dep-b-eng", { Operations: [{ op: "add", path: "members", value: [{ value: "pat" }] }] }), params("dep-b-eng"));
+    // The group's writes are one transaction since step 9 (seat-writes.ts
+    // placeDepartmentHere): Lee's account half is written, then the
+    // membership half meets the deadlock, and the whole batch rolls back.
+    failInside("tx.organizationMembership.updateManyAndReturn", "40P01", "deadlock detected");
+    const scimRes = await groupPatch(scim("PATCH", "/api/scim/v2/Groups/dep-b-eng", { Operations: [{ op: "add", path: "members", value: [{ value: "pat" }, { value: "lee" }] }] }), params("dep-b-eng"));
     db.failing.clear();
     expect(scimRes.status).toBe(503);
+    expect(db.log).toContain("tx.user.updateManyAndReturn");
     expect(seatOf("pat", "b").departmentId).toBe("dep-b-del");
+    expect(account("lee").departmentId).toBe("dep-b-del");
   });
 });

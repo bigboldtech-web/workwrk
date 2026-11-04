@@ -60,6 +60,7 @@ import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { managesNobody } from "@/lib/access/manager-lines";
 import { inWorkspaceWhere, reportsHereOf } from "@/lib/access/acting-workspace";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { liftWithheldListIds } from "@/lib/assignee-lift";
 import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/calendar-event";
@@ -521,10 +522,14 @@ export async function GET(req: Request) {
   const people: Array<{ id: string; name: string; avatar: string | null }> = [];
   const loggedByPersonDay: Record<string, Record<string, number>> = {};
   if (calendar === "team") {
-    const users = await prisma.user.findMany({
-      where: { id: { in: personIds }, organizationId: orgId },
-      select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
-    });
+    // A row for everyone on the team who holds a seat here, of either kind,
+    // read at the seat (seated-here.ts; kept seats, as the tree walks them),
+    // in the tree's order. Before (found by the live proof of
+    // docs/plans/workspace-status-2.md, step 9), the rows were the people
+    // anchored here only, so Dana's Team calendar in B had no row for Pat,
+    // who works in B through a membership, though the tree held her.
+    const here = await peopleHereAmong(orgId, personIds, "kept");
+    const users = personIds.map((id) => here.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
     for (const p of users) {
       people.push({
         id: p.id,
