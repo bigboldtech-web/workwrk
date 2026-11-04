@@ -106,7 +106,7 @@ interface Writer {
 }
 
 /** The steps of this program whose builder has finished: none of their (b) entries or writers may remain. */
-const MERGED: readonly Step[] = [2, 3, 4, 5];
+const MERGED: readonly Step[] = [2, 3, 4, 5, 7];
 /** What the one merge of steps 1 to 4 (with 5, 7 and 8) needs MERGED to hold. */
 const MERGE_NEEDS: readonly Step[] = [2, 3, 4, 5, 7, 8];
 
@@ -165,6 +165,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/roles/[id]/alignment/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holder count, anchored only (Role.users)" },
   "src/app/api/roles/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's listed holder count, anchored only (a Role's own department is the Role's); its delete counts both halves (the step 5 review M2)" },
   "src/app/api/roles/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "removed holders per job title, anchored only" },
+  "src/app/api/scim/v2/Users/route.ts": { kinds: ["line"], mark: "a", why: "the list names each person's line here (the account's for someone anchored here, the membership's for anyone else), only while that manager holds a seat here; POST's manager goes through scim-manager.ts, writeLineHere under the role lock (E9 i, step 7)" },
   "src/app/api/search/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "announcement visibility by the viewer's department and office" },
   "src/app/api/skills/export/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's skills here are a known limit; the department shown only when it belongs here" },
   "src/app/api/skills/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's skills here are a known limit; the department shown only when it belongs here" },
@@ -242,7 +243,8 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/policy-ledger.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the ledger's department (unscoped), anchored only" },
   "src/lib/reporting-line.ts": { kinds: ["line", "dotted"], mark: "a", why: "the solid walk joins each step to the two halves of the lines here (a LATERAL subquery), dottedRowsHere reads this workspace's rows; getReportingChain, which named no workspace and had no caller, is gone (step 2)" },
   "src/lib/scim-groups.ts": { kinds: ["profile"], mark: "a", why: "SCIM Groups' members read at the seat here, both halves (the account's department where anchored here, the membership's otherwise), and written through writeProfileHere on the row that holds the seat (E9 ii, step 5)" },
-  "src/lib/scim-reactivate.ts": { kinds: ["line"], mark: "a", why: "the stale-line clears through writeLineHere on the row that holds the seat now and removeDottedHere for this workspace's rows (step 4)" },
+  "src/lib/scim-manager.ts": { kinds: ["line"], mark: "a", why: "SCIM's manager attribute: the line the seat here holds (personSeatIn), written through writeLineHere on the row that holds it under the role lock, E4 and E5; a resource names the manager only while they hold a seat here (E9 i, step 7)" },
+  "src/lib/scim-reactivate.ts": { kinds: ["line"], mark: "a", why: "the stale-line clears through writeLineHere on the row that holds the seat now and removeDottedHere for this workspace's rows (step 4); the push's manager through scim-manager.ts in the same transaction (step 7)" },
   "src/lib/sop-compliance.ts": { kinds: ["profile"], mark: "b", step: 8, why: "compliance by the account's department" },
   "src/lib/team-alignment.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "the tree via getEffectiveReportTree and the dotted marks by this workspace's rows (step 2); the rows are people anchored here, by their own line and job title" },
   "src/lib/team-rollup.ts": { kinds: ["line", "dotted"], mark: "a", why: "the directs via getAllDirectReports and effectiveReportsOfMany (the lines here), the dotted marks by this workspace's rows (step 2)" },
@@ -270,7 +272,7 @@ const ENTRIES: Record<string, Entry> = {
 const WRITERS: Record<string, Writer> = {
   "src/app/api/auth/accept-invite/route.ts": { writes: "made", functions: ["POST"], why: "the signed-out join makes the account here with its line and placement; the signed-in join makes or revives the membership with its placement and the invitation's manager before the move (D18, E10)" },
   "src/app/api/departments/[id]/route.ts": { writes: "key", functions: ["DELETE"], why: "a deleted department cleared from removed accounts anchored here (the account's key); a membership's copy has no key" },
-  "src/app/api/scim/v2/Users/[id]/route.ts": { writes: "none", functions: ["writeScimUser"], why: "its data holds the name, the address and the status only; step 7 adds the manager through writeLineHere" },
+  "src/app/api/scim/v2/Users/[id]/route.ts": { writes: "none", functions: ["writeScimUser"], why: "its data holds the name, the address and the status only; the manager goes through scim-manager.ts, writeLineHere under the role lock (step 7)" },
   "src/app/api/users/[id]/route.ts": { writes: "none", functions: ["PATCH"], why: "its data object, written with update({ data: write }), holds the personal columns only (names, phone, photo, birthday) of someone anchored here; the profile goes through writeProfileHere and every line through writeLineHere and removeDottedHere (steps 4 and 5)" },
   "src/app/api/users/route.ts": { writes: "made", functions: ["POST"], why: "makes an account here, with its line and placement" },
   "src/lib/access/membership.ts": { writes: "none", functions: ["applyRoleChangeIn", "transferOwnership"], why: "its data holds the level, the org role, the Admin scopes and the token version only" },
@@ -280,7 +282,7 @@ const WRITERS: Record<string, Writer> = {
   "src/lib/agents/previews.ts": { writes: "none", functions: ["prepareOne"], why: "sets an invitation's manager (the Invitation row, applied at acceptance), never a person's line" },
   "src/lib/people/directory-list.server.ts": { writes: "none", functions: ["prismaWhere"], why: "builds the Directory's Reports to filter, a where, never a write" },
   "src/lib/people/directory-query.ts": { writes: "none", functions: ["directoryWhere"], why: "builds the Directory's filters, a where, never a write" },
-    "src/lib/scim-reactivate.ts": { writes: "none", functions: ["scimReactivateSeat"], why: "its own write holds the push's names and address only; the stale-line clears go through writeLineHere and removeDottedHere (step 4)" },
+    "src/lib/scim-reactivate.ts": { writes: "none", functions: ["scimReactivateSeat"], why: "its own write holds the push's names and address only; the stale-line clears go through writeLineHere and removeDottedHere (step 4), the push's manager through scim-manager.ts (step 7)" },
   "scripts/live-proof-ai-teammates-phase2.ts": { writes: "proof", functions: ["makeWorkspace"], why: "a local-only proof: makes accounts in its own workspace" },
   "scripts/live-proof-ai-teammates-phase3.ts": { writes: "proof", functions: ["makeWorkspace"], why: "a local-only proof: makes accounts in its own workspace" },
   "scripts/live-proof-ai-teammates-phase4.ts": { writes: "proof", functions: ["makeWorkspaces"], why: "a local-only proof: makes accounts in its own workspaces" },
@@ -742,5 +744,57 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     // The only seeding left in PATCH is the anchored seat's, inside the else of the membership note.
     expect(code("src/app/api/users/[id]/route.ts")).toMatch(/alignmentNote = \{ alignmentNote: ALIGNMENT_NOT_HERE \};\n\s+else \{\n\s+try \{\n\s+await seedAlignmentForUser\(/);
     expect(code("src/app/api/people/bulk-update/route.ts")).not.toMatch(/rolesBusyOrThrow|LOCKED_TX/);
+  });
+
+  // Step 7 (merged): SCIM's manager attribute (E9 i) is THIS workspace's
+  // line for both kinds, read at the seat here and written through
+  // writeLineHere under the role lock (taken before the person's row lock),
+  // held in the code; a resource names it from the seat's line only.
+  it("holds step 7's manager attribute at the seat here, under the role lock", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const held: Array<[string, RegExp, number]> = [
+      // The one write: the row that holds the seat here, read under the person's lock.
+      ["src/lib/scim-manager.ts", /writeLineHere\(tx, seatRefOf\(organizationId, account\), next\)/, 1],
+      ["src/lib/scim-manager.ts", /await lockPerson\(tx, userId\);\n\s+const account = await tx\.user\.findUnique/, 1],
+      ["src/lib/scim-manager.ts", /personSeatIn\(organizationId, userId, tx\)/, 1],
+      // E4 and E5: a live seat here, no Agent, no loop in this workspace's lines.
+      ["src/lib/scim-manager.ts", /managerCandidateIn\(organizationId, managerId, \{ db: tx, live: true \}\)/, 1],
+      ["src/lib/scim-manager.ts", /wouldLoopIn\(organizationId, userId, managerId, tx\)/, 1],
+      ["src/lib/scim-manager.ts", /await lockOrgRoles\(tx, organizationId\);\n\s+return scimManagerHere\(tx, organizationId, userId, ask\);/, 1],
+      // A resource names the manager only while they hold a seat here.
+      ["src/lib/scim-manager.ts", /peopleHereAmong\(organizationId, ids, "kept", db\)/, 1],
+      ["src/lib/scim-manager.ts", /const line = seat\?\.managerId \?\? null;/, 1],
+      // The doors: the role lock before the person's, in the same transaction as the fields.
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /if \(line\) await lockOrgRoles\(tx, organizationId\);\n\s+await lockPerson\(tx, id\);/, 1],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /if \(line\) await scimManagerHere\(tx, organizationId, id, line\);/, 1],
+      // The step 7 review L3: no change, no role lock (read before it; a change is checked again under it).
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /const line = manager && \(await scimManagerChanges\(organizationId, id, manager\)\) \? manager : undefined;/, 1],
+      ["src/lib/scim-manager.ts", /if \(!\(await scimManagerChanges\(organizationId, userId, ask\)\)\) return \{ ok: true, outcome: \{ outcome: "unchanged" \} \};\n\s+try \{/, 1],
+      // L7: an address resolves among live seats first, then deactivated ones; L1: the repeat rule compares the line too.
+      ["src/lib/scim-manager.ts", /const live = await personHereByEmail\(organizationId, value, "live", db\);\n\s+return \(live \?\? \(await personHereByEmail\(organizationId, value, "kept", db\)\)\)\?\.id \?\? null;/, 1],
+      ["src/lib/scim-manager.ts", /\(line\.managerId \?\? null\) === r\.before\) return;/, 1],
+      // L2: the reactivation answers a transaction past its time as the 503 too.
+      ["src/lib/scim-reactivate.ts", /const busy = retryAnswer\(e\);/, 1],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /scimReactivateSeat\(organizationId, id, fields, manager\)/, 1],
+      // A membership person's reactivation still carries none of the push's fields, only the manager.
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /writeScimUser\(organizationId, id, \{\}, true, manager\)/, 1],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /const asked = managerAskOfOperation\(op\);/, 1],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /let manager = managerAskOfResource\(body\);/, 1],
+      ["src/app/api/scim/v2/Users/route.ts", /if \(manager\) await lockOrgRoles\(tx, auth\.organizationId\);\n\s+if \(active\) \{\n\s+await lockWorkspaceSeats\(tx, auth\.organizationId, \{ bounded: !!manager \}\);/, 1],
+      ["src/app/api/scim/v2/Users/route.ts", /if \(manager\) await scimManagerHere\(tx, auth\.organizationId, made\.id, manager\);/, 1],
+      ["src/app/api/scim/v2/Users/route.ts", /scimReactivateSeat\(auth\.organizationId, ended\.userId, \{\}, asked\)/, 1],
+      ["src/app/api/scim/v2/Users/route.ts", /managersShownHere\(auth\.organizationId, /, 2],
+      ["src/lib/scim-reactivate.ts", /if \(manager\) await scimManagerHere\(tx, organizationId, userId, manager\);/, 1],
+    ];
+    for (const [file, re, n] of held) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // The list's members are named from the membership's line, never the account's (the anchored workspace's).
+    expect(code("src/app/api/scim/v2/Users/route.ts")).toMatch(/organizationMemberships: \{ where: \{ organizationId: auth\.organizationId \}, select: \{ status: true, removedAt: true, managerId: true \} \}/);
+    // No SCIM file writes a line itself, and the shared identity is still dropped for an account another workspace shares.
+    for (const f of ["src/app/api/scim/v2/Users/route.ts", "src/app/api/scim/v2/Users/[id]/route.ts", "src/lib/scim-manager.ts"]) {
+      expect(code(f), f).not.toMatch(/data:\s*\{\s*managerId|\.managerId\s*=(?!=)|organizationMembership\.update/);
+    }
+    expect(count("src/app/api/scim/v2/Users/[id]/route.ts", /await dropSharedIdentity\(data, id, auth\.organizationId\);/)).toBe(2);
+    expect(code("src/lib/scim-reactivate.ts")).not.toMatch(/rolesBusyAnswer/);
   });
 });

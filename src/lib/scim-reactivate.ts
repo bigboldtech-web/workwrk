@@ -36,6 +36,14 @@
 //      first Owner when no person acted), all in the same transaction (L1:
 //      POST cleared lines silently; L2: a not_ended reactivation kept them
 //      cleared, unlogged).
+//   6. the push's own manager, when it names one or clears it
+//      (workspace-status-2.md E9 i, step 7; src/lib/scim-manager.ts): this
+//      workspace's line, after the stale lines, under the same role lock,
+//      for someone anchored here or here through a membership alike. A
+//      refused manager writes nothing of the line and is logged in words;
+//      the reactivation stands.
+// A busy lock, a deadlock or a transaction past its time wrote nothing: the
+// 503 an identity provider retries (retryAnswer), never a 500.
 // After the commit: the reactivation's own audit row (scimReactivated) and
 // the skills with AI teammates here, and in each workspace whose seat came
 // back with the anchored one (D16), stop their 30 days.
@@ -43,7 +51,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { liveOwnerIds, lockOrgRoles } from "@/lib/access/membership";
-import { LOCKED_TX, rolesBusyAnswer } from "@/lib/access/org-roles-busy";
+import { LOCKED_TX, retryAnswer } from "@/lib/access/org-roles-busy";
 import { clearedLineSentence, staleLinesOf, type StaleLine } from "@/lib/access/manager-candidate";
 import { personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
 import { restoreSeat, workspaceIsOpen, type RestoreSeatResult } from "@/lib/access/workspace-status";
@@ -55,6 +63,8 @@ import { skillsBackFor } from "@/lib/skills/store";
 import { lockPerson } from "@/lib/access/workspace-anchor";
 import { removeDottedHere, seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
 import { identityShared, touchesIdentity, withoutIdentity } from "@/lib/access/shared-identity";
+import { ScimSeatMoved, scimManagerHere } from "@/lib/scim-manager";
+import type { ScimManagerAsk } from "@/lib/scim-mappers";
 
 /** The fields SCIM answers a resource with. */
 export const SCIM_USER_SELECT = { id: true, email: true, firstName: true, lastName: true, status: true, createdAt: true, updatedAt: true } as const;
@@ -96,9 +106,10 @@ class Refused extends Error {
 /**
  * Brings back this person's deactivated seat here (see the header). `fields`:
  * what the push also writes on the account of someone anchored here (never
- * pass any for a membership person).
+ * pass any for a membership person). `manager`: what the push asks of their
+ * manager here (step 6 of the header), for either kind.
  */
-export async function scimReactivateSeat(organizationId: string, userId: string, fields: Record<string, unknown> = {}): Promise<ScimReactivation> {
+export async function scimReactivateSeat(organizationId: string, userId: string, fields: Record<string, unknown> = {}, manager?: ScimManagerAsk): Promise<ScimReactivation> {
   let placed: { row: ScimUserRow | null; seat: PersonSeat | null; restored: Extract<RestoreSeatResult, { outcome: "restored" }> | null };
   try {
     placed = await prisma.$transaction(async (tx) => {
@@ -165,13 +176,19 @@ export async function scimReactivateSeat(organizationId: string, userId: string,
           if (owner) await followReportingLine(organizationId, [userId], owner, tx);
         }
       }
+      // The push's manager (step 6 of the header), on the seat as it stands now.
+      if (manager) await scimManagerHere(tx, organizationId, userId, manager);
       const row = await tx.user.findUnique({ where: { id: userId }, select: SCIM_USER_SELECT });
       const seat = row ? await personSeatIn(organizationId, userId, tx) : null;
       return { row, seat, restored };
     }, LOCKED_TX);
   } catch (e) {
     if (e instanceof Refused) return { ok: false, status: e.status, error: e.message };
-    const busy = rolesBusyAnswer(e);
+    if (e instanceof ScimSeatMoved) return { ok: false, status: 503, error: e.message };
+    // Busy, a deadlock Postgres broke, or past LOCKED_TX's time (P2028, the
+    // step 7 review L2: the manager's checks run in this transaction too):
+    // nothing was written, and the provider retries the 503.
+    const busy = retryAnswer(e);
     if (busy) return { ok: false, status: 503, error: busy.error };
     throw e;
   }

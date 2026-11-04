@@ -63,13 +63,31 @@
 // here (updateMany by id and workspace). A move by another admin in between
 // lands nothing, and the answer is the one for a person gone from here (the
 // member's resource as stored, or 404).
+//
+// THE MANAGER (docs/plans/workspace-status-2.md E9 i, step 7;
+// src/lib/scim-manager.ts). The enterprise extension's `manager` on PUT and
+// PATCH (`urn:...:User:manager` and `manager.value` paths, add, replace
+// and remove, or a value with no path) is THIS workspace's line, for both
+// kinds of person: the account's line for someone anchored here, the
+// membership's for someone here through one, written through
+// seat-writes.ts writeLineHere under the workspace's role lock (taken
+// before the person's row lock) and the rules of every line here (E4, E5).
+// It is not the shared identity: a membership person's manager here is
+// written although their names and address never are. A refused manager
+// writes nothing of the line, the rest of the request goes on, and one
+// Audit log row says why. A PUT that leaves the manager out leaves the line
+// as it is, and one naming the manager the person already has takes no role
+// lock at all (scimManagerChanges, the step 7 review L3). Every resource answered names the line the seat here holds, as
+// a reference to the manager's SCIM id, while that manager holds a seat
+// here. Not in a suspended or cancelled workspace (a deprovision only), and
+// never on an erased account.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { formerMemberDeprovision, scimDeprovision, scimDeprovisionMember } from "@/lib/scim-deprovision";
 import { authenticateScim, isDeprovisionOnly, scimError, scimResponse, scimWorkspaceInactiveError } from "@/lib/scim-auth";
-import { userToScim } from "@/lib/scim-mappers";
+import { managerAskOfOperation, managerAskOfResource, type ScimManagerAsk } from "@/lib/scim-mappers";
 import { isReservedStaffAddress, STAFF_ADDRESS_REFUSAL } from "@/lib/platform-admin";
 import { isErasedAccount } from "@/lib/compliance/erased-account";
 import { personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
@@ -77,6 +95,9 @@ import { seatIsLive } from "@/lib/access/workspace-status";
 import { SCIM_USER_SELECT, scimReactivateSeat } from "@/lib/scim-reactivate";
 import { IDENTITY_FIELDS, identityShared, touchesIdentity, withoutIdentity } from "@/lib/access/shared-identity";
 import { lockPerson } from "@/lib/access/workspace-anchor";
+import { lockOrgRoles } from "@/lib/access/membership";
+import { LOCKED_TX } from "@/lib/access/org-roles-busy";
+import { scimManagerChanges, scimManagerHere, scimManagerRetry, scimSetManager, scimUserHere } from "@/lib/scim-manager";
 
 /** The row SCIM answers with. */
 const SEAT_ROW_SELECT = SCIM_USER_SELECT;
@@ -91,9 +112,9 @@ async function seatHere(organizationId: string, id: string, db: Db = prisma): Pr
   return seat ? { row, seat } : null;
 }
 
-/** The resource as SCIM answers it: `active` is the seat here (see the header). */
-function scimOf(row: SeatRow, seat: PersonSeat | null) {
-  return userToScim({ id: row.id, email: row.email, firstName: row.firstName, lastName: row.lastName, status: String(row.status), createdAt: row.createdAt, updatedAt: row.updatedAt, externalId: null, active: !!seat && seatIsLive(seat) });
+/** The resource as SCIM answers it: `active` is the seat here, the manager the line it holds (see the header). */
+function scimOf(organizationId: string, row: SeatRow, seat: PersonSeat | null) {
+  return scimUserHere(organizationId, row, seat);
 }
 
 /**
@@ -103,25 +124,48 @@ function scimOf(row: SeatRow, seat: PersonSeat | null) {
  * the seat check, restoreSeat here, then the lines that no longer hold and
  * their open reviews, in one transaction with the fields, under bounded
  * locks (a busy one answers 503). A refused reactivation writes nothing,
- * the fields included.
+ * the fields included. `manager` (see the header) is written in the same
+ * transaction as the fields, under the role lock taken first; a refused one
+ * leaves the fields written; one the seat here already holds takes no lock.
  */
-async function writeScimUser(organizationId: string, id: string, data: Record<string, unknown>, reactivating: boolean): Promise<Response> {
+async function writeScimUser(organizationId: string, id: string, data: Record<string, unknown>, reactivating: boolean, manager?: ScimManagerAsk): Promise<Response> {
   const fields = Object.fromEntries(Object.entries(data).filter(([k]) => k !== "status"));
   if (reactivating) {
-    const r = await scimReactivateSeat(organizationId, id, fields);
-    return r.ok ? scimResponse(scimOf(r.row, r.seat)) : scimError(r.status, r.error);
+    const r = await scimReactivateSeat(organizationId, id, fields, manager);
+    return r.ok ? scimResponse(await scimOf(organizationId, r.row, r.seat)) : scimError(r.status, r.error);
   }
-  if (Object.keys(fields).length > 0) {
+  // A manager the seat here already holds (or a clear of an empty line) is
+  // no change: no role lock is taken for it (the step 7 review L3). A real
+  // change is checked again, in full, under the lock.
+  const line = manager && (await scimManagerChanges(organizationId, id, manager)) ? manager : undefined;
+  if (Object.keys(fields).length > 0 || line) {
     // Under the person's row lock: the shared-identity rule read again, and
-    // the write only while they are anchored here (see the header).
-    await prisma.$transaction(async (tx) => {
-      await lockPerson(tx, id);
-      const write = touchesIdentity(fields) && (await identityShared(tx, id, organizationId)) ? withoutIdentity(fields) : fields;
-      if (Object.keys(write).length > 0) await tx.user.updateMany({ where: { id, organizationId }, data: write });
-    });
+    // the write only while they are anchored here (see the header). A line
+    // write takes this workspace's role lock first (seat-writes.ts's order).
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (line) await lockOrgRoles(tx, organizationId);
+        await lockPerson(tx, id);
+        const write = touchesIdentity(fields) && (await identityShared(tx, id, organizationId)) ? withoutIdentity(fields) : fields;
+        if (Object.keys(write).length > 0) await tx.user.updateMany({ where: { id, organizationId }, data: write });
+        if (line) await scimManagerHere(tx, organizationId, id, line);
+      }, LOCKED_TX);
+    } catch (e) {
+      // Busy, a deadlock Postgres broke, or past its time: nothing written, and the provider retries.
+      const retry = scimManagerRetry(e);
+      if (retry) return scimError(503, retry);
+      throw e;
+    }
   }
   const now = await seatHere(organizationId, id);
-  return now ? scimResponse(scimOf(now.row, now.seat)) : scimError(404, "User not found");
+  return now ? scimResponse(await scimOf(organizationId, now.row, now.seat)) : scimError(404, "User not found");
+}
+
+/** The manager alone, in its own transaction (see the header), after the rest of the request; a busy one is the 503 the provider retries. */
+async function writeManagerAlone(organizationId: string, id: string, manager: ScimManagerAsk | undefined): Promise<Response | null> {
+  if (!manager) return null;
+  const out = await scimSetManager(organizationId, id, manager);
+  return out.ok ? null : scimError(out.status, out.error);
 }
 
 /**
@@ -146,23 +190,37 @@ type Intent = "deprovision" | "reactivate" | "other";
  * anything else is answered as stored. Null when they hold no seat here (or
  * their account was erased) and nothing acts.
  */
-async function forMember(organizationId: string, id: string, intent: Intent, workspaceInactive = false): Promise<Response | null> {
+async function forMember(organizationId: string, id: string, intent: Intent, workspaceInactive = false, manager?: ScimManagerAsk): Promise<Response | null> {
   const found = await seatHere(organizationId, id);
   const seat = found?.seat.kind === "membership" ? found.seat : null;
   if (!seat && (intent !== "deprovision" || (await formerMemberDeprovision(organizationId, id)) === null)) return null;
   if (intent === "deprovision") {
     const out = await scimDeprovisionMember(organizationId, id);
     if (!out.ok) return scimError(out.status, out.error);
+    // The manager, this workspace's own line, after the end (see the header):
+    // never in a closed workspace, never on an erased account.
+    if (manager && !workspaceInactive && !(await isErasedAccount(prisma, id))) {
+      const busy = await writeManagerAlone(organizationId, id, manager);
+      if (busy) return busy;
+    }
     const after = await seatHere(organizationId, id);
     const row = after?.row ?? (await prisma.user.findUnique({ where: { id }, select: SEAT_ROW_SELECT }));
     if (!row) return scimError(404, "User not found");
-    return scimResponse(scimOf(row, after?.seat.kind === "membership" ? after.seat : null));
+    return scimResponse(await scimOf(organizationId, row, after?.seat.kind === "membership" ? after.seat : null));
   }
   if (!found || !seat || (await isErasedAccount(prisma, id))) return null;
   // Only a deprovision goes through while the workspace is suspended or cancelled.
   if (workspaceInactive) return scimWorkspaceInactiveError();
-  if (intent === "reactivate" && !seatIsLive(seat)) return writeScimUser(organizationId, id, {}, true);
-  return scimResponse(scimOf(found.row, seat));
+  if (intent === "reactivate" && !seatIsLive(seat)) return writeScimUser(organizationId, id, {}, true, manager);
+  if (manager) {
+    // Their manager here is this workspace's own (see the header), though
+    // their names and address are not.
+    const busy = await writeManagerAlone(organizationId, id, manager);
+    if (busy) return busy;
+    const now = await seatHere(organizationId, id);
+    return now ? scimResponse(await scimOf(organizationId, now.row, now.seat)) : scimError(404, "User not found");
+  }
+  return scimResponse(await scimOf(organizationId, found.row, seat));
 }
 
 /**
@@ -187,7 +245,7 @@ export async function GET(
   // Anchored here, or here through a membership (batch 7), with the seat here (D14).
   const found = await seatHere(auth.organizationId, id);
   if (!found || (await isErasedAccount(prisma, id))) return scimError(404, "User not found");
-  return scimResponse(scimOf(found.row, found.seat));
+  return scimResponse(await scimOf(auth.organizationId, found.row, found.seat));
 }
 
 /**
@@ -197,10 +255,18 @@ export async function GET(
  * here (their names and address are no longer this workspace's to write).
  * Null while they are still anchored here.
  */
-async function movedAway(organizationId: string, id: string): Promise<Response | null> {
+async function movedAway(organizationId: string, id: string, manager?: ScimManagerAsk): Promise<Response | null> {
   const now = await seatHere(organizationId, id);
   if (!now || now.seat.kind === "anchor") return null;
-  return scimResponse(scimOf(now.row, now.seat));
+  // Their line here moved with the swap onto the membership the move left
+  // (E3): the manager is still this workspace's to write (see the header).
+  if (manager) {
+    const busy = await writeManagerAlone(organizationId, id, manager);
+    if (busy) return busy;
+    const after = await seatHere(organizationId, id);
+    return after ? scimResponse(await scimOf(organizationId, after.row, after.seat)) : scimError(404, "User not found");
+  }
+  return scimResponse(await scimOf(organizationId, now.row, now.seat));
 }
 
 export async function PUT(
@@ -214,12 +280,14 @@ export async function PUT(
   const body = await req.json().catch(() => null);
   if (!body) return scimError(400, "Invalid JSON body");
 
+  // The manager this workspace's line names (see the header); a PUT that leaves it out leaves the line as it is.
+  let manager = managerAskOfResource(body);
   const existing = await prisma.user.findFirst({
     where: { id, organizationId: auth.organizationId },
   });
   if (!existing) {
-    // Someone who works here through a membership: their seat here only (batch 7, D14).
-    const member = await forMember(auth.organizationId, id, body.active === false ? "deprovision" : body.active === true ? "reactivate" : "other", auth.workspaceInactive);
+    // Someone who works here through a membership: their seat here only (batch 7, D14), and their manager here.
+    const member = await forMember(auth.organizationId, id, body.active === false ? "deprovision" : body.active === true ? "reactivate" : "other", auth.workspaceInactive, manager);
     return member ?? scimError(404, "User not found");
   }
 
@@ -239,8 +307,11 @@ export async function PUT(
     data.status = body.active ? "ACTIVE" : "INACTIVE";
   }
 
-  if ((await isErasedAccount(prisma, id)) && refuseForErased(data)) return scimError(404, "User not found");
-  if (Object.keys(data).length === 0) return scimError(400, "No fields to update");
+  const erased = await isErasedAccount(prisma, id);
+  if (erased && refuseForErased(data)) return scimError(404, "User not found");
+  // An erased account's deprovision drops every other field, the manager too.
+  if (erased) manager = undefined;
+  if (Object.keys(data).length === 0 && !manager) return scimError(400, "No fields to update");
   if (auth.workspaceInactive) {
     // Suspended or cancelled: only a deprovision goes through. An identity
     // provider that deprovisions with a FULL resource (name, emails and
@@ -249,6 +320,7 @@ export async function PUT(
     // the day the company is reactivated.
     if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
     for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    manager = undefined;
     if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
   }
   // Shared with another workspace: never written, the rest answered as stored (see the header).
@@ -267,12 +339,12 @@ export async function PUT(
     const out = await scimDeprovision(auth.organizationId, id);
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;
-    const moved = await movedAway(auth.organizationId, id);
+    const moved = await movedAway(auth.organizationId, id, manager);
     if (moved) return moved;
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  return writeScimUser(auth.organizationId, id, data, reactivating);
+  return writeScimUser(auth.organizationId, id, data, reactivating, manager);
 }
 
 export async function PATCH(
@@ -293,7 +365,11 @@ export async function PATCH(
   });
 
   const data: Record<string, unknown> = {};
+  // The manager this workspace's line names (see the header): the last operation that touches it decides, a remove included.
+  let manager: ScimManagerAsk | undefined;
   for (const op of body.Operations as Array<{ op?: string; path?: string; value?: unknown }>) {
+    const asked = managerAskOfOperation(op);
+    if (asked !== undefined) manager = asked;
     const verb = (op.op ?? "").toLowerCase();
     if (verb !== "replace" && verb !== "add") continue;
 
@@ -331,14 +407,17 @@ export async function PATCH(
   }
 
   if (!existing) {
-    // Someone who works here through a membership: their seat here only (batch 7, D14).
-    const member = await forMember(auth.organizationId, id, data.status === "INACTIVE" ? "deprovision" : data.status === "ACTIVE" ? "reactivate" : "other", auth.workspaceInactive);
+    // Someone who works here through a membership: their seat here only (batch 7, D14), and their manager here.
+    const member = await forMember(auth.organizationId, id, data.status === "INACTIVE" ? "deprovision" : data.status === "ACTIVE" ? "reactivate" : "other", auth.workspaceInactive, manager);
     return member ?? scimError(404, "User not found");
   }
-  if ((await isErasedAccount(prisma, id)) && refuseForErased(data)) return scimError(404, "User not found");
-  if (Object.keys(data).length === 0) {
+  const erased = await isErasedAccount(prisma, id);
+  if (erased && refuseForErased(data)) return scimError(404, "User not found");
+  // An erased account's deprovision drops every other field, the manager too.
+  if (erased) manager = undefined;
+  if (Object.keys(data).length === 0 && !manager) {
     const found = await seatHere(auth.organizationId, id);
-    return found ? scimResponse(scimOf(found.row, found.seat)) : scimError(404, "User not found");
+    return found ? scimResponse(await scimOf(auth.organizationId, found.row, found.seat)) : scimError(404, "User not found");
   }
   if (auth.workspaceInactive) {
     // Suspended or cancelled: only a deprovision goes through. An identity
@@ -348,6 +427,7 @@ export async function PATCH(
     // the day the company is reactivated.
     if (data.status !== "INACTIVE") return scimWorkspaceInactiveError();
     for (const k of Object.keys(data)) if (k !== "status") delete data[k];
+    manager = undefined;
     if (!isDeprovisionOnly(data)) return scimWorkspaceInactiveError();
   }
   // Shared with another workspace: never written, the rest answered as stored (see the header).
@@ -366,12 +446,12 @@ export async function PATCH(
     const out = await scimDeprovision(auth.organizationId, id);
     if (!out.ok) return scimError(out.status, out.error);
     delete data.status;
-    const moved = await movedAway(auth.organizationId, id);
+    const moved = await movedAway(auth.organizationId, id, manager);
     if (moved) return moved;
   }
   const reactivating = data.status === "ACTIVE" && existing.status === "INACTIVE";
 
-  return writeScimUser(auth.organizationId, id, data, reactivating);
+  return writeScimUser(auth.organizationId, id, data, reactivating, manager);
 }
 
 export async function DELETE(

@@ -84,6 +84,13 @@
 // the Settings deletes' `_count` is answered as Postgres answers it (in an
 // `include` too), and the batch form of $transaction (each call already ran
 // in order; no rollback is modelled for it).
+//
+// docs/plans/workspace-status-2.md step 7 (SCIM's manager attribute): an
+// Audit log row's createdAt, filled on a create as Prisma fills it
+// (`@default(now())`), so a read of a person's newest row by createdAt is
+// answered as Postgres answers it; and a User's updatedAt on a create
+// (`@updatedAt`; never on a seed, whose rows say what they hold), so the
+// resource SCIM's POST answers carries its stamp.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -198,6 +205,13 @@ const DEFAULTS: Record<string, () => Row> = {
   invitation: () => ({ accepted: false, spaceId: null, spaceRole: null, createdAt: new Date() }),
   // Its two stamps, as Postgres and Prisma fill them (a SCIM Group answers them: step 5).
   department: () => ({ createdAt: new Date(), updatedAt: new Date() }),
+  // Its stamp, as Prisma fills it (step 7: the newest refusal of a manager is read by it).
+  activityLog: () => ({ createdAt: new Date() }),
+};
+
+/** The stamps Prisma fills on a create only (`@updatedAt`), never on a seed. */
+const CREATED: Record<string, () => Row> = {
+  user: () => ({ updatedAt: new Date() }),
 };
 
 const OPS = new Set(["not", "in", "notIn", "equals", "contains", "mode", "gt", "gte", "lt", "lte"]);
@@ -547,7 +561,7 @@ export function createSeatDb(): SeatDb {
       },
       create: async (a: { data: Row; select?: Record<string, unknown> }) => {
         wrote("create");
-        const row: Row = { ...(DEFAULTS[name]?.() ?? {}) };
+        const row: Row = { ...(DEFAULTS[name]?.() ?? {}), ...(CREATED[name]?.() ?? {}) };
         // A list relation written with the row (`members: { create: [...] }`)
         // becomes rows of its own table naming this one.
         const nested: Array<[string, string, Row[]]> = [];

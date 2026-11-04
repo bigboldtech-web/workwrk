@@ -1314,3 +1314,181 @@ And:
 11. **Someone acting here from an out of date session** who changes their own name, phone, photo or birthday is told to refresh.
 12. **Their record shows this workspace's tags of them**, and the people who may tag them can take a tag off.
 13. **A large bulk change has 20 seconds**, and a bulk change or a SCIM Group write that runs out of time or meets a deadlock says "try again" (503), never "Something went wrong".
+
+## Step 7, built
+
+Branch `workspace-status-2` in ~/theywrk-launch, on 5213106a (steps 1 to 5 committed on main f16c2220), not committed. **No SQL, no schema change, no flag.** It ships in the one merge of steps 1 to 9.
+
+### The rule
+
+The enterprise extension's `manager` (`urn:ietf:params:scim:schemas:extension:enterprise:2.0:User`) on POST, PUT and PATCH of /api/scim/v2/Users is **this workspace's line** for the person, for someone anchored here and for someone here through a membership alike, and every resource SCIM answers names that line back. New leaf src/lib/scim-manager.ts holds the one write; the shapes are read in src/lib/scim-mappers.ts.
+
+- **What the value is (decided here).** RFC 7643 4.3: `manager.value` is the `id` of the manager's SCIM resource. This service's SCIM ids are WorkwrK user ids (every resource it answers carries the account's id as `id`, and the identity provider links people by it), so the value is read as **the manager's WorkwrK id**. That is what Azure sends (it resolves the manager to the id this service returned when it provisioned them) and what Okta sends when its managerId holds that id. This service keeps no externalId: its list filter already answers `externalId` by the address, so **a value that is an address** (Okta's managerId often holds the manager's login) is read the same way, as the address of someone with a seat here (seated-here.ts personHereByEmail: any case; a live seat first, then one deactivated here, the step 7 review L7; within each, the account anchored here first). Anything else (an employee number) names nobody here and is refused in words.
+- **Resolved at the manager's seat here**, under E4 and E5: a live seat here (managerCandidateIn with `live`: someone B deactivated through their membership is "deactivated", never "not here"), not on the Agent tier here, not the person, no loop in this workspace's lines (wouldLoopIn, lineAbove at each seat here).
+- **The write.** Under this workspace's role lock, taken first, then the person's row lock, then the seat read under that lock (personSeatIn), then seat-writes.ts writeLineHere on the row that holds it: the account for someone anchored here, the membership for anyone else. Another workspace's line is never read or written: B's provider setting Pat's manager to Dana writes her B membership, and her A line to Max stays. A written line is logged as reporting_line_changed (actor "Identity provider", the old and new manager), and her open reviews follow it in the same transaction, to the first live Owner when no person acted (as SCIM's reactivation does).
+- **A refused manager** writes nothing of the line, the rest of the request goes on (the names, a reactivation, a deprovision, the account POST makes), and one `reporting_line_refused` row in the Audit log says why in plain words: "The identity provider's manager for Pat Ng was not set: Ada Ng is an Agent here, and an Agent can't be anyone's manager. Their manager here is unchanged." Someone with no seat here is never named ("that manager isn't anyone who works in this workspace"). The reasons: not here, Agent, deactivated, the person themself, a loop, the person's own seat removed here. The row keeps the provider's value (up to 200 characters) and the reason in metadata, for its admin to fix the mapping. The type is filed under the Access tab, beside the line changes.
+- **A `remove`, or a null.** A PATCH `remove` of the manager (any of its paths, whatever value it carries: a single-valued attribute is removed whole, RFC 7644 3.5.2.2), a replace with null or an empty value, or a PUT or POST whose extension says `manager: null`, clears this workspace's line under the same lock and logs it ("Cleared who Pat Ng reports to"). A line already empty is left alone.
+- **GET answers** the line the seat here holds as the enterprise manager, `{ value: <the manager's SCIM id>, displayName }`, with the extension's URI in `schemas`, for GET by id, the address filter (both halves) and the unfiltered list, and in the answer of every PUT, PATCH and POST. The manager is named only while they hold a kept seat here (step 3's rule: a deactivated manager is named, a removed one or one with no seat here never); with none, the extension is left out.
+- **The identity rule from phase 1 is unchanged** (shared-identity.ts): SCIM still never writes the name or address of an account another workspace shares, and a membership person's names and address are never written. Their manager here is written: it is this workspace's own.
+- **Busy and deadlocks.** A busy role or seat lock, a deadlock Postgres broke (40P01) or a transaction past its time wrote nothing: the 503 an identity provider retries (scimManagerRetry over retryAnswer), never a 500.
+
+### Each door: before, now, test
+
+Tests are in src/app/api/scim/v2/Users/manager.test.ts (new, 26 tests, through the real routes on the in-memory database, with the real seat reads, manager checks and writes) unless another file is named. The case: Pat anchored at A under Max, at B through a membership (her B line set by B's provider to Dana); Max a Manager in B too, under Dana; Lee anchored in B under Dana; Ada anchored in A and an Agent in B; Rita anchored in A, live there, deactivated by B through her membership; Zed in A only; Ari owns A, Bo owns B.
+
+- **PATCH /Users/[id].** Before: only `active`, `name.givenName`, `name.familyName` and `userName` were read, and `remove` was skipped. Now each operation is also read for the manager (managerAskOfOperation): `add` and `replace` by `urn:...:User:manager`, `urn:...:User:manager.value`, the bare `manager` and `manager.value`, the extension's own URI, or a value with no path (Okta's shape, read as a resource); `remove` clears it; the last operation that touches it decides. A manager alone is a write, so the "nothing to change" answer no longer swallows it.
+  - Tests: "an Okta-shaped PATCH ... writes her B membership, under the role lock first" (A's line stays, the audit row in B only, her reviews follow to Bo, the role lock before her row lock in the log); "an Azure-shaped PATCH (the extension's path, a bare id) does the same, and so does the manager.value path"; "a manager named by address ... is found at their seat in B"; "A's identity provider sets Pat's A line, and B's line to Dana stays"; "a loop only across workspaces is no loop (E5): Max under Pat in B, though Pat reports to Max in A"; "the manager she already has, sent again, is no change: nothing written, nothing logged, and the answer names her".
+- **PUT /Users/[id].** Before: name, userName, emails and active only. Now the extension's `manager` too (managerAskOfResource), in the same transaction as the fields for someone anchored here (the role lock taken first, then the person's lock as before), so a refused manager leaves the name change written and a deadlock writes neither. A PUT that leaves the manager out leaves the line as it is. A manager alone is no longer "No fields to update".
+  - Tests: "an Azure-shaped PUT of the full resource writes her B line and never her names, which A shares"; "for someone anchored in B too: Lee's account line, with her name change in the same push"; "a replace with an empty manager.value, and a PUT with a null manager, clear it; a PUT that leaves the manager out keeps it".
+- **Someone here through a membership (forMember).** Before: every field but `active` was answered as stored. Now their manager here is written (scimSetManager, its own transaction under the role lock): on its own, after a deprovision of their seat (never on an erased account), and inside a reactivation's transaction. Their names and address are still never written.
+- **The reactivation (scim-reactivate.ts scimReactivateSeat)**, both doors and POST's revive: the push's manager is applied in the reactivation's transaction, after the stale-line clears (so a refused manager never leaves a stale line standing), on the row that holds the seat then (a D6 restore may have moved the account here). Test: "someone with no seat in B (Zed): never named, and the reactivation in the same push lands" (her line to Dana kept, one refusal row naming nobody).
+- **POST /Users.** Before: the extension was ignored. Now a manager to set is written in the create's own transaction: the role lock first, then the seat lock bounded (so the role lock is never held through an unbounded wait, as SCIM's reactivation already does), the create, then the line through writeLineHere. A refused manager still makes the account, with its row; a busy lock or a deadlock makes nothing (503), so the provider's retry is a clean create, never a 409 for a half-made person. A clear on a new account asks nothing (it has no line). A revive of an ended seat takes whatever the push asks, in the reactivation's transaction. Tests: "makes the account under Dana here, with the role lock first and the seat lock bounded"; "still makes the account when the manager is refused, with its row"; "a revive of Pat's deactivated B seat takes the manager in the reactivation's transaction"; "a deadlock in POST makes no account".
+- **GET /Users/[id] and the list.** Before: no manager in any resource. Now the line the seat here holds (the account's for someone anchored here, the membership's line for a membership person, read from `organizationMemberships` here in the filter's member half, never the account's line), named through managersShownHere (peopleHereAmong, kept seats, two reads at most per page). Tests: "shows Dana for Pat in B's SCIM and Max in A's, by id and by the address filter" (and A's unfiltered list); "names a manager only while they hold a seat here (never one with no seat, or a removed one), and leaves the extension out for someone with no manager".
+- **Refusals.** Tests: "Rita, whom B deactivated through her membership: refused as deactivated, and Lee's name change lands"; "Ada, an Agent in B (a Manager in A): refused"; "a loop in B's lines: Dana under Pat while Pat is under Dana in B, and Dana's name change lands"; "the person themself, and a value that names nobody (an employee number)"; "the same refusal pushed again makes one row; after anyone changes the line, the next push logs again"; "a seat B removed takes no line, logged, and A's line stays".
+- **A remove.** Test: "a PATCH remove of the extension's manager clears her B membership's line, and A's line to Max stays".
+- **Busy, deadlocks, closed workspaces.** Tests: "a deadlock Postgres breaks under Pat's lock is the 503 the provider retries, with nothing written"; "a deadlock in an anchored person's push rolls back its fields too, so the retry writes them all"; "a suspended or cancelled workspace takes no manager (403), and a deprovision there drops it". An erased account's deprovision drops the manager with every other field.
+- **The shapes** (src/lib/scim-mappers.test.ts, new, 8 tests): the complex attribute, a bare id, a list of one (older Azure), a number; null, empty and an empty list clear; a displayName alone asks nothing; the extension in any case and its flat forms; a PUT that leaves the manager out asks nothing; every PATCH path and verb, and every other operation left alone; the resource adds the extension and its schema only when there is a manager to name.
+- **The Audit log tab** (src/lib/audit-families.ts): `reporting_line_refused` is in Access. Test: audit-families.test.ts "files a refused manager from the identity provider under Access, beside the line changes" (and its words, "Reporting line refused").
+
+### The contract test (E16)
+
+- New entries, both (a): src/app/api/scim/v2/Users/route.ts (the list names each person's line here; POST's manager through scim-manager.ts) and src/lib/scim-manager.ts (the line the seat here holds, written through writeLineHere under the role lock). scim-reactivate.ts's reason names the push's manager. The [id] route touches no line column itself (its manager is scim-manager.ts's), so it stays a writer of "none" only, its reason updated: its data holds the name, the address and the status only.
+- **MERGED is [2, 3, 4, 5, 7]**; the done gate holds (step 7 had no (b) entry and no "step 7" writer left). MERGE_NEEDS still needs 8.
+- New test, "holds step 7's manager attribute at the seat here, under the role lock": the one write (writeLineHere on the row read under the person's lock), the seat read, managerCandidateIn live, wouldLoopIn, scimSetManager's role lock, the kept-seat naming, the role lock before the person's lock in PUT and PATCH and in POST (with the seat lock bounded), the reactivation's call, the list's membership line, that no SCIM file writes a line itself, and that the shared identity is still dropped by both doors.
+- The list: **154 files**, (a) 96, (b) 36 (all step 8), (c) 22; 21 writers.
+
+### Decisions made here (worst case first)
+
+- **The value is the manager's SCIM id (their WorkwrK id), or as a fallback their address.** Worst case of the id only: an Okta customer whose managerId holds logins gets every manager refused, and B's admins retype what their provider knows (E9's worst case of ignoring it). Worst case of the address fallback: two accounts share an address across workspaces and the one anchored here is taken, which is the rule every lookup by address here follows. Worst case of storing an externalId instead: a schema change and a migration for a value no provider is required to send.
+- **A PUT that leaves the manager out keeps the line; a displayName with no value asks nothing.** Worst case of clearing: a provider that maps no manager, or only its name, takes every line here off at every push, the Admins' edits included. Worst case of keeping: a provider that drops a manager by leaving it out of a PUT leaves the old line; Azure sends a remove, any provider can send null, and an Admin can clear it.
+- **The manager they already have, sent again, is no change**: nothing checked, written or logged, as PATCH /api/users/[id] keeps it. Worst case of re-checking: a manager deactivated since, or made an Agent from before rule 6, is refused and logged at every periodic push while the line stays anyway (the restore's and reactivation's stale checks own that line).
+- **A refusal identical to the newest refusal logged for the person (the same value, the same reason and the same line here when it was logged, the step 7 review L1) is not logged again.** Worst case of a row per push: a provider with a scheduled full sync writes thousands of identical rows and buries the log. Worst case of this: two pushes in the same instant both log (harmless).
+- **A refused manager never fails the request.** Worst case of failing it: the provider retries for ever and the names, the deactivation or the new account never land (an Okta push errors and the person is never provisioned).
+- **POST writes the manager in the create's transaction, and the role lock is held only when a manager is asked.** Worst case of a second transaction after the create: a busy lock answers 503 after the account was made, the retry meets the 409 "already exists", and the manager never lands. Worst case of this: a create with a manager waits for the role lock (bounded, 3 seconds, then 503).
+- **For a membership person the manager is its own transaction after the rest** (the deprovision, which has its own transactions); a 503 there is retried, and the retry finds the rest already done (a deprovision of an ended seat is a no-op). Worst case of folding it into the deprovision: the most intricate path in SCIM gains a second lock order.
+- **The manager is written on a deactivated seat (a push with active:false and a manager), never on a removed one** (refused, logged), never in a suspended or cancelled workspace (403, a deprovision only) and never on an erased account. Same as PATCH /api/users/[id]: a deactivated person's line is kept and editable, a removed seat's is not.
+- **A reactivation runs the stale-line clears first, then the provider's manager.** Worst case of skipping the clear when the push names a manager (as PATCH does): the provider's manager is refused and the stale line stays.
+- **The resource carries `value` and `displayName`, no `$ref`**: RFC 7643 calls `$ref` recommended; Azure and Okta read `value`, and the mapper knows no base URL. A deactivated manager is named (the record names them, step 3), a removed one is not.
+
+### Tests
+
+- **New: 36.** manager.test.ts 26, scim-mappers.test.ts 8, the contract's step 7 test 1, audit-families.test.ts 1. **All 36 fail on 5213106a** (step 5's code exported to the scratchpad with `git archive`, these test files and the test double copied in), each on an assertion (a line not written, no audit row, no manager in a resource, 200 where 503 or 403 is due), and the mappers' on the missing exports; the anchored deadlock test meets the deadlock thrown as an error there (a 500). Changed: the contract's "lists each file" (its two new entries) fails there too; its other changes (reasons, MERGED) pass on both.
+- The test double (seat-test-db.ts): an Audit log row's createdAt on a create (`@default(now())`), and a User's updatedAt on a create only (`@updatedAt`; never on a seed), as Prisma fills them.
+- The SCIM tests (src/app/api/scim, scim-auth, scim-deprovision, scim-mappers): 9 files, 109 tests, all pass. With their neighbours (audit-families, src/lib/access, src/lib/people, src/app/api/users, auth, people, settings, src/lib/skills, src/lib/browser, and src/components/settings/settings-phase7.test.ts, which reads the audit words): 185 files, 3,057 tests, all pass. Every test related to a changed source (`vitest related` over the 7 changed sources, the test double included): 58 files, 625 tests, all pass.
+- Type check clean, run twice (6 GB heap). ESLint on every touched file: no problem. `node scripts/check-schema-sql.mjs` passes.
+
+### Files
+
+- New: src/lib/scim-manager.ts. Tests: src/app/api/scim/v2/Users/manager.test.ts, src/lib/scim-mappers.test.ts.
+- Changed: src/app/api/scim/v2/Users/route.ts, src/app/api/scim/v2/Users/[id]/route.ts, src/lib/scim-mappers.ts, src/lib/scim-reactivate.ts, src/lib/audit-families.ts; the test double src/lib/access/seat-test-db.ts; tests src/lib/access/workspace-lines.contract.test.ts, src/lib/audit-families.test.ts; this section.
+
+### Left for later steps and the final sweep
+
+- Step 9's live proof ("SCIM sets a manager in B") runs these routes on Postgres: a PATCH and a PUT of Pat in B, a refusal, a remove, and both workspaces' GET.
+- No /Schemas or /ResourceTypes endpoint advertises the enterprise extension (none did before; Okta and Azure do not ask for them).
+- The extension's other attributes (department, employeeNumber, organization, costCenter, division) are not read; department placement is SCIM Groups' (step 5). Dotted lines have no SCIM attribute and stay WorkwrK's to set.
+
+### Deploy notes (step 7, in the one merge), for identity providers
+
+No SQL to apply, no schema change, no environment flag. Rollback is the revert; the lines written meanwhile are ordinary lines, edited in WorkwrK as any.
+
+What customers will notice, from the deploy on:
+1. **An identity provider's manager attribute sets this workspace's Reports to**, for everyone it provisions here, people who work here from another workspace's account included. It never changes who they report to in another workspace, and never their name or sign-in address when another workspace shares the account.
+2. **The provider's manager replaces an Admin's edit at its next push for that person**, as a provider does with the fields it owns (E9). A workspace that wants Reports to kept in WorkwrK unmaps the attribute in its provider.
+3. **A manager that can't be set is left as it was and logged**: Settings, Audit log, Access tab, "Reporting line refused", with the reason in words (not in this workspace, deactivated here, an Agent, the person themself, a reporting loop, the person removed here). The rest of the push lands. Fix the person in WorkwrK or the mapping in the provider, then have the provider send the manager again: Entra does not resend an attribute that has not changed, so use Provision on demand for that person (or change their manager in Entra, or set it in WorkwrK); Okta sends it with the person's next profile push, or push the person from the app's Assignments. The same refusal pushed again is logged once, and again after anyone changes the line.
+4. **Removing the manager in the provider clears this workspace's Reports to** (a PATCH remove, or a null). A PUT that leaves the manager out leaves it as it is.
+5. **SCIM resources now carry the manager** in the enterprise extension (`manager.value` is the manager's SCIM id, with `displayName`), so a provider that compares before it pushes sees this workspace's line.
+
+For each provider's admin:
+- **Microsoft Entra ID (Azure AD).** The default mapping, manager to `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager`, works as it is for every change from the deploy on: Entra sends the id this service returned when it provisioned the manager, so the manager must be in the app's scope and provisioned here first (until then Entra sends no manager for the person, and sends it on a later cycle). Removing someone's manager in Entra sends a remove, which clears the line here. **After the deploy, restart provisioning once** (the app's Provisioning page, "Restart provisioning"): Entra has sent its manager updates all along, this service answered them 200 and ignored them, and Entra counts them as delivered, so without a restart the managers it already sent arrive only when someone's manager next changes in Entra. The restart's full cycle sends every person's manager again; expect one Audit log row per manager this workspace cannot take.
+- **Okta.** In the app's attribute mappings (To App), map the enterprise extension's `manager.value` from an Okta attribute that holds either the manager's sign-in address in this workspace (their userName here) or their WorkwrK SCIM id (the `id` this service answers for them). A managerId that holds an employee number names nobody here and is refused, in words, in the Audit log. **Emptying someone's manager in Okta does not clear it here**: Okta's PUT leaves out an attribute with no value, and a PUT that leaves the manager out keeps the line (so a provider that does not map the manager never wipes the lines Admins set). To take someone's manager off, an Admin clears Reports to on their record in WorkwrK (or the Members drawer); Okta's next push leaves it empty. To be checked against a real Okta tenant in step 9's live proof.
+- **Any other provider**: send `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User` with `manager: { value }` on POST or PUT, or a PATCH on `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager` (or `...:manager.value`), the value being the manager's `id` from this service's SCIM resources or their address; `remove`, or null, to clear it.
+
+## Step 7, review fixes
+
+The review is ~/workwrk-launch-backup/agents/workspace-status-2/step7-review.md: no high finding, no medium, eight lows, each fixed as the coordinator ruled. Same branch, still not committed. **No SQL, no schema change, no flag.**
+
+### L1: a repeat refusal is held back only while the line is the one it was logged against
+
+- logRefusal (src/lib/scim-manager.ts) now compares the newest refusal row's value, reason **and line** (its `oldValue.managerId`, the line here when it was logged) with this push's. The second query (the newest reporting_line_changed row after it) is gone.
+- So a line changed by any door logs the next refusal again, including the doors that write no row per person (the bulk Change manager logs one bulk_update row naming no one; the Agent move logs one row on the Agent).
+- Test: "a line changed outside SCIM, by a door that logs no row for the person (a bulk change, the Agent move), logs the next refusal again". The repeat test no longer back-dates a row to get its order: it steps the clock a second between pushes, as a real sync's rows are spaced, since the in-memory double reads rows stamped in the same millisecond in the order they were made.
+
+### L2: the reactivation answers a transaction past its time as the 503
+
+scimReactivateSeat's catch reads retryAnswer (busy, a deadlock, P2028) in place of rolesBusyAnswer. So the PUT and PATCH reactivation, and POST's revive, answer the 503 an identity provider retries, never a 500, now that the manager's checks run in that transaction too. Test: "a reactivation that runs out of its time is the 503 the provider retries, never a 500, with nothing written".
+
+### L3: no change, no role lock
+
+- New `scimManagerChanges(organizationId, userId, ask)`, read before any lock: the seat's line here (personSeatIn) and the value resolved. False when it names the manager the seat already holds, clears a line already empty, or the person holds no seat here.
+- Where it is read: writeScimUser (PUT and PATCH for someone anchored here) and scimSetManager (a membership person's push, after a deprovision, after a D3 move). With a false answer they pass no manager, so a push carrying an unchanged manager takes only the person's row lock, as before step 7, or no lock at all with no other field.
+- A true answer is checked again, in full, under the role lock (scimManagerHere, unchanged).
+- Not used where the role lock is taken anyway: POST's create (a new account has no line, so a manager is always a change) and the reactivation.
+- Tests: "the manager she already has, sent again ... and the answer names her" now also holds that no role lock was taken; "an unchanged manager riding on a name change takes no role lock, and a clear of an empty line takes none either"; "a change seen before the lock is checked again under it: Dana made an Agent meanwhile is refused".
+
+### L4: the provider deploy notes
+
+Corrected in place in step 7's deploy notes:
+- **Okta:** emptying a manager in Okta does not clear it here (Okta's PUT leaves the empty attribute out, and a PUT without the manager keeps the line). An Admin clears Reports to in WorkwrK, and Okta's next push leaves it empty. To be checked in step 9's live proof.
+- **Entra:** restart provisioning once after the deploy. The manager updates Entra sent before were answered 200, ignored, and counted as delivered.
+- **Note 3:** after fixing a refused manager, have the provider send it again. Entra does not resend an unchanged attribute: use Provision on demand, change it in Entra, or set it in WorkwrK. Okta sends it with the person's next push.
+
+### L5: the two rollback tests throw after the writes they roll back
+
+- "a deadlock in an anchored person's push, after her names were written, rolls them back too": the deadlock is thrown at Lee's second row lock (the manager's write), after her names' updateMany.
+- "a deadlock in POST, after the account was made, makes no account": the deadlock is thrown at the new account's own lock (the manager's write), after the create.
+- Each also holds that the write went through the transaction's client, before the deadlock, and nothing outside it. The in-memory double's rollback restores the whole store, so the `tx.` log entry is what tells the two apart. With the names' write or the create moved outside the transaction (a scratch mutation), both tests fail.
+
+### L6: the claims with no test, tested
+
+- A line changed outside SCIM before a repeat refusal (L1's test above).
+- "a reactivation clears a stale B line first, then logs the refused manager, and A's line stays": Pat back in B under Rita, deactivated there, with the push naming Ada (an Agent). Her B line is cleared ("Reactivated Pat Ng with no manager: Rita Ng is deactivated"), then the refusal is logged against the cleared line; her A line stays.
+- "an address: a live seat before a deactivated twin, the account anchored here before one through a membership, a removed seat never": Max's old deactivated account anchored in B and his live account from A share an address, and the live one is taken (L7). Two live accounts at one address: the one anchored here. A lone deactivated match (Rita's address) is refused as deactivated, by name. A removed seat's address names nobody.
+
+### L7: an address resolves among live seats first
+
+managerNamed tries personHereByEmail at `live`, then at `kept`. An old deactivated account never hides the live one, and a lone deactivated match is still refused as "deactivated". A removed seat still never answers. Test: L6's address test.
+
+### L8: a refused clear says it was not cleared
+
+The refusal's sentence reads "was not cleared" for a remove or a null ("The identity provider's manager for Pat Ng was not cleared: Pat Ng was removed from this workspace. Their manager here is unchanged."), and "was not set" otherwise. Test: "a seat B removed takes no line, logged, and A's line stays; a refused clear says it was not cleared".
+
+### The contract test (E16)
+
+"holds step 7's manager attribute" follows the [id] route's `line` local and adds pins:
+- the pre-check in writeScimUser and scimSetManager (L3);
+- live then kept for an address (L7);
+- the repeat rule's line comparison (L1);
+- retryAnswer in the reactivation, with no rolesBusyAnswer left there (L2).
+
+The list is unchanged: 154 files, (a) 96, (b) 36, (c) 22; 21 writers. MERGED stays [2, 3, 4, 5, 7].
+
+### Files
+
+- Changed: src/lib/scim-manager.ts, src/lib/scim-reactivate.ts, src/app/api/scim/v2/Users/[id]/route.ts, docs/plans/workspace-status-2.md (step 7's deploy notes and two of its sentences, this section).
+- Tests: src/app/api/scim/v2/Users/manager.test.ts (6 new, 5 changed), src/lib/access/workspace-lines.contract.test.ts (the step 7 test's pins).
+
+### Tests
+
+- **New: 6**, all in manager.test.ts, which now has 32.
+- **Changed: 6.** In manager.test.ts: the "already has" test (no role lock), the repeat test (the clock in place of the back-dating), the removed seat test (the refused clear), and the two deadlock tests. Plus the contract's step 7 test.
+- **On the reviewed step 7 code**, 7 fail. The scratchpad tree was 5213106a with today's files and this pass's source edits taken back.
+  - New tests: the L1, L2, L3 (no lock) and L6/L7 address tests.
+  - Changed tests: the "already has" test (L3) and the refused clear (L8).
+  - The contract's step 7 test.
+- Passing there by design:
+  - The L3 re-check under the lock: a guard, since the reviewed code always checked under the lock.
+  - The L6 stale-line test and the two L5 tests: the code was right, and they close test gaps. The L5 tests fail under the outside-the-transaction mutation.
+  - The repeat test: passes on both codes.
+- The SCIM tests (src/app/api/scim, scim-auth, scim-deprovision, scim-mappers): 9 files, 115 tests, all pass.
+- With their neighbours (audit-families, src/lib/access, src/lib/people, src/app/api/users, auth, people, settings, src/lib/skills, src/lib/browser, settings-phase7): 185 files, 3,063 tests, all pass.
+- Every test related to a changed source: 58 files, 631 tests, all pass.
+- Type check clean, run twice (6 GB heap). ESLint on every touched file: no problem. `node scripts/check-schema-sql.mjs` passes.
+
+### Deploy notes, added to step 7's
+
+1. **A push naming the manager someone already has waits for no lock**, so a provider's large profile sync never queues behind, or holds up, an Admin changing a level or a Reports to.
+2. **After the deploy, Entra ID workspaces restart provisioning once**, so the managers Entra sent before the deploy arrive (step 7's Entra note).
+3. **Okta workspaces clear a manager in WorkwrK**, since emptying it in Okta does not reach here (step 7's Okta note).
+4. **A manager the provider names by address** is the person with a live seat here under that address before one deactivated here.
+5. **The same refused manager is logged again after any change of the person's line here**, whoever made it.
