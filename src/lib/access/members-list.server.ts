@@ -19,8 +19,10 @@
 // membership person the row carries `profileHere: false`, and the job title,
 // department, office and weekly hours are the ones THIS workspace holds on
 // their membership (D18; the final review, product H1), never the
-// account's, which are the workspace it is anchored to; the drawer shows
-// them read-only. The department, office and job title filters match a
+// account's, which are the workspace it is anchored to; the drawer edits
+// them there for the people who may write them
+// (docs/plans/workspace-status-2.md E7, E8, step 5; read-only before). The
+// department, office and job title filters match a
 // membership person by those same ids (security L1). For every row,
 // anchored here or not, a job title, department or office is shown only
 // when it is one of this workspace's own, and a manager only when they hold
@@ -96,8 +98,11 @@ export interface MemberRow {
   /**
    * False for someone who works here through a membership (D11): their job
    * title, department, office and capacity are the ones their membership
-   * here holds (D18, the final review, product H1), shown read-only while
-   * they work in another workspace. True for someone anchored here.
+   * here holds (D18, the final review, product H1), edited here on that
+   * membership (workspace-status-2.md E7, step 5); their name, address,
+   * phone, photo and birthday are the account's, their sign-ins are logged
+   * where it is anchored, and Admin scopes are not held here. True for
+   * someone anchored here.
    */
   profileHere: boolean;
 }

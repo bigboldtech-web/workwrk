@@ -311,9 +311,14 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
     expect(read("src/app/api/users/[id]/route.ts")).toContain(".catch((e: unknown) => (e instanceof PatchRefused ? e.refusal : rolesBusyOrThrow(e)));");
     // Step 3 review L1: a seat plan that changed under the lock rolls back too.
     expect(read("src/app/api/users/[id]/route.ts")).toContain('.catch((e: unknown) => (e instanceof AlreadyRemoved ? ("already" as const) : e instanceof SeatPlanChanged ? ("changed" as const) : rolesBusyOrThrow(e)));');
-    for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/people/bulk-update/route.ts", "src/app/api/settings/ownership/route.ts"]) {
+    for (const p of ["src/app/api/users/route.ts", "src/app/api/users/[id]/dotted-lines/route.ts", "src/app/api/settings/ownership/route.ts"]) {
       expect(read(p), p).toContain(".catch(rolesBusyOrThrow)");
     }
+    // workspace-status-2 step 5 review L5: the bulk update's two batch
+    // transactions answer the same busy and deadlock 503, and a batch past
+    // its 20 seconds too (retryOrThrow, over rolesBusyAnswer).
+    expect(read("src/app/api/people/bulk-update/route.ts").match(/BATCH_TX\)\s*\.catch\(retryOrThrow\)/g)?.length).toBe(2);
+    expect(read("src/lib/access/org-roles-busy.ts")).toContain("return rolesBusyAnswer(e) ?? (isTransactionTimeout(e) ?");
     expect(read("src/app/api/users/[id]/handover/route.ts")).toContain("const busy = rolesBusyResponse(e);");
     expect(read("src/app/api/users/[id]/agent-reports/route.ts")).toContain("const busy = rolesBusyResponse(e);");
     // Batch 5: both branches, and the seat lock's busy too (one answer).

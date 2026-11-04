@@ -56,34 +56,51 @@ export const PERSON_FIELD_GROUP: Record<string, PersonFieldGroup> = {
 
 /**
  * The fields of someone who works here through a membership that THIS
- * workspace changes today (docs/plans/workspace-status.md D11): their role
- * and their status. Their job title, department, office and the rest of
- * their profile here are held on the membership (D18) and shown read-only
- * while they are working in another workspace; PATCH refuses them with
- * PROFILE_ELSEWHERE. Editing them is the next step.
+ * workspace writes (docs/plans/workspace-status.md D11, D18;
+ * docs/plans/workspace-status-2.md E7, step 5): their role and status, and
+ * since step 5 their job title, department, office, weekly hours, working
+ * week, profile fields and Reports to, each on their membership here
+ * (seat-writes.ts), through the same doors as for anyone. Everything but
+ * their shared identity: their name, phone, photo and birthday are the
+ * account's, read by every workspace they belong to, so PATCH refuses them
+ * here with SHARED_IDENTITY_REFUSAL (src/lib/access/shared-identity.ts).
+ * Before step 5 only the role and the status were here, and every other
+ * field was refused with "their details here are read-only".
  */
-export const SEAT_FIELDS: ReadonlySet<string> = new Set(["status", "orgRole", "memberTier", "accessLevel"]);
+export const SEAT_FIELDS: ReadonlySet<string> = new Set(
+  Object.entries(PERSON_FIELD_GROUP)
+    .filter(([, group]) => group !== "personal" && group !== "dob")
+    .map(([field]) => field),
+);
 
-/** The one line the drawer and the record show, and PATCH answers, for that profile (D11; the final review, product H1). */
-export const PROFILE_ELSEWHERE = "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.";
+/**
+ * What a job title change and every KRA or SOP assignment door says for
+ * someone here through a membership (docs/plans/workspace-status-2.md, the
+ * step 5 review M1): a KRA or SOP assignment names no workspace, and the
+ * readers of them (My KRAs, the KPI recorder, self-reports, review
+ * self-assessments, the weight total, the open SOP count) read every row of
+ * the person's, so a row B made for Pat showed in A and counted there,
+ * while B's own record of her shows none (a known limit). So none is made
+ * for them here: their job title, department and office are saved, and
+ * this sentence says why nothing else was. Per workspace KRAs, KPIs,
+ * reviews and skills, with those readers filtered, are the next step.
+ */
+export const ALIGNMENT_NOT_HERE = "KRAs and SOPs are not assigned to people who work here from another workspace's account.";
 
 /** Members' tooltip on "·" in Last logged in for someone here through a membership (the final review, product M4). */
 export const SIGN_IN_ELSEWHERE = "Not shown while they are working in another workspace.";
 
 /**
- * The words a bulk placement change's toast adds for the people it skipped
+ * The words a bulk change's toast adds for the people it skipped
  * (docs/plans/workspace-status.md, the final review, product L5): how many,
- * and why, after the count changed. `elsewhere` of them work here through a
- * membership (their details here are read-only, PROFILE_ELSEWHERE); the rest
- * are not this viewer's to change. Empty when nobody was skipped.
+ * after the count changed. Empty when nobody was skipped. Since
+ * workspace-status-2 step 5 a bulk placement change reaches the people here
+ * through a membership too, so nobody is skipped for working in another
+ * workspace (the answer's `skippedElsewhere` is 0, kept for one release).
  */
-export function bulkSkippedWords(skipped: number, elsewhere = 0): string {
+export function bulkSkippedWords(skipped: number): string {
   if (skipped <= 0) return "";
-  const away = Math.min(Math.max(0, elsewhere), skipped);
-  const other = skipped - away;
-  if (away === 0) return ` · ${skipped} skipped (not yours to change)`;
-  if (other === 0) return ` · ${skipped} skipped: they are working in another workspace, so their details here are read-only`;
-  return ` · ${skipped} skipped: ${away} working in another workspace, whose details here are read-only, and ${other} not yours to change`;
+  return ` · ${skipped} skipped (not yours to change)`;
 }
 
 /** Every key PATCH /api/users/[id] accepts. Anything else is a 400. */

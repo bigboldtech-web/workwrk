@@ -187,11 +187,11 @@ export async function GET(req: NextRequest) {
         departmentId: departmentHere(p),
         weeklyCapacityHours: extra.get(p.id)?.weeklyCapacityHours ?? null,
         workSchedule: extra.get(p.id)?.workSchedule ?? null,
-        // The hours a membership holds are read-only here until editing a
-        // membership's profile is built (person-fields.ts SEAT_FIELDS,
-        // PROFILE_ELSEWHERE: PATCH refuses them), so the grid never offers
-        // an edit that would be refused.
-        canEditCapacity: p.seat.kind === "anchor" && canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),
+        // The same door as PATCH's (workspace-status-2.md E7, E13, step 5):
+        // the hours a membership holds here are written here, on the
+        // membership, for someone here through one as for anyone. Before step
+        // 5 they were read-only (PATCH refused them).
+        canEditCapacity: canWritePersonField("weeklyCapacityHours", relationTo(ctx, p.id), { managerTierSelf: ctx.managerTier, chainWritesMembership: !accessV2Resolver() }),
       })),
       items,
       boards: boards.ids

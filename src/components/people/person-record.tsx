@@ -56,7 +56,7 @@ import { appAudienceAllows } from "@/lib/nav/app-audience";
 import { assetGlyph } from "@/app/(dashboard)/assets/asset-glyph";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
 import { ratingLabel } from "@/lib/people/skills-aggregate";
-import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
+import { SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
 import { seniorityLabel } from "@/lib/people/seniority";
 import { describeSchedule } from "@/lib/work-schedule";
 import { fitTabs } from "@/lib/people/fit-tabs";
@@ -77,6 +77,15 @@ import { goalChip, repeatingDueText } from "@/lib/goals/goal-form";
 interface Access {
   relation: string;
   peopleData: boolean;
+  /**
+   * The profile this workspace holds of them (weekly hours, working week,
+   * profile fields) is on the record: with the rest of their people data, or
+   * on its own for someone here through a membership, whose phone, birthday,
+   * KPIs, reviews and skills are not this workspace's
+   * (docs/plans/workspace-status-2.md E8, step 5). Absent from a server
+   * before step 5: peopleData decides then.
+   */
+  profileData?: boolean;
   editable: string[];
   remove: boolean;
   restore: boolean;
@@ -120,7 +129,7 @@ interface Person {
   kudosReceived: KudosRow[];
   access: Access;
   minimal?: boolean;
-  /** False for someone who works here through a membership: their details here are read-only (PROFILE_ELSEWHERE). */
+  /** False for someone who works here through a membership: their name, phone, photo and birthday are the account's (SHARED_IDENTITY_REFUSAL). */
   profileHere?: boolean;
   phone?: string | null;
   dateOfBirth?: string | null;
@@ -641,6 +650,8 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
   // An Owner, Admin or manager-tier person holds their own placement writes
   // (yesterday's rule), so the "ask your manager" caption would be wrong.
   const selfPlacement = self && person.access.editable.some((f) => PLACEMENT_FIELDS.includes(f));
+  // The profile this workspace holds (weekly hours, working week, profile fields), E8.
+  const profileData = person.access.profileData ?? person.access.peopleData;
   const birthday = person.dateOfBirth
     ? person.dateOfBirth.startsWith("--")
       ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`2000-${person.dateOfBirth.slice(2)}T12:00:00Z`))
@@ -676,7 +687,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
         {person.access.peopleData && person.phone ? <RecordRow label="Phone">{person.phone}</RecordRow> : null}
         {person.access.peopleData && birthday ? <RecordRow label="Date of birth">{birthday}</RecordRow> : null}
         <RecordRow label="Joined">{formatDate(person.joinDate, datePrefs, "date")}</RecordRow>
-        {person.access.peopleData ? (
+        {profileData ? (
           <RecordRow label="Weekly capacity">
             {person.weeklyCapacityHours != null ? (
               `${person.weeklyCapacityHours}h`
@@ -688,7 +699,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
             )}
           </RecordRow>
         ) : null}
-        {person.access.peopleData && (person.workSchedule || person.orgSchedule) ? (
+        {profileData && (person.workSchedule || person.orgSchedule) ? (
           <RecordRow label="Work schedule">
             {person.workSchedule ? (
               describeSchedule(person.workSchedule)
@@ -697,7 +708,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
             )}
           </RecordRow>
         ) : null}
-        {person.access.peopleData
+        {profileData
           ? (person.profileFields ?? [])
               .filter((f) => f.value || person.access.editable.includes("customFields"))
               .map((f) => (
@@ -706,13 +717,14 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
                 </RecordRow>
               ))
           : null}
-        {person.access.peopleData ? (
+        {/* This workspace's tags, with the profile it holds of them: someone here through a membership too, so a tag the bulk bar put on can be taken off (the step 5 review L3). */}
+        {profileData ? (
           <RecordRow label="Tags"><TagPicker entityType="USER" entityId={person.id} canEdit={person.access.tags} /></RecordRow>
         ) : null}
       </dl>
-      {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3). */}
-      {person.profileHere === false ? <p className="pb-1 pt-2 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}
-      {self && !selfPlacement && person.profileHere !== false ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
+      {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3): since workspace-status-2 step 5 (E8) only their name, phone, photo and birthday are not this workspace's. */}
+      {person.profileHere === false && !self ? <p className="pb-1 pt-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}
+      {self && !selfPlacement ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
       {self && selfPlacement && onEditPlacement ? (
         <p className="pb-1 pt-2 text-sm text-ink-2">
           You can change your own placement.{" "}

@@ -27,6 +27,17 @@
 // (deactivated in B through her membership, live in another workspace the
 // person works in) off the person's B lines, the PUT answered 200 and kept
 // the row, and Rita was back on the next load.
+//
+// A SUBJECT OF EITHER KIND (workspace-status-2.md E7, step 5). PUT writes the
+// dotted lines here of someone anchored here and of someone here through a
+// membership alike, on the seat as read (personSeatIn, the account's
+// workspace with it), through the same doors: relationTo over this
+// workspace's tree, the placement write, the role lock. The solid line it
+// leaves out of the set is the one the seat here holds (the membership's for
+// a membership person), never the account's: before, it filtered the
+// account's line, which is the anchored workspace's, so a B dotted manager
+// who is Pat's A manager was dropped from her B set (the step 2 review,
+// pairing 10). Before step 5 a membership subject was a 404.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -127,11 +138,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const staleTab = await staleTabRefusal(ctx.organizationId);
   if (staleTab) return staleTab;
   const { id } = await params;
-  const subject = await prisma.user.findFirst({
-    where: { id, organizationId: ctx.organizationId, deletedAt: null },
-    select: { id: true, managerId: true, firstName: true, lastName: true },
-  });
-  if (!subject) return err(404, "Not found");
+  // The seat they hold HERE, not removed: anchored here, or a membership here
+  // (E7, step 5). The account row says where it was anchored when read, so
+  // the write below lands on that seat's row or nowhere (seatRefOf).
+  const [subject, seat] = await Promise.all([
+    prisma.user.findUnique({ where: { id }, select: { id: true, organizationId: true, firstName: true, lastName: true } }),
+    personSeatIn(ctx.organizationId, id),
+  ]);
+  if (!subject || !seat || seat.removedAt) return err(404, "Not found");
   if (!writesDottedLines(ctx, id)) {
     return err(403, "You can't change this person's dotted lines.", { code: "field_forbidden", fields: ["dottedLines"] });
   }
@@ -144,7 +158,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if ((body.managerIds as string[]).includes(id)) {
     return err(400, "Someone can't be their own dotted-line manager.", { code: "self_dotted_line", field: "dottedLines" });
   }
-  const ids = [...new Set(body.managerIds as string[])].filter((m) => m !== subject.managerId);
+  // The solid line here is never a dotted line too: the one this seat holds.
+  const ids = [...new Set(body.managerIds as string[])].filter((m) => m !== seat.managerId);
   if (ids.length > 20) return err(400, "Up to 20 dotted-line managers");
   // Every line the body names is this workspace's (E2): checked here, never
   // kept for another workspace.
@@ -183,8 +198,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (c !== "ok") return { refused: "not_found" as const };
     }
     // This workspace's rows only, replaced with the body (E2, step 4): on
-    // the seat as read (anchored here); null when that seat no longer stands.
-    const done = await writeDottedHere(tx, seatRefOf(ctx.organizationId, { id, organizationId: ctx.organizationId }), ids.map((managerId) => ({ managerId })));
+    // the seat as read (anchored here or a membership here, step 5); null
+    // when that seat no longer stands.
+    const done = await writeDottedHere(tx, seatRefOf(ctx.organizationId, { id, organizationId: subject.organizationId }), ids.map((managerId) => ({ managerId })));
     return done ? { refused: null } : { refused: "seat_changed" as const };
   }).catch(rolesBusyOrThrow);
   if (written instanceof NextResponse) return written;

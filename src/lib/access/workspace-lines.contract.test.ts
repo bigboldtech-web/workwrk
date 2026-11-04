@@ -106,7 +106,7 @@ interface Writer {
 }
 
 /** The steps of this program whose builder has finished: none of their (b) entries or writers may remain. */
-const MERGED: readonly Step[] = [2, 3, 4];
+const MERGED: readonly Step[] = [2, 3, 4, 5];
 /** What the one merge of steps 1 to 4 (with 5, 7 and 8) needs MERGED to hold. */
 const MERGE_NEEDS: readonly Step[] = [2, 3, 4, 5, 7, 8];
 
@@ -128,7 +128,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/calendar/events/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "the Team pill: the solid reports by the line here (reportsHereOf, both halves), the dotted ones this workspace's rows (step 2)" },
   "src/app/api/candor/[id]/respond/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the Candor audience by the account's department" },
   "src/app/api/conversations/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "shows a member's job title and department only when they belong here" },
-  "src/app/api/departments/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "clears a deleted department from removed accounts anchored here (the key); a membership's copy has no key and is never shown" },
+  "src/app/api/departments/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "the delete counts everyone here placed in it, both halves (membershipsPlacedHere, the step 5 review M2), and clears it from removed accounts anchored here (the key); a removed membership's copy has no key and is never shown" },
   "src/app/api/departments/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "removed people's department counts, anchored only" },
   "src/app/api/email/send-reminders/route.ts": { kinds: ["line"], mark: "a", why: "the monthly evaluation's people with a line here, both halves (the account's line for people anchored here, a live membership's line), each named to their digest manager (step 2)" },
   "src/app/api/export/people/route.ts": { kinds: ["line", "profile"], mark: "a", why: "anchored rows, whose line and profile are this workspace's (phase 1's decision)" },
@@ -136,7 +136,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/invitations/route.ts": { kinds: ["line"], mark: "a", why: "an invitation's own manager and placement (one workspace's row, applied at acceptance)" },
   "src/app/api/kpi-records/route.ts": { kinds: ["profile"], mark: "a", why: "a holder's department read at the seat here (seatPlacementsHere)" },
   "src/app/api/kpi-records/summary/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's KPI history here is a known limit (the plan); anchored people's job title and department" },
-  "src/app/api/kra-assignments/route.ts": { kinds: ["line"], mark: "a", why: "via effectiveDirectReportIds, which reads the reports here (reportsHereOf, step 2)" },
+  "src/app/api/kra-assignments/route.ts": { kinds: ["line"], mark: "a", why: "via effectiveDirectReportIds, which reads the reports here (reportsHereOf, step 2); POST refuses a membership person in words (ALIGNMENT_NOT_HERE, the step 5 review M1)" },
   "src/app/api/kras/orphans/route.ts": { kinds: ["profile"], mark: "a", why: "a KRA's own job role; a holder's job title shown only when it belongs here" },
   "src/app/api/kudos/leaderboard/route.ts": { kinds: ["profile"], mark: "a", why: "shows job title and department only when they belong here" },
   "src/app/api/kudos/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the wall's department filter by the account's department" },
@@ -144,12 +144,12 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/me/export/route.ts": { kinds: ["profile"], mark: "c", why: "the person's own data export, account-wide" },
   "src/app/api/me/route.ts": { kinds: ["line", "profile"], mark: "c", why: "the person's own place card, their manager included, by design (phase 1)" },
   "src/app/api/my-team/route.ts": { kinds: ["line", "profile"], mark: "a", why: "each member's managerId and so directReportIds from the line their seat here holds (seatsHeldFor), the lines the walk climbed, named only with a seat here (step 3)" },
-  "src/app/api/offices/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "an office's member counts, anchored only (Office.members)" },
+  "src/app/api/offices/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "an office's listed member counts, anchored only (Office.members); its delete counts both halves (the step 5 review M2)" },
   "src/app/api/okrs/my-okrs/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title" },
   "src/app/api/okrs/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title" },
   "src/app/api/people/[id]/alignment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a person's alignment, their manager and placement: a membership person's people data here is a known limit" },
   "src/app/api/people/bulk-import/route.ts": { kinds: ["line"], mark: "a", why: "makes invitations, each with its manager and placement (E10: unchanged)" },
-  "src/app/api/people/bulk-update/route.ts": { kinds: ["line", "profile"], mark: "b", step: 5, why: "change_manager through writeLineHere, each person under their row lock on the row that holds their seat (step 4, done); department, office and the line for membership people (step 5)" },
+  "src/app/api/people/bulk-update/route.ts": { kinds: ["line"], mark: "a", why: "the selection read at the seat each person holds here, both halves (step 5); change_manager through writeLineHere, change department and office through writeProfileHere, each under the person's row lock on the row that holds their seat (steps 4 and 5)" },
   "src/app/api/policies/[id]/assignments/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the audience by the account's department" },
   "src/app/api/policies/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the assignees' department (unscoped) and the counts" },
   "src/app/api/pulse-surveys/[id]/respond/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the survey audience by the account's office and department" },
@@ -163,27 +163,25 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/reviews/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "the writer via reviewerFacts, which reads the line here (step 2: the subject's account line is no longer read or sent); title and department shown only when they belong here" },
   "src/app/api/role-boundaries/request/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holders, anchored only" },
   "src/app/api/roles/[id]/alignment/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holder count, anchored only (Role.users)" },
-  "src/app/api/roles/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holder count, anchored only (a Role's own department is the Role's)" },
+  "src/app/api/roles/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's listed holder count, anchored only (a Role's own department is the Role's); its delete counts both halves (the step 5 review M2)" },
   "src/app/api/roles/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "removed holders per job title, anchored only" },
-  "src/app/api/scim/v2/Groups/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 5, why: "a Group writes the account's department, membership people skipped (E9 ii)" },
-  "src/app/api/scim/v2/Groups/route.ts": { kinds: ["profile"], mark: "b", step: 5, why: "a new Group's members get the account's department, membership people skipped (E9 ii)" },
   "src/app/api/search/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "announcement visibility by the viewer's department and office" },
   "src/app/api/skills/export/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's skills here are a known limit; the department shown only when it belongs here" },
   "src/app/api/skills/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's skills here are a known limit; the department shown only when it belongs here" },
-  "src/app/api/sop-assignments/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "SOP assignment by department, anchored only" },
+  "src/app/api/sop-assignments/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "SOP assignment by department, anchored only; a membership person named by id is refused in words (ALIGNMENT_NOT_HERE, the step 5 review M1)" },
   "src/app/api/sop-folders/[id]/access/route.ts": { kinds: ["profile"], mark: "a", why: "shows title and department only when they belong here" },
   "src/app/api/sops/[id]/people/route.ts": { kinds: ["profile"], mark: "a", why: "shows the department only when it belongs here" },
   "src/app/api/spaces/[id]/workload/route.ts": { kinds: ["profile"], mark: "a", why: "capacity at the seat here (capacityHereOf, step 6)" },
   "src/app/api/talent-assessment/people/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a membership person's talent data here is a known limit; anchored people's own line and placement" },
   "src/app/api/talent-assessment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a membership person's talent data here is a known limit; anchored people's own line and placement" },
   "src/app/api/team/members-work/route.ts": { kinds: ["line", "profile"], mark: "a", why: "the Reports to filter by the line each seat here holds: the account's for the anchored half, the membership's own for the membership half (step 3)" },
-  "src/app/api/team/workload/route.ts": { kinds: ["profile"], mark: "b", step: 5, why: "capacity at the seat here (step 6); canEditCapacity for membership people (E7)" },
+  "src/app/api/team/workload/route.ts": { kinds: ["profile"], mark: "a", why: "capacity at the seat here (step 6); canEditCapacity by PATCH's door for both kinds (E7, step 5)" },
   "src/app/api/users/[id]/agent-reports/route.ts": { kinds: ["line"], mark: "a", why: "via moveAgentReports and previewAgentReports, which read and move this workspace's lines only (reportsHereOf, moveLinesHere, removeDottedHere, step 4)" },
-  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 5, why: "GET reads this workspace's rows (step 3, done); PUT replaces this workspace's rows through writeDottedHere, the keep-elsewhere list retired, a new line live here (step 4, done); PUT for a subject here through a membership, its solid-line filter by the seat's line (step 5)" },
+  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "GET reads this workspace's rows (step 3); PUT replaces this workspace's rows through writeDottedHere, a new line live here (step 4), for a subject of either kind at the seat here, the solid line left out the one that seat holds (step 5)" },
   "src/app/api/users/[id]/handover/route.ts": { kinds: ["line"], mark: "a", why: "the summary's reports through reportsHereOf, the preview and the run the same plan over this workspace's lines (step 4)" },
   "src/app/api/users/[id]/record-access/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "the walk up the line each seat here holds (personSeatIn for the subject, linesHereOf up the line) and this workspace's dotted rows, as viewer.ts walks them (step 3)" },
-  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 5, why: "GET names the line the seat here holds, this workspace's dotted rows and the reports here (step 3, done); PATCH's Reports to through writeLineHere with no 409, and the clears on a restore and a reactivation through writeLineHere and removeDottedHere on the seat's row (step 4, done); a membership person's profile and lines (step 5)" },
-  "src/app/api/users/[id]/seed-alignment/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's KRAs here are a known limit; seeds from the job title of someone anchored here" },
+  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "GET names the line the seat here holds, this workspace's dotted rows and the reports here, and the profile a membership holds to readers of people data (steps 3 and 5); PATCH writes the profile through writeProfileHere and Reports to through writeLineHere on the row that holds the seat, for both kinds, the shared identity refused for a membership person, and the clears through writeLineHere and removeDottedHere (steps 4 and 5)" },
+  "src/app/api/users/[id]/seed-alignment/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's KRAs here are a known limit, refused in words (ALIGNMENT_NOT_HERE, the step 5 review M1); seeds from the job title of someone anchored here" },
   "src/app/api/users/export/route.ts": { kinds: ["line", "profile"], mark: "a", why: "Reports to from the line each row's seat here holds (the membership's for a membership person), named only with a seat here (step 3); the placement read at the seat (D18)" },
   "src/app/api/users/route.ts": { kinds: ["line", "profile"], mark: "a", why: "POST makes an account here with its line (right); GET's manager columns from the line each seat here holds and every row's reports here (reportsHere), a sort by managerId at the seat too (step 3)" },
   "src/app/api/v1/openapi.json/route.ts": { kinds: ["profile"], mark: "a", why: "the public API's documentation text" },
@@ -203,12 +201,11 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/access/membership.ts": { kinds: ["line", "dotted"], mark: "a", why: "rule 6 (reportCountOf) counts the reports here (reportsHereOf) and this workspace's dotted lines; unattendedRecipient walks the line each seat here holds (step 2)" },
   "src/lib/access/node-access.ts": { kinds: ["line"], mark: "a", why: "reads the line with the session's row so personSeatIn answers the seat in one read; decides nothing by it" },
   "src/lib/access/object-share/goal.ts": { kinds: ["profile"], mark: "c", why: "behind ACCESS_V2_TABLES (off): the object share module reads people anchored here throughout and moves as one when the flag is turned on" },
-  "src/lib/access/profile-here.ts": { kinds: ["profile"], mark: "a", why: "a membership's placement read at the seat; a manager named only while they hold a seat here" },
+  "src/lib/access/profile-here.ts": { kinds: ["profile"], mark: "a", why: "a membership's placement read at the seat; a manager named only while they hold a seat here; the membership half of a placement count for the Settings deletes (membershipsPlacedHere, the step 5 review M2)" },
   "src/lib/access/seat-writes.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "the one place a line or a profile is written for a seat (E16)" },
   "src/lib/access/seated-here.ts": { kinds: ["profile"], mark: "a", why: "reads the membership's placement and capacity columns, and the account's, at the seat here (step 6)" },
   "src/lib/access/viewer.ts": { kinds: ["profile"], mark: "a", why: "the viewer's placement read at the seat here (phase 1's final review, L5)" },
   "src/lib/access/workspace-anchor.ts": { kinds: ["line", "profile"], mark: "a", why: "the swap (E3, D18): a move writes the line and the profile of the workspace left and the one arrived in" },
-  "src/lib/agents/connector-tools.ts": { kinds: ["profile"], mark: "b", step: 5, why: "a teammate's working days from the account's working week: the seat's (capacityHereOf, E13), missed by step 6's search" },
   "src/lib/agents/previews.ts": { kinds: ["line"], mark: "a", why: "an AI invitation's manager at the seat here (managerCandidateIn, live), stored for an existing account too, since its signed-in join writes it (E10, step 4)" },
   "src/lib/agents/tools.ts": { kinds: ["line"], mark: "a", why: "the invite tool's manager via previews.ts and sendInvitation, both at the seat here (E10, step 4); team alignment via getTeamAlignment reads the lines here (step 2); searchEmployeeRows reads the seat (step 6)" },
   "src/lib/alignment-assign.ts": { kinds: ["profile"], mark: "b", step: 8, why: "KRA seeding to a job title's holders, anchored only" },
@@ -216,7 +213,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/analytics.ts": { kinds: ["profile"], mark: "c", why: "a membership person's people data here is a known limit (analytics by department, anchored only)" },
   "src/lib/auth/invite-facts.server.ts": { kinds: ["line"], mark: "a", why: "an invitation's manager and placement (managerOnAccept checks the seat under the role lock)" },
   "src/lib/dashboards/widget-data.ts": { kinds: ["profile"], mark: "a", why: "capacity at the seat here (capacityHereOf, step 6)" },
-  "src/lib/export/workspace-export.server.ts": { kinds: ["profile"], mark: "a", why: "anchored rows, each shown only with this workspace's own placement (phase 1)" },
+  "src/lib/export/workspace-export.server.ts": { kinds: ["profile"], mark: "b", step: 8, why: "anchored rows, each shown only with this workspace's own placement (phase 1); departments.csv's member count, anchored only (Department.members: the step 5 review M2's check)" },
   "src/lib/goal-audience.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a goal's audience by department and job title" },
   "src/lib/goals/goal-contributor.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title, anchored only" },
   "src/lib/hr-segment.ts": { kinds: ["profile"], mark: "c", why: "HRSegment's department and office scope is out of this program (the plan's known limits)" },
@@ -229,7 +226,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/people/handover.server.ts": { kinds: ["line", "dotted"], mark: "a", why: "every report here (reportsHereOf, lineFactsAround) counted and moved through moveLinesHere, an Agent's dotted rows here through removeDottedHere, the relied-line machinery retired (E4 to E6, step 4)" },
   "src/lib/people/named-here.ts": { kinds: ["line"], mark: "a", why: "a pure seat filter over the lines here its caller reads; the elsewhere fields are gone (E6, step 3)" },
   "src/lib/people/person-access.server.ts": { kinds: ["line"], mark: "a", why: "the chain via getTeamUserIds and the report tree, which walk the lines here; managerMapFor reads the lines here (workspacePeopleLines), the graph lineAbove walks too (step 2)" },
-  "src/lib/people/person-fields.ts": { kinds: ["line", "profile"], mark: "b", step: 5, why: "PROFILE_ELSEWHERE goes and SEAT_FIELDS widens (E7)" },
+  "src/lib/people/person-fields.ts": { kinds: ["line", "profile"], mark: "a", why: "a pure field table: SEAT_FIELDS is everything but the shared identity, what this workspace writes for someone here through a membership; PROFILE_ELSEWHERE gone (E7, step 5)" },
   "src/lib/people/reporting-lines.ts": { kinds: ["line"], mark: "a", why: "pure: the callers pass this workspace's lines" },
   "src/lib/people/send-invitation.server.ts": { kinds: ["line"], mark: "a", why: "an invitation's manager and placement, checked against this workspace" },
   "src/lib/people/team-scope.server.ts": { kinds: ["line"], mark: "a", why: "via effectiveDirectReportIds and countedDottedReportIds, which read the lines here (step 2); the chain read keeps the ids only" },
@@ -244,6 +241,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/policy-compliance.ts": { kinds: ["profile"], mark: "b", step: 8, why: "compliance rows by department, anchored only" },
   "src/lib/policy-ledger.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the ledger's department (unscoped), anchored only" },
   "src/lib/reporting-line.ts": { kinds: ["line", "dotted"], mark: "a", why: "the solid walk joins each step to the two halves of the lines here (a LATERAL subquery), dottedRowsHere reads this workspace's rows; getReportingChain, which named no workspace and had no caller, is gone (step 2)" },
+  "src/lib/scim-groups.ts": { kinds: ["profile"], mark: "a", why: "SCIM Groups' members read at the seat here, both halves (the account's department where anchored here, the membership's otherwise), and written through writeProfileHere on the row that holds the seat (E9 ii, step 5)" },
   "src/lib/scim-reactivate.ts": { kinds: ["line"], mark: "a", why: "the stale-line clears through writeLineHere on the row that holds the seat now and removeDottedHere for this workspace's rows (step 4)" },
   "src/lib/sop-compliance.ts": { kinds: ["profile"], mark: "b", step: 8, why: "compliance by the account's department" },
   "src/lib/team-alignment.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "the tree via getEffectiveReportTree and the dotted marks by this workspace's rows (step 2); the rows are people anchored here, by their own line and job title" },
@@ -272,11 +270,8 @@ const ENTRIES: Record<string, Entry> = {
 const WRITERS: Record<string, Writer> = {
   "src/app/api/auth/accept-invite/route.ts": { writes: "made", functions: ["POST"], why: "the signed-out join makes the account here with its line and placement; the signed-in join makes or revives the membership with its placement and the invitation's manager before the move (D18, E10)" },
   "src/app/api/departments/[id]/route.ts": { writes: "key", functions: ["DELETE"], why: "a deleted department cleared from removed accounts anchored here (the account's key); a membership's copy has no key" },
-  "src/app/api/people/bulk-update/route.ts": { writes: "step 5", functions: ["POST"], why: "change_manager goes through writeLineHere (step 4, done); department and office through writeProfileHere (step 5)" },
-  "src/app/api/scim/v2/Groups/[id]/route.ts": { writes: "step 5", functions: ["PATCH", "PUT"], why: "a Group's members' department, the account's only: writeProfileHere (E9 ii)" },
-  "src/app/api/scim/v2/Groups/route.ts": { writes: "step 5", functions: ["POST"], why: "a new Group's members' department, the account's only: writeProfileHere (E9 ii)" },
   "src/app/api/scim/v2/Users/[id]/route.ts": { writes: "none", functions: ["writeScimUser"], why: "its data holds the name, the address and the status only; step 7 adds the manager through writeLineHere" },
-    "src/app/api/users/[id]/route.ts": { writes: "step 5", functions: ["PATCH"], why: "Reports to and the clears on a restore and a reactivation go through writeLineHere and removeDottedHere (step 4, done); the profile through writeProfileHere, for a membership person too (step 5): its data object is built field by field and written with update({ data: write })" },
+  "src/app/api/users/[id]/route.ts": { writes: "none", functions: ["PATCH"], why: "its data object, written with update({ data: write }), holds the personal columns only (names, phone, photo, birthday) of someone anchored here; the profile goes through writeProfileHere and every line through writeLineHere and removeDottedHere (steps 4 and 5)" },
   "src/app/api/users/route.ts": { writes: "made", functions: ["POST"], why: "makes an account here, with its line and placement" },
   "src/lib/access/membership.ts": { writes: "none", functions: ["applyRoleChangeIn", "transferOwnership"], why: "its data holds the level, the org role, the Admin scopes and the token version only" },
   "src/lib/access/seat-writes.ts": { writes: "seat", functions: ["moveLinesHere", "removeDottedHere", "writeDottedHere", "writeLineHere", "writeProfileHere"], why: "the one place a line or a profile is written for a seat (E16)" },
@@ -550,18 +545,9 @@ describe("every reader and writer of a person's line and profile is listed (E16)
   // drops its line here.
   it("holds the plan's named readers at their marks, by the account-line reads they still make", () => {
     const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
-    const stillReads: Array<[string, RegExp]> = [
-      // Step 5: the PUT's subject is anchored here only, and its solid-line
-      // filter reads the account's line (the step 2 review, pairing 10).
-      ["src/app/api/users/[id]/dotted-lines/route.ts", /where: \{ id, organizationId: ctx\.organizationId, deletedAt: null \}/],
-      ["src/app/api/users/[id]/dotted-lines/route.ts", /\.filter\(\(m\) => m !== subject\.managerId\)/],
-      // Step 5: a membership person's profile and Reports to are refused here (PROFILE_ELSEWHERE).
-      ["src/app/api/users/[id]/route.ts", /return err\(403, PROFILE_ELSEWHERE, \{ code: "profile_elsewhere", fields: profile \}\);/],
-    ];
-    for (const [file, read] of stillReads) {
-      expect(ENTRIES[file], file).toMatchObject({ mark: "b" });
-      expect(code(file), file).toMatch(read);
-    }
+    // Steps 2 to 5 merged: none of the account-line reads this test named
+    // for them is left (step 5's are held at the seat by "holds step 5's
+    // doors" below).
     // Step 2 (merged): each reader it flipped reads THIS workspace's line,
     // held in the code (the reads above that it replaced are gone).
     const readsHere: Array<[string, RegExp]> = [
@@ -646,8 +632,10 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/app/api/users/[id]/route.ts", /writeLineHere\(tx, seatRefOf\(ctx\.organizationId, target\), lineNext\)/, 1],
       ["src/app/api/users/[id]/route.ts", /writeLineHere\(tx, await seatNowRef\(tx, ctx\.organizationId, id\), null\)/, 2],
       ["src/app/api/users/[id]/route.ts", /removeDottedHere\(tx, ctx\.organizationId, stale\.dotted\.map/, 2],
-      ["src/app/api/users/[id]/dotted-lines/route.ts", /writeDottedHere\(tx, seatRefOf\(ctx\.organizationId, \{ id, organizationId: ctx\.organizationId \}\)/, 1],
-      ["src/app/api/people/bulk-update/route.ts", /writeLineHere\(tx, seatRefOf\(orgId, \{ id, organizationId: orgId \}\), managerId\)/, 1],
+      // Step 5 opened both for the people here through a membership: the
+      // seat as read, the account's workspace with it.
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /writeDottedHere\(tx, seatRefOf\(ctx\.organizationId, \{ id, organizationId: subject\.organizationId \}\)/, 1],
+      ["src/app/api/people/bulk-update/route.ts", /writeLineHere\(tx, seatOf\.get\(id\)!, managerId\)/, 1],
       ["src/lib/scim-reactivate.ts", /removeDottedHere\(tx, organizationId, stale\.dotted\.map/, 1],
       ["src/lib/scim-reactivate.ts", /writeLineHere\(tx, seatRefOf\(organizationId, now\), null\)/, 1],
       ["src/lib/access/manager-candidate.ts", /personSeatIn\(organizationId, userId, db\)/, 1],
@@ -681,5 +669,78 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     for (const dir of ["src", "scripts"]) all.push(...sources(path.join(ROOT, dir)));
     const hits = all.filter((f) => retired.test(codeOf(readFileSync(f, "utf8")))).map((f) => path.relative(ROOT, f));
     expect(hits).toEqual([]);
+  });
+
+  // Step 5 (merged): a membership person's profile and lines are edited
+  // HERE, through the same doors as anyone's, on the row that holds the seat
+  // (E7 to E9 ii), held in the code; the reads and writes they replaced are
+  // gone, and "read-only while they are working in another workspace" is
+  // said nowhere.
+  it("holds step 5's doors at the seat here, and PROFILE_ELSEWHERE is gone everywhere", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const doors: Array<[string, RegExp, number]> = [
+      // PATCH: the profile through writeProfileHere on the seat as read, for both kinds.
+      ["src/app/api/users/[id]/route.ts", /writeProfileHere\(tx, seatRefOf\(ctx\.organizationId, target\), profile\)/, 1],
+      ["src/app/api/users/[id]/route.ts", /if \(identity\.length\) return err\(403, SHARED_IDENTITY_REFUSAL, \{ code: "identity_shared", fields: identity \}\);/, 1],
+      ["src/app/api/users/[id]/route.ts", /editable: editable\.filter\(\(f\) => SEAT_FIELDS\.has\(f\)\)/, 1],
+      ["src/app/api/users/[id]/route.ts", /if \(access\.profileData\) \{/, 1],
+      // The dotted-lines PUT: a subject of either kind, the solid line the seat here holds left out.
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /personSeatIn\(ctx\.organizationId, id\),\n\s+\]\);/, 1],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /\.filter\(\(m\) => m !== seat\.managerId\)/, 1],
+      // Bulk: both halves, each written on the row that holds the seat.
+      ["src/app/api/people/bulk-update/route.ts", /membershipHereWhere\(orgId, "kept", \{ id: \{ in: userIds \} \}\)/, 1],
+      ["src/app/api/people/bulk-update/route.ts", /writeProfileHere\(tx, seatOf\.get\(id\)!, patch\)/, 1],
+      // SCIM Groups: both halves, written through writeProfileHere.
+      ["src/lib/scim-groups.ts", /writeProfileHere\(tx, seatRefOf\(organizationId, account\), \{ departmentId: next \}\)/, 1],
+      ["src/lib/scim-groups.ts", /membershipHereWhere\(organizationId, "kept"\)/, 2],
+      ["src/lib/scim-groups.ts", /membershipsPlacedHere\(organizationId, \{ departmentId \}\)/, 1],
+      // Workload's capacity edit by PATCH's door, and a teammate's working days at the seat.
+      ["src/app/api/team/workload/route.ts", /canEditCapacity: canWritePersonField\("weeklyCapacityHours"/, 1],
+      ["src/lib/agents/connector-tools.ts", /capacityHereOf\(person\.organizationId, \[person\.userId\], prisma\)/, 1],
+      // What this workspace writes for a membership person: everything but the shared identity.
+      ["src/lib/people/person-fields.ts", /\.filter\(\(\[, group\]\) => group !== "personal" && group !== "dob"\)/, 1],
+    ];
+    for (const [file, re, n] of doors) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // The reads and writes they replaced are gone: the account's department
+    // written by SCIM and bulk, the raw profile-field merge on User, the
+    // PUT's anchored-only subject and its account-line filter, Workload's
+    // anchored-only edit.
+    for (const f of ["src/app/api/scim/v2/Groups/route.ts", "src/app/api/scim/v2/Groups/[id]/route.ts", "src/app/api/people/bulk-update/route.ts"]) {
+      expect(code(f), f).not.toMatch(/prisma\.user\.updateMany|members: \{ select|_count: \{ select: \{ members/);
+    }
+    expect(code("src/app/api/users/[id]/route.ts")).not.toMatch(/UPDATE "User"|SET "customFields"/);
+    expect(code("src/app/api/users/[id]/dotted-lines/route.ts")).not.toMatch(/subject\.managerId|deletedAt: null \}/);
+    expect(code("src/app/api/team/workload/route.ts")).not.toMatch(/seat\.kind === "anchor" && canWritePersonField/);
+    // PROFILE_ELSEWHERE and its sentence, nowhere in src/ (client files included), comments aside.
+    const gone = /\bPROFILE_ELSEWHERE\b|"profile_elsewhere"|read-only while they are working in another workspace/;
+    const hits = sources(path.join(ROOT, "src")).filter((f) => gone.test(codeOf(readFileSync(f, "utf8")))).map((f) => path.relative(ROOT, f));
+    expect(hits).toEqual([]);
+  });
+
+  // The step 5 review fixes: no KRA or SOP is assigned to a membership
+  // person here (M1), the Settings deletes count both halves (M2), and the
+  // batch writers answer a timeout or a deadlock as "try again" (L5).
+  it("holds the step 5 review's fixes in the code", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const fixes: Array<[string, RegExp, number]> = [
+      ["src/app/api/users/[id]/route.ts", /if \(target\.seat\.kind !== "anchor"\) alignmentNote = \{ alignmentNote: ALIGNMENT_NOT_HERE \};/, 1],
+      ["src/app/api/users/[id]/route.ts", /seedAlignmentForUser\(/, 1],
+      ["src/app/api/users/[id]/route.ts", /if \(identity\.length && relation === "self"\) return err\(409, OWN_SESSION_STALE_WORDS/, 1],
+      ["src/app/api/sop-assignments/route.ts", /error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere"/, 1],
+      ["src/app/api/kra-assignments/route.ts", /return jsonError\(ALIGNMENT_NOT_HERE, 400\)/, 1],
+      ["src/app/api/users/[id]/seed-alignment/route.ts", /return jsonError\(ALIGNMENT_NOT_HERE, 400\)/, 1],
+      ["src/app/api/departments/[id]/route.ts", /dept\._count\.members \+ \(await membershipsPlacedHere\(orgId, \{ departmentId: id \}\)\)/, 1],
+      ["src/app/api/offices/route.ts", /membershipsPlacedHere\(orgId, \{ officeId: id \}\)/, 1],
+      ["src/app/api/roles/[id]/route.ts", /membershipsPlacedHere\(orgId, \{ roleId: id \}\)/, 1],
+      ["src/app/api/people/bulk-update/route.ts", /BATCH_TX\)\s*\.catch\(retryOrThrow\)/, 2],
+      ["src/app/api/scim/v2/Groups/[id]/route.ts", /await groupWriteRetry\(/, 3],
+      ["src/app/api/scim/v2/Groups/route.ts", /await groupWriteRetry\(/, 1],
+    ];
+    for (const [file, re, n] of fixes) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // The only seeding left in PATCH is the anchored seat's, inside the else of the membership note.
+    expect(code("src/app/api/users/[id]/route.ts")).toMatch(/alignmentNote = \{ alignmentNote: ALIGNMENT_NOT_HERE \};\n\s+else \{\n\s+try \{\n\s+await seedAlignmentForUser\(/);
+    expect(code("src/app/api/people/bulk-update/route.ts")).not.toMatch(/rolesBusyOrThrow|LOCKED_TX/);
   });
 });

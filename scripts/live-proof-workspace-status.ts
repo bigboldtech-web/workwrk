@@ -25,7 +25,9 @@
 //   - the final review: a session sent home by an ended seat says so ("You
 //     no longer have access to B, so you are now in A."); a workspace shows
 //     a membership person the department, job title and office it holds on
-//     their membership, read-only, with the new sentence; a key whose maker
+//     their membership (edited there since workspace-status-2 step 5: their
+//     weekly hours land on the membership, their name is refused with the
+//     shared-identity sentence); a key whose maker
 //     is gone is Stopped in Settings, API keys; re-inviting someone ended
 //     where they are anchored says the way back;
 //   - and the dev server logs no 500.
@@ -997,19 +999,29 @@ async function main() {
   const key5 = await keyCall(KEY);
   check("her old key stays refused (a restore brings no key back)", key5.status === 401, key5.status);
   // The final review, product H1 and M4: A's Members shows her, working in
-  // B, with A's placement read-only and no sign-in of A's to show; a
-  // profile write answers the one sentence.
+  // B, with A's placement and no sign-in of A's to show. Since
+  // workspace-status-2 step 5 (E7) A edits her profile there, on A's
+  // membership, and never her name (the account's).
   const memA5 = await membersRow(ada, pat.email);
   check(
-    "A's Members shows Pat with the job title, department and office A's membership holds, read-only, and no sign-in shown",
+    "A's Members shows Pat with the job title, department and office A's membership holds, and no sign-in shown",
     !!memA5.row && memA5.row.profileHere === false && (memA5.row.jobTitle as Json | null)?.title === `Proof Analyst ${RUN}` && (memA5.row.department as Json | null)?.name === `Proof Ops ${RUN}` && (memA5.row.office as Json | null)?.name === `Proof Office ${RUN}` && memA5.row.lastSignInAt === null,
     memA5.row,
   );
-  const patch5 = await ada.json("PATCH", `/api/users/${pat.id}`, { departmentId: null });
+  const hoursBefore = (await prisma.user.findUnique({ where: { id: pat.id }, select: { weeklyCapacityHours: true } }))?.weeklyCapacityHours ?? null;
+  const patch5 = await ada.json("PATCH", `/api/users/${pat.id}`, { weeklyCapacityHours: 12 });
+  const hoursA5 = (await prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: pat.id, organizationId: A } }, select: { weeklyCapacityHours: true } }))?.weeklyCapacityHours ?? null;
+  const hoursAccount5 = (await prisma.user.findUnique({ where: { id: pat.id }, select: { weeklyCapacityHours: true } }))?.weeklyCapacityHours ?? null;
   check(
-    "Ada's write of Pat's department in A answers 403 profile_elsewhere with the new sentence, writing nothing",
-    patch5.status === 403 && patch5.body.code === "profile_elsewhere" && patch5.body.error === "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status." && (await seat(pat.id, A))?.departmentId === A_DEPT,
-    patch5.body,
+    "Ada's write of Pat's weekly hours in A lands on A's membership (workspace-status-2 step 5), and the account, B's, keeps its own",
+    patch5.status === 200 && hoursA5 === 12 && hoursAccount5 === hoursBefore && (await seat(pat.id, A))?.departmentId === A_DEPT,
+    { reply: patch5.body, hoursA: hoursA5, hoursAccount: hoursAccount5 },
+  );
+  const name5 = await ada.json("PATCH", `/api/users/${pat.id}`, { firstName: "Patricia" });
+  check(
+    "Ada's write of Pat's name in A answers 403 identity_shared with the shared-identity sentence, writing nothing",
+    name5.status === 403 && name5.body.code === "identity_shared" && name5.body.error === "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them." && (await prisma.user.findUnique({ where: { id: pat.id }, select: { firstName: true } }))?.firstName !== "Patricia",
+    name5.body,
   );
   const sw5 = await switchTo(pat, A);
   now = await account(pat.id);

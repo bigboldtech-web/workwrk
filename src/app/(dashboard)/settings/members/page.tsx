@@ -330,12 +330,12 @@ function PeopleTab({ onList, inviteSignal, canInvite, onInvite }: { onList: (b: 
   const runBulkDept = async () => {
     if (!bulkDept) return;
     setBusy(true);
-    const r = await apiFetch<{ updated: number; skipped?: number; skippedElsewhere?: number }>("/api/people/bulk-update", { method: "POST", json: { userIds: [...selected], action: "change_department", payload: { departmentId: bulkDept } } });
+    const r = await apiFetch<{ updated: number; skipped?: number }>("/api/people/bulk-update", { method: "POST", json: { userIds: [...selected], action: "change_department", payload: { departmentId: bulkDept } } });
     setBusy(false);
     setBulkDept(null);
     if (!r.ok) { toast(r.error); return; }
     // How many it skipped, and why (the final review, product L5).
-    toast(`${r.data.updated} moved${bulkSkippedWords(r.data.skipped ?? 0, r.data.skippedElsewhere ?? 0)}`);
+    toast(`${r.data.updated} moved${bulkSkippedWords(r.data.skipped ?? 0)}`);
     setSelected(new Set());
     void load();
   };

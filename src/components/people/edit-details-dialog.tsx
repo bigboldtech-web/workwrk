@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { recordWriteQueue, refusalIsAbout } from "@/lib/people/record-write-queue";
 import { describeSchedule } from "@/lib/work-schedule";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
 
 export interface EditablePerson {
@@ -215,7 +216,14 @@ function Row({ label, state, children }: { label: string; state: FieldState; chi
 
 export function EditDetailsDialog({ person, onClose, onSaved }: { person: EditablePerson; onClose: () => void; onSaved: () => void }) {
   const { openSettings } = useSettingsNav();
+  const { toast } = useOsToast();
   const can = (f: string) => person.access.editable.includes(f);
+  // A job title saved for someone here through a membership assigns no KRAs
+  // or SOPs here, and the server says so (the step 5 review M1).
+  const noteOf = (data: unknown) => {
+    const note = (data as { alignmentNote?: unknown } | null | undefined)?.alignmentNote;
+    if (typeof note === "string" && note) toast(note);
+  };
   const [roles, setRoles] = useState<Opt[]>([]);
   const [depts, setDepts] = useState<Opt[]>([]);
   const [offices, setOffices] = useState<Opt[]>([]);
@@ -351,7 +359,7 @@ export function EditDetailsDialog({ person, onClose, onSaved }: { person: Editab
           ) : null}
           {can("roleId") ? (
             <Row label="Job title" state={state.roleId ?? "idle"}>
-              <FlipSlot>{(side) => <OptionField side={side} ariaLabel="Job title" noneLabel="No job title" value={roleId} options={roles} onPick={(v) => { setRoleId(v); void save("roleId", { roleId: v }); }} />}</FlipSlot>
+              <FlipSlot>{(side) => <OptionField side={side} ariaLabel="Job title" noneLabel="No job title" value={roleId} options={roles} onPick={(v) => { setRoleId(v); void save("roleId", { roleId: v }, undefined, undefined, { onSaved: noteOf }); }} />}</FlipSlot>
             </Row>
           ) : null}
           {can("departmentId") ? (

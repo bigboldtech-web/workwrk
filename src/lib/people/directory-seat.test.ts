@@ -4,7 +4,8 @@
 // state (the membership's own status and removal), so the Removed view lists
 // a membership this workspace removed, for Restore. Their profile here is
 // empty (D18): no department, job title or office, their join date the
-// membership's, their placement not editable here. The Org chart and the
+// membership's, their placement editable here since workspace-status-2.md
+// step 5 (before, not editable here). The Org chart and the
 // export list the same people. Before, all three listed people anchored
 // here only, so a removed contractor had no screen to come back from.
 // Run on the in-memory database.
@@ -48,13 +49,14 @@ beforeEach(() => {
 });
 
 describe("the Directory lists everyone who works here (D11)", () => {
-  it("lists a member here with this workspace's state and none of their profile, their placement not editable here", async () => {
+  it("lists a member here with this workspace's state and none of their account's profile, their placement editable here", async () => {
     const body = await dir();
     // Before: Ada and Bea only.
     expect(ids(body.data)).toEqual(["u-admin", "bea", "cy"]);
     expect(body.pagination.total).toBe(3);
     const cy = body.data.find((r) => r.id === "cy")!;
-    expect(cy).toMatchObject({ department: null, role: null, office: null, isAgent: true, isDeactivated: false, deletedAt: null, canEdit: false, profileHere: false });
+    // Editable here by an Admin since workspace-status-2.md step 5 (E8): on his B membership.
+    expect(cy).toMatchObject({ department: null, role: null, office: null, isAgent: true, isDeactivated: false, deletedAt: null, canEdit: true, profileHere: false });
     expect(new Date(cy.joinDate as string).toISOString()).toBe("2026-06-01T00:00:00.000Z");
     expect(JSON.stringify(cy)).not.toMatch(/Finance|2019/);
     expect(body.data.find((r) => r.id === "bea")).toMatchObject({ canEdit: true, profileHere: true });

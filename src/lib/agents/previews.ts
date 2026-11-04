@@ -649,7 +649,8 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       // sets the level and the manager (accept-invite's signed-in branch,
       // E10): no role, department, office, KRAs or SOPs from this card. So
       // none of those is stored or promised; the card says where to set them
-      // (review round 2).
+      // (review round 2): Members, where their profile here is edited on
+      // their seat here once they join (workspace-status-2.md E7, step 5).
       const account = await liveAccountFor(email);
       if (account && account.organizationId !== org) {
         lines.push(...(managerLine ? [managerLine] : []), INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending);

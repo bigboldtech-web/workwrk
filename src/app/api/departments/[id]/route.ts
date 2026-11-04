@@ -23,6 +23,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { personHere } from "@/lib/access/seated-here";
+import { membershipsPlacedHere } from "@/lib/access/profile-here";
 import { getSessionOrFail, getOrgId } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { mayWriteDepartments } from "@/lib/people/department-access.server";
@@ -129,7 +130,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     include: { _count: { select: { members: { where: { deletedAt: null } }, subDepartments: true } } },
   });
   if (!dept) return err(404, "Department not found");
-  const current = dept._count.members;
+  // Everyone here placed in it, both kinds (docs/plans/workspace-status-2.md,
+  // the step 5 review M2): the people anchored here, and the people here
+  // through a membership whose membership holds it. Before, only the first,
+  // so a department held by someone here through a membership was deleted
+  // under them, leaving their membership a dead id nobody was told about.
+  const current = dept._count.members + (await membershipsPlacedHere(orgId, { departmentId: id }));
   if (current > 0 || dept._count.subDepartments > 0) {
     const parts = [
       current > 0 ? `${current} ${current === 1 ? "person" : "people"}` : null,

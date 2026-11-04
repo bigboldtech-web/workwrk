@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { canWritePersonField, checkPersonPatch, dobOverwriteAllowed, readsPeopleData, visibleStatus } from "./person-fields";
 
+describe("SEAT_FIELDS: what this workspace writes for someone here through a membership (workspace-status-2.md E7, step 5)", () => {
+  it("is every field but their shared identity: name, phone, photo and birthday", async () => {
+    const { SEAT_FIELDS, PATCHABLE_PERSON_FIELDS } = await import("./person-fields");
+    // Before: status, orgRole, memberTier and accessLevel only.
+    expect([...SEAT_FIELDS].sort()).toEqual(["accessLevel", "customFields", "departmentId", "managerId", "memberTier", "officeId", "orgRole", "roleId", "status", "weeklyCapacityHours", "workSchedule"]);
+    expect([...PATCHABLE_PERSON_FIELDS].filter((f) => !SEAT_FIELDS.has(f)).sort()).toEqual(["avatar", "dateOfBirth", "firstName", "lastName", "phone"]);
+    expect(Object.keys(await import("./person-fields"))).not.toContain("PROFILE_ELSEWHERE");
+  });
+});
+
 describe("person field whitelist", () => {
   it("lets the person edit their own name but not their placement", () => {
     expect(canWritePersonField("firstName", "self")).toBe(true);
@@ -66,12 +76,12 @@ describe("person field whitelist", () => {
 describe("bulkSkippedWords and SIGN_IN_ELSEWHERE", () => {
   it("says how many a bulk change skipped, and why", async () => {
     const { bulkSkippedWords } = await import("./person-fields");
-    expect(bulkSkippedWords(0, 0)).toBe("");
+    expect(bulkSkippedWords(0)).toBe("");
     // Before (Members): "{n} moved" alone, whoever was skipped.
-    expect(bulkSkippedWords(2, 0)).toBe(" · 2 skipped (not yours to change)");
-    expect(bulkSkippedWords(1, 1)).toBe(" · 1 skipped: they are working in another workspace, so their details here are read-only");
-    expect(bulkSkippedWords(3, 1)).toBe(" · 3 skipped: 1 working in another workspace, whose details here are read-only, and 2 not yours to change");
-    expect(bulkSkippedWords(1, 5)).toBe(" · 1 skipped: they are working in another workspace, so their details here are read-only");
+    expect(bulkSkippedWords(2)).toBe(" · 2 skipped (not yours to change)");
+    // Since workspace-status-2.md step 5 nobody is skipped for working here
+    // through a membership, so no sentence says their details are read-only.
+    expect(bulkSkippedWords(1)).not.toMatch(/read-only|another workspace/);
   });
 
   it("gives Members' last sign-in a tooltip for someone working elsewhere", async () => {

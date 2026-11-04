@@ -16,12 +16,13 @@
 // joinDate): placementsHere resolves those ids to this workspace's own rows
 // (by id AND workspace, then ownHere), and seatPlacementsHere reads, for
 // any people, the ids this workspace holds: the account's for someone
-// anchored here, the membership's for anyone else. Read-only for a
-// membership person until editing the profile on a membership is built.
+// anchored here, the membership's for anyone else. Edited here on the
+// membership since docs/plans/workspace-status-2.md step 5 (E7).
 
 import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { levelsHeldIn } from "./acting-workspace";
+import { membershipHereWhere } from "./seated-here";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -148,4 +149,23 @@ export function placedHere<T extends Record<string, unknown>>(person: T | null, 
     if (k in out) out[k] = ownHere(out[k] as { organizationId: string } | null | undefined, organizationId);
   }
   return out as PlacedHere<T>;
+}
+
+/**
+ * How many people here through a membership (a seat here not removed, their
+ * account not removed where it is anchored) hold this department, job title
+ * or office on their membership here: the membership half of "who is placed
+ * there" (docs/plans/workspace-status-2.md, the step 5 review M2). A delete
+ * of a department, an office or a job title adds it to its own count of the
+ * people anchored here, so it never deletes one a membership person still
+ * holds without saying so (their membership would keep a dead id, shown as
+ * nothing anywhere). Step 8's helper (E15) reads both halves for the
+ * audiences and the listed counts.
+ */
+export async function membershipsPlacedHere(
+  organizationId: string,
+  placement: { departmentId: string } | { roleId: string } | { officeId: string },
+  db: Db = prisma,
+): Promise<number> {
+  return db.organizationMembership.count({ where: { ...membershipHereWhere(organizationId, "kept"), ...placement } });
 }

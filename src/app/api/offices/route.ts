@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { settingsWriteGate } from "@/lib/access/settings-write";
 import { logActivity } from "@/lib/activity";
+import { membershipsPlacedHere } from "@/lib/access/profile-here";
 import { z } from "zod";
 
 const optText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v === "" ? null : v));
@@ -161,7 +162,9 @@ export async function DELETE(req: NextRequest) {
     include: { _count: { select: { members: true } } },
   });
   if (!existing) return jsonError("Office not found", 404);
-  if (existing._count.members > 0) return jsonError("Cannot delete office with assigned members");
+  // The people here through a membership whose membership holds this office
+  // count too (docs/plans/workspace-status-2.md, the step 5 review M2).
+  if (existing._count.members > 0 || (await membershipsPlacedHere(orgId, { officeId: id })) > 0) return jsonError("Cannot delete office with assigned members");
 
   await prisma.office.delete({ where: { id } });
 

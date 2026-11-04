@@ -5,6 +5,7 @@ import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
+import { membershipsPlacedHere } from "@/lib/access/profile-here";
 import { KPI_ORDER } from "@/lib/alignment";
 
 // GET: the full role-definition bundle: the Block-B view of a role.
@@ -145,9 +146,12 @@ export async function DELETE(
 
   // Holders include removed people (their history keeps the title), and
   // KRAs defined on the title would be orphaned, so both refuse with the
-  // count and what to do first.
-  if (role._count.users > 0) {
-    const current = await prisma.user.count({ where: { roleId: id, deletedAt: null } });
+  // count and what to do first. The people here through a membership whose
+  // membership holds the title are current holders too
+  // (docs/plans/workspace-status-2.md, the step 5 review M2).
+  const memberHolders = await membershipsPlacedHere(orgId, { roleId: id });
+  if (role._count.users > 0 || memberHolders > 0) {
+    const current = (await prisma.user.count({ where: { roleId: id, deletedAt: null } })) + memberHolders;
     const removed = role._count.users - current;
     return jsonError(
       current > 0

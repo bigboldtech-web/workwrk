@@ -6,7 +6,7 @@
 // is always safe.
 
 import { NextResponse } from "next/server";
-import { rolesBusyAnswer } from "./org-roles-busy";
+import { retryAnswer, rolesBusyAnswer } from "./org-roles-busy";
 
 /** The 503 for an OrgRolesBusy, or null for any other error (the caller rethrows it). */
 export function rolesBusyResponse(e: unknown): NextResponse | null {
@@ -26,4 +26,18 @@ export function rolesBusyOrThrow(e: unknown): NextResponse {
   const busy = rolesBusyResponse(e);
   if (busy) return busy;
   throw e;
+}
+
+/**
+ * For `.catch()` on a transaction over a batch of people (the step 5 review
+ * L5): the 503 for a busy lock, a deadlock or a transaction that ran out of
+ * its time, each of which wrote nothing; any other error thrown on.
+ */
+export function retryOrThrow(e: unknown): NextResponse {
+  const busy = retryAnswer(e);
+  if (!busy) throw e;
+  return NextResponse.json(
+    { error: busy.error, code: busy.code },
+    { status: busy.status, headers: { "Retry-After": String(busy.retryAfterSeconds) } },
+  );
 }

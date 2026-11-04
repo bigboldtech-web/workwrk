@@ -196,6 +196,7 @@ vi.mock("@/lib/people/person-fields", () => ({
   PERSON_FIELD_LABEL: {},
   PATCHABLE_PERSON_FIELDS: new Set(["firstName", "lastName", "phone", "status", "managerId", "orgRole", "memberTier"]),
   SEAT_FIELDS: new Set(["status", "orgRole", "memberTier", "accessLevel"]),
+  ALIGNMENT_NOT_HERE: "KRAs and SOPs are not assigned to people who work here from another workspace's account.",
   PROFILE_ELSEWHERE: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.",
   canWritePersonField: () => true,
   checkPersonPatch: (body: Record<string, unknown>) => { st.checkedKeys = Object.keys(body); return { unknown: [], forbidden: [] }; },

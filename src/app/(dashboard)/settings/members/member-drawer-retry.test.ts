@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
+import { SHARED_IDENTITY_REFUSAL } from "@/lib/access/shared-identity";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { profileEditable, refusedSave, retrySave, saveGroup, undoFor, withoutKeys, type FailedSave } from "./member-drawer";
@@ -94,31 +94,46 @@ describe("member drawer: a refused Reports to", () => {
   });
 });
 
-// docs/plans/workspace-status.md step 3 (D11): someone who works here
-// through a membership keeps their profile in the workspace their account
-// belongs to, so the drawer shows it as text; their role and status still work.
+// docs/plans/workspace-status.md step 3 (D11) showed the profile of someone
+// who works here through a membership as text. Since workspace-status-2.md
+// step 5 (E7, E8) it is edited here, on their membership, by the same
+// people as anyone's; only their name and address are the account's.
 describe("profileEditable", () => {
-  it("is the People team's and Admins' right, only for someone whose profile this workspace keeps", () => {
+  it("is the People team's and Admins' right, for everyone who works here", () => {
     expect(profileEditable({ profileHere: true }, true)).toBe(true);
     expect(profileEditable({}, true)).toBe(true);
-    expect(profileEditable({ profileHere: false }, true)).toBe(false);
+    // Before: false, read-only for someone here through a membership.
+    expect(profileEditable({ profileHere: false }, true)).toBe(true);
     expect(profileEditable({ profileHere: true }, false)).toBe(false);
+    expect(profileEditable({ profileHere: false }, false)).toBe(false);
   });
 
-  it("the drawer reads it for every profile row, says why once, and hides the Admin scopes for them", () => {
+  it("the drawer reads it for every profile row, says once that the name is the account's, and hides the Admin scopes for them", () => {
     const src = readFileSync(path.join(process.cwd(), "src/app/(dashboard)/settings/members/member-drawer.tsx"), "utf8");
     expect(src.match(/readOnlyValue=\{canEditProfile \? undefined/g)?.length).toBe(5);
     expect(src).not.toMatch(/readOnlyValue=\{canEditPeople \?/);
-    expect(src).toContain('{m.profileHere === false ? <p className="mt-3 text-sm text-ink-2">{PROFILE_ELSEWHERE}</p> : null}');
+    expect(src).toContain('{m.profileHere === false ? <p className="mb-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}');
+    expect(src).not.toMatch(/PROFILE_ELSEWHERE/);
+    // Admin scopes are read from the anchored row only (a known limit).
     expect(src).toContain('m.role === "ADMIN" && viewerIsOwner && m.profileHere !== false');
   });
 
   // The final review of docs/plans/workspace-status.md, product H1: the
   // membership's own placement is shown, with the same empty mark anyone's
   // gets, and the sentence says what is true now.
-  it("says the new sentence, and never \"Not set here\"", () => {
+  // The step 5 review M1: a job title saved for someone here through a
+  // membership assigns no KRAs or SOPs, and both editors say the server's note.
+  it("shows the server's note when a job title assigns no KRAs or SOPs", () => {
+    const drawer = readFileSync(path.join(process.cwd(), "src/app/(dashboard)/settings/members/member-drawer.tsx"), "utf8");
+    expect(drawer).toContain("if (r.data?.alignmentNote) toast(r.data.alignmentNote);");
+    const dialog = readFileSync(path.join(process.cwd(), "src/components/people/edit-details-dialog.tsx"), "utf8");
+    expect(dialog).toContain('void save("roleId", { roleId: v }, undefined, undefined, { onSaved: noteOf });');
+  });
+
+  it("says what is true now, and never \"Not set here\" or \"read-only\"", () => {
     const src = readFileSync(path.join(process.cwd(), "src/app/(dashboard)/settings/members/member-drawer.tsx"), "utf8");
     expect(src).not.toContain("Not set here");
-    expect(PROFILE_ELSEWHERE).toBe("Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status.");
+    expect(SHARED_IDENTITY_REFUSAL).toBe("Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them.");
+    expect(src).not.toMatch(/read-only while they are working/);
   });
 });

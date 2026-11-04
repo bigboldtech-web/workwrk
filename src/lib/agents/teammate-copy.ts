@@ -2535,8 +2535,19 @@ export const INVITE_CARD = {
   roleListedOnly: (title: string) => `Role: ${title}. Only the KRAs and SOPs below are assigned, not the role's own.`,
   /** Only SOPs listed: the role's KRAs, with the listed SOPs instead of its own. */
   roleKrasListedSops: (title: string) => `Role: ${title}. Its KRAs are assigned when they accept, and the SOPs below replace its own.`,
-  /** The address already has an account: accepting signed in sets the level and, since workspace-status-2 step 4 (E10), the manager named. */
-  existingAccount: "They already use WorkwrK, so their role, department, office, KRAs and SOPs aren't set when they join. Set them in Members afterwards.",
+  /**
+   * The address already has an account: accepting signed in sets the level
+   * and, since workspace-status-2 step 4 (E10), the manager named; this card
+   * stores nothing else for them. Since step 5 (E7) their job title,
+   * department and office here are edited in Members once they join, on
+   * their seat here ("Job title" is that row; "Role" there is Owner, Admin or
+   * Member: the step 5 review L4). Whether a job title then assigns its KRAs
+   * and SOPs depends on where their account is (a seat anchored here only,
+   * the step 5 review M1), so the card promises none. Before step 5 "Set
+   * them in Members afterwards" was untrue for them: their details here were
+   * read-only.
+   */
+  existingAccount: "They already use WorkwrK, so this invitation doesn't set their job title, department, office, KRAs or SOPs. Once they join, set their job title, department and office in Members.",
   manager: (name: string) => `Reports to ${name}.`,
   department: (name: string) => `Department: ${name}.`,
   office: (name: string) => `Office: ${name}.`,

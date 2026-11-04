@@ -2,8 +2,8 @@
 // (docs/plans/workspace-status.md D18; the final review, product H1 and
 // security L1, L2, L3): Members, the Directory (rows, filters, groups), the
 // Org chart, the Directory's export and My team show the job title,
-// department, office and weekly hours their membership here holds,
-// read-only, and never the account's (which are the workspace it is anchored
+// department, office and weekly hours their membership here holds (edited
+// there since workspace-status-2.md step 5), and never the account's (which are the workspace it is anchored
 // to, today), nor their phone; the placement filters match them by the
 // membership's own ids; My team sends their level here and a manager only
 // with a seat here. Run on an in-memory database.
@@ -89,7 +89,8 @@ describe("the Directory, the chart and the export show what the membership holds
   it("the row has B's department, title and office, and no phone, for an Admin too", async () => {
     const pat = (await directory()).data.find((r) => r.id === "pat")!;
     // Before: department, role and office null, and the account's phone.
-    expect(pat).toMatchObject({ profileHere: false, department: { id: "dep-b", name: "Delivery" }, role: { id: "role-b", title: "Contractor", seniority: "TEAM_LEAD" }, office: { id: "off-b", name: "Leeds", city: "Leeds" }, joinDate: "2026-06-15T00:00:00.000Z", canEdit: false });
+    // Editable here by an Admin since workspace-status-2.md step 5 (E8): on her B membership.
+    expect(pat).toMatchObject({ profileHere: false, department: { id: "dep-b", name: "Delivery" }, role: { id: "role-b", title: "Contractor", seniority: "TEAM_LEAD" }, office: { id: "off-b", name: "Leeds", city: "Leeds" }, joinDate: "2026-06-15T00:00:00.000Z", canEdit: true });
     expect(pat).not.toHaveProperty("phone");
     expect(JSON.stringify(pat)).not.toMatch(A);
   });

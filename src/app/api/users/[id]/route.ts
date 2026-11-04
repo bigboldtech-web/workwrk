@@ -43,11 +43,34 @@
 // bumped. A reactivation and a restore bring the seat back through
 // restoreSeat (D6), under the same seat check; its refusals are plain
 // sentences. The API keys they made here are revoked with the seat (D15).
-// For someone who works here through a membership only the role and the
-// status are this workspace's: their profile (name, manager, department, job
-// title and the rest) is the account's, kept by the workspace it belongs to,
-// so any other field is refused with one sentence (PROFILE_ELSEWHERE), and
-// the record answers identity, role and status only.
+// A MEMBERSHIP PERSON'S PROFILE AND LINES ARE EDITED HERE
+// (docs/plans/workspace-status-2.md E7, E8, step 5). Someone who works here
+// through a membership has their job title, department, office, weekly
+// hours, working week, profile fields and Reports to written HERE, on their
+// membership (seat-writes.ts writeProfileHere, writeLineHere), through the
+// same doors and gates as someone anchored here: relationTo over this
+// workspace's tree, canWritePersonGroup for "placement" and "reports-to"
+// (chainWritesMembership), the role lock for any line, the person's row lock
+// with the seat read again (sameSeat), staleTabRefusal. Nothing of it lands
+// on the account or on another workspace's row. Their name, phone, photo
+// and birthday are the account's, read by every workspace they belong to,
+// so they are refused here for everyone with SHARED_IDENTITY_REFUSAL (the
+// person themselves, in the stale session that acts here through their
+// membership, is told their session is out of date); two step is
+// account-wide, the join date has no write door for anyone, and Admin scopes
+// are read from the anchored row only (a known limit). A new job title
+// seeds its KRAs and SOPs for a seat anchored here only: a KRA or SOP
+// assignment names no workspace, so one made here for a membership person
+// shows and counts in the workspace their account is in (the step 5 review
+// M1); their job title is saved and the answer says so (ALIGNMENT_NOT_HERE).
+// Before
+// step 5 only the role and the status were written, and every other field
+// was refused ("their details here are read-only"). The record answers
+// their placement, lines and reports here, and to readers of people data the
+// weekly hours, working week and profile fields this workspace holds of
+// them; their KPI history, reviews and skills here stay out (a known limit).
+// For someone anchored here the profile goes through writeProfileHere too,
+// on the account, so one function knows which row holds a seat's profile.
 //
 // A deactivation and a removal hand over THIS workspace's reports first, all
 // of them (docs/plans/workspace-status-2.md E4, E6, step 4): the gate counts
@@ -112,7 +135,7 @@ import { ratingHere } from "@/lib/people/skill-ratings";
 import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockPerson } from "@/lib/access/workspace-anchor";
 import { identityShared, SHARED_IDENTITY_REFUSAL, SHARED_PERSON_FIELDS } from "@/lib/access/shared-identity";
-import { removeDottedHere, seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
+import { removeDottedHere, seatRefOf, writeLineHere, writeProfileHere, type ProfilePatch } from "@/lib/access/seat-writes";
 import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
@@ -131,8 +154,7 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import {
   PERSON_FIELD_GROUP,
   PERSON_FIELD_LABEL,
-  PATCHABLE_PERSON_FIELDS,
-  PROFILE_ELSEWHERE,
+  ALIGNMENT_NOT_HERE,
   SEAT_FIELDS,
   canWritePersonField,
   checkPersonPatch,
@@ -176,12 +198,13 @@ const err = (status: number, error: string, extra: Record<string, unknown> = {})
 
 /**
  * The person as PATCH answers them, at the seat they hold here. For someone
- * who works here through a membership (D11), identity, status and level
- * only: their profile is not this workspace's to send.
+ * who works here through a membership (D11), the placement and the line
+ * their membership here holds (workspace-status-2.md E7, step 5), never the
+ * account's, which are the workspace it is anchored to.
  */
 type PatchUser =
   | { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string }
-  | { id: string; firstName: string; lastName: string; status: string; accessLevel: string; profileHere: false };
+  | { id: string; firstName: string; lastName: string; roleId: string | null; departmentId: string | null; officeId: string | null; managerId: string | null; status: string; accessLevel: string; profileHere: false };
 
 /** What PATCH answers when its transaction refuses the edit. */
 type PatchRefusal = { ok: false; status: 400 | 403 | 404 | 409; error: string; code: string; fields?: string[] };
@@ -285,6 +308,14 @@ function endedMetadata(seat: PersonSeat, ended: EndSeatResult | null) {
 const SEAT_CHANGED_WORDS = "Their status here changed a moment ago, so nothing was saved. Reload and try again.";
 
 /**
+ * The person's own name, phone, photo or birthday asked from a session that
+ * acts here through their membership (the step 5 review L1): a stale
+ * session (the switcher, the join and the session repair anchor the account
+ * where it acts), so they are told that, never "only they can change them".
+ */
+const OWN_SESSION_STALE_WORDS = "Your session is out of date, so nothing was saved. Refresh the page and try again.";
+
+/**
  * Which row holds the person's seat here NOW (seat-writes.ts SeatRef), read
  * in the transaction after a restore or a reactivation: a D6 restore may
  * have moved the account here, and E3 carried the line onto it.
@@ -309,31 +340,6 @@ function accessFor(
   subjectHasDob = false,
   profileHere = true,
 ) {
-  // Someone who works here through a membership (D11): this workspace holds
-  // their role and status only. Their profile and people data are the
-  // account's, so nothing of them is read or written here; Remove, Restore,
-  // the handover and Members (role, status) stay under the same gates.
-  if (!profileHere) {
-    const canRemove = mayRemovePerson(ctx, relation, subject);
-    return {
-      relation,
-      peopleData: false,
-      editable: [] as string[],
-      remove: canRemove && !subject.deletedAt,
-      restore: canRemove && !!subject.deletedAt,
-      handover: !subject.deletedAt && mayHandOverPerson(ctx, subject.id, subject),
-      avatar: false,
-      manageAlignment: false,
-      rateSkills: false,
-      addSkills: false,
-      removeSkills: false,
-      tags: false,
-      dottedLines: false,
-      manageMembers: ctx.isAdmin,
-      fullBirthday: false,
-      profileHere: false,
-    };
-  }
   const opts = { managerTierSelf: relation === "self" && ctx.managerTier, chainWritesMembership: !accessV2Resolver() };
   const editable = Object.keys(PERSON_FIELD_GROUP).filter(
     (f) =>
@@ -348,11 +354,49 @@ function accessFor(
   // dotted-line manager, or a report's manager below manager tier
   // (chain-view), reads the record and acts on nothing.
   const writes = relation !== "none" && relation !== "chain-view";
+  // Someone who works here through a membership (D11): their role, status,
+  // placement, weekly hours, working week, profile fields and lines here
+  // are written HERE through the same doors as anyone's
+  // (workspace-status-2.md E7, E8, step 5), so the editable list is the
+  // same, without their shared identity (name, phone, photo, birthday: the
+  // account's, refused with SHARED_IDENTITY_REFUSAL). Their people data
+  // proper (phone, birthday, KPIs, reviews, skills, the score) is not this
+  // workspace's (a known limit), so `peopleData` stays false; `profileData`
+  // says the profile this workspace holds of them (weekly hours, working
+  // week, profile fields) is sent, to the readers of people data. Their
+  // photo, alignment, skills and tags are not acted on here.
+  if (!profileHere) {
+    const canRemove = mayRemovePerson(ctx, relation, subject);
+    return {
+      relation,
+      peopleData: false,
+      profileData: relation !== "none",
+      editable: editable.filter((f) => SEAT_FIELDS.has(f)),
+      remove: canRemove && !subject.deletedAt,
+      restore: canRemove && !!subject.deletedAt,
+      handover: !subject.deletedAt && mayHandOverPerson(ctx, subject.id, subject),
+      avatar: false,
+      manageAlignment: false,
+      rateSkills: false,
+      addSkills: false,
+      removeSkills: false,
+      // A tag assignment is this workspace's row: taken off where it was put
+      // on (the bulk bar tags them too; the step 5 review L3).
+      tags: relation !== "self" && writes,
+      dottedLines: relation !== "self" && writes,
+      manageMembers: ctx.isAdmin,
+      fullBirthday: false,
+      profileHere: false,
+    };
+  }
   const canRemove = mayRemovePerson(ctx, relation, subject);
   const peopleData = relation !== "none";
   return {
     relation,
     peopleData,
+    // The profile this workspace holds of them (weekly hours, working week,
+    // profile fields), with the rest of their people data.
+    profileData: peopleData,
     editable,
     remove: canRemove && !subject.deletedAt,
     restore: canRemove && !!subject.deletedAt,
@@ -465,14 +509,21 @@ async function kudosHere(ctx: PeopleCtx, id: string, opts: { count?: boolean } =
  * (workspace-status-2.md E1, step 3; never the account's, which is the
  * workspace it is anchored to) and their dotted lines and reports HERE, each
  * named while that person holds a seat here, the kudos given here, and what
- * this viewer may do. No people data (phone, birthday, KPIs, reviews,
- * skills): this workspace holds none of theirs yet. `profileHere: false`,
- * so the page says once why the rest is read-only.
+ * this viewer may do (accessFor: the same doors as for anyone, without the
+ * shared identity, workspace-status-2.md E7, step 5). To a reader of people
+ * data, the profile this workspace holds of them (E8, step 5): the weekly
+ * hours and working week their membership here gives (none means this
+ * workspace's calendar) and its profile fields, by this workspace's
+ * definitions. No people data proper (phone, birthday, KPIs, reviews,
+ * skills): the phone and the birthday are the account's, and their KPI
+ * history, reviews and skills here are a known limit. `profileHere: false`,
+ * so the page says once that their name, phone, photo and birthday are the
+ * account's (SHARED_IDENTITY_REFUSAL).
  */
 async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: string, seat: PersonSeat) {
   const [who, joined, lineManager, dottedRows, reportRows] = await Promise.all([
     prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true } }),
-    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: { ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT } }),
+    prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: { ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT, workSchedule: true, customFields: true } }),
     // Their manager here: the line their membership holds (personSeatIn), never the account's.
     seat.managerId ? prisma.user.findUnique({ where: { id: seat.managerId }, select: NAMED_SELECT }) : Promise.resolve(null),
     // This workspace's dotted lines only (E2).
@@ -494,6 +545,22 @@ async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: st
   const reports = isGuest ? [] : await reportsShownHere(ctx.organizationId, named.directReports);
   const { createdAt: _made, ...identity } = who;
   void _made;
+  // The profile this workspace holds of them, for the readers of people
+  // data only (E8, step 5): the membership's, never the account's.
+  let profileData: Record<string, unknown> = {};
+  if (access.profileData) {
+    const [org, orgSchedule] = await Promise.all([
+      prisma.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } }),
+      readOrgWorkSchedule(ctx.organizationId),
+    ]);
+    profileData = {
+      weeklyCapacityHours: joined?.weeklyCapacityHours ?? null,
+      workSchedule: readPersonScheduleOverride(joined?.workSchedule ?? null),
+      orgSchedule: { workdays: orgSchedule.workdays, hoursPerDay: orgSchedule.hoursPerDay },
+      defaultWeeklyHours: nominalWeekHours(effectivePersonSchedule(orgSchedule, joined?.workSchedule ?? null)),
+      profileFields: profileFieldRows(readProfileFieldDefs(org?.settings), joined?.customFields ?? null),
+    };
+  }
   return NextResponse.json(
     {
       ...identity,
@@ -515,6 +582,7 @@ async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: st
       skills: [],
       kudosCount: kudos.count,
       kudosReceived: kudos.rows,
+      ...profileData,
       access,
       minimal: true,
       profileHere: false,
@@ -753,14 +821,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const target = await personHere(ctx.organizationId, id);
   if (!target) return err(404, "User not found");
 
+  // relationTo reads this workspace's tree (E1, step 2), for someone anchored
+  // here and for someone here through a membership alike (E7, step 5): Dana
+  // is Pat's chain in B through Pat's B line.
   const relation = relationTo(ctx, id);
   if (relation === "none") return err(403, "You can only edit your own record or your reports'.");
-  // Someone who works here through a membership: only their role and status
-  // are this workspace's (D11). Any other field is the account's profile.
-  if (!target.profileHere) {
-    const profile = Object.keys(body).filter((k) => body[k] !== undefined && PATCHABLE_PERSON_FIELDS.has(k) && !SEAT_FIELDS.has(k));
-    if (profile.length) return err(403, PROFILE_ELSEWHERE, { code: "profile_elsewhere", fields: profile });
-  }
   // Whether this viewer may hand this person's work over (batch 9), for the
   // handover_first refusal's words.
   const canHandOver = mayHandOverPerson(ctx, id, target);
@@ -773,6 +838,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       code: "field_forbidden",
       fields: forbidden,
     });
+  }
+  // Someone who works here through a membership (D11; workspace-status-2.md
+  // E7, step 5): every field this viewer may write is written HERE, on their
+  // membership, except their shared identity. Their name, phone, photo and
+  // birthday are the account's row, read by every workspace they belong to,
+  // so nobody changes them here (not even from a session acting here
+  // through the membership: the write would land on the account). Before
+  // step 5 every field but the role and the status was refused, with "their
+  // details here are read-only". Checked after the field whitelist, so a
+  // viewer who may not write a field gets the refusal anyone would.
+  if (!target.profileHere) {
+    const identity = Object.keys(body).filter((k) => body[k] !== undefined && !SEAT_FIELDS.has(k));
+    if (identity.length && relation === "self") return err(409, OWN_SESSION_STALE_WORDS, { code: "session_out_of_date", fields: identity });
+    if (identity.length) return err(403, SHARED_IDENTITY_REFUSAL, { code: "identity_shared", fields: identity });
   }
   // An erased account keeps its anonymisation (see the header): only a
   // deactivation goes through (review round 8 of Phase 3).
@@ -835,26 +914,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (typeof body.status !== "string" || !(STATUSES as readonly string[]).includes(body.status)) return err(400, "Unknown status", { field: "status" });
     statusNext = body.status as UserStatusValue;
   }
+  // The profile HERE (D18; workspace-status-2.md E7, step 5): job title,
+  // department, office, weekly hours, working week and profile fields, held
+  // apart from `data` (the account's personal columns) and written by
+  // seat-writes.ts writeProfileHere in the transaction below, on the row
+  // that holds the seat here: the account for someone anchored here, their
+  // membership for someone here through one. Never the account's for a
+  // membership person, never another workspace's row.
+  const profile: ProfilePatch = {};
   if (body.weeklyCapacityHours !== undefined) {
     const v = body.weeklyCapacityHours;
     if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 168)) {
       return err(400, "Weekly capacity is 0 to 168 hours, or blank for the org default", { field: "weeklyCapacityHours" });
     }
-    data.weeklyCapacityHours = v;
+    profile.weeklyCapacityHours = v;
   }
   if (body.workSchedule !== undefined) {
     const v = validatePersonScheduleOverride(body.workSchedule);
     if (!v.ok) return err(400, v.error, { field: "workSchedule" });
-    data.workSchedule = v.value === null ? Prisma.DbNull : v.value;
+    profile.workSchedule = v.value === null ? null : (v.value as unknown as Prisma.InputJsonValue);
   }
-  // Profile fields are merged key by key in one statement after the update
-  // (two editors saving different fields never overwrite each other).
-  let profilePatch: { set: Record<string, string>; remove: string[] } | null = null;
+  // Profile fields, by this workspace's definitions, merged key by key with
+  // what the seat's row holds, under the person's row lock (writeProfileHere):
+  // two editors saving different fields never overwrite each other.
   if (body.customFields !== undefined) {
     const org = await prisma.organization.findUnique({ where: { id: ctx.organizationId }, select: { settings: true } });
     const v = validateProfileValues(body.customFields, readProfileFieldDefs(org?.settings));
     if (!v.ok) return err(400, v.error, { field: "customFields" });
-    profilePatch = { set: v.set, remove: v.remove };
+    profile.customFields = { set: v.set, remove: v.remove };
   }
 
   // Placement must point at the org's own rows.
@@ -870,7 +957,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   for (const r of await Promise.all(refChecks)) if (r) return r;
   for (const key of ["roleId", "departmentId", "officeId"] as const) {
-    if (body[key] !== undefined) data[key] = body[key] === null || body[key] === "" ? null : String(body[key]);
+    if (body[key] !== undefined) profile[key] = body[key] === null || body[key] === "" ? null : String(body[key]);
+  }
+  const profileKeys = Object.keys(profile);
+  // A removed seat keeps its profile and line as they were, for a restore:
+  // nothing of them is written on it (seat-writes.ts writes a seat not
+  // removed only), and the refusal says why, as a status change does.
+  if (target.deletedAt && (profileKeys.length > 0 || body.managerId !== undefined)) {
+    return err(409, "They were removed from this workspace. Restore them first.", { code: "removed", fields: [...profileKeys, ...(body.managerId !== undefined ? ["managerId"] : [])] });
   }
 
   // Reports to: THIS workspace's line (E1, step 4), the one the seat here
@@ -951,7 +1045,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // `live: false`, so the person came back under a deactivated manager).
   const managerInBody = lineNext !== undefined && lineNext !== target.seat.managerId;
 
-  if (Object.keys(data).length === 0 && lineNext === undefined && !profilePatch && !roleNext && statusNext === null) return err(400, "Nothing to change");
+  if (Object.keys(data).length === 0 && lineNext === undefined && profileKeys.length === 0 && !roleNext && statusNext === null) return err(400, "Nothing to change");
 
   // A role change or a deactivation changes who can do what: the actor is
   // re-read from the database first (an Admin demoted a moment ago is
@@ -1060,37 +1154,40 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       rc = r;
     }
     const select = { id: true, firstName: true, lastName: true, roleId: true, departmentId: true, officeId: true, managerId: true, status: true, accessLevel: true } as const;
-    // The profile first (never for someone who works here through a
-    // membership: refused above), while the account is still anchored where
-    // it was: a deactivation below may move it to another workspace (D3).
+    // The personal columns (names, phone, photo, birthday: only for someone
+    // anchored here, refused above for a membership person) and the profile
+    // first, while the account is still anchored where it was: a
+    // deactivation below may move it to another workspace (D3).
     const write = data;
-    // A profile write, a Reports to or a status label acts on the seat read
-    // before this transaction (the step 3 review M1): a deactivation landing
-    // in between would be undone by the label, or (a D3 move) the label and
-    // the profile written onto the account now anchored in another
-    // workspace. So the person's row lock first, the seat read again under
-    // it, and a seat that changed is refused, with nothing written.
-    if (Object.keys(write).length > 0 || lineWrite || profilePatch || relabel) {
+    // A personal or profile write, a Reports to or a status label acts on the
+    // seat read before this transaction (the step 3 review M1): a
+    // deactivation landing in between would be undone by the label, or (a D3
+    // move) the label and the profile written onto the account now anchored
+    // in another workspace. So the person's row lock first, the seat read
+    // again under it, and a seat that changed is refused, with nothing
+    // written. A membership person who switched into this workspace
+    // meanwhile is another seat (the account's now): refused the same way.
+    if (Object.keys(write).length > 0 || lineWrite || profileKeys.length > 0 || relabel) {
       await lockPerson(tx, id);
       if (!sameSeat(target.seat, await personSeatIn(ctx.organizationId, id, tx))) {
-        return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: statusNext !== null ? ["status"] : [...Object.keys(write), ...(lineWrite ? ["managerId"] : [])] });
+        return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: statusNext !== null ? ["status"] : [...Object.keys(write), ...profileKeys, ...(lineWrite ? ["managerId"] : [])] });
       }
       if (guardShared && (await identityShared(tx, id, ctx.organizationId))) {
         return refuse({ status: 403, error: SHARED_IDENTITY_REFUSAL, code: "identity_shared", fields: [...sharedAsked] });
       }
     }
     if (Object.keys(write).length > 0) await tx.user.update({ where: { id }, data: write as Prisma.UserUncheckedUpdateInput, select: { id: true } });
+    // The profile: this workspace's, on the row that holds the seat as read
+    // (E7, step 5): the account for someone anchored here, the membership for
+    // someone here through one. False when that row no longer holds it.
+    if (profileKeys.length > 0 && !(await writeProfileHere(tx, seatRefOf(ctx.organizationId, target), profile))) {
+      return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: profileKeys });
+    }
     // Reports to: this workspace's line, on the row that holds the seat as
-    // read (E1, step 4). False when that row no longer holds it.
+    // read (E1, step 4; for a membership person too, step 5). False when that
+    // row no longer holds it.
     if (lineNext !== undefined && !(await writeLineHere(tx, seatRefOf(ctx.organizationId, target), lineNext))) {
       return refuse({ status: 409, error: SEAT_CHANGED_WORDS, code: "seat_changed", fields: ["managerId"] });
-    }
-    if (profilePatch) {
-      const json = JSON.stringify(profilePatch.set);
-      await tx.$executeRaw`
-      UPDATE "User"
-      SET "customFields" = ((CASE WHEN jsonb_typeof("customFields") = 'object' THEN "customFields" ELSE '{}'::jsonb END) - ${profilePatch.remove}::text[]) || ${json}::jsonb
-      WHERE "id" = ${id} AND "organizationId" = ${ctx.organizationId}`;
     }
     let ended: EndSeatResult | null = null;
     let restored: Extract<RestoreSeatResult, { outcome: "restored" }> | null = null;
@@ -1137,7 +1234,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const seatNow = row ? await personSeatIn(ctx.organizationId, id, tx) : null;
     const u: PatchUser | null = row
       ? seatNow?.kind === "membership"
-        ? { id: row.id, firstName: row.firstName, lastName: row.lastName, status: seatNow.status, accessLevel: seatNow.level, profileHere: false }
+        ? {
+            id: row.id,
+            firstName: row.firstName,
+            lastName: row.lastName,
+            roleId: seatNow.placement?.roleId ?? null,
+            departmentId: seatNow.placement?.departmentId ?? null,
+            officeId: seatNow.placement?.officeId ?? null,
+            managerId: seatNow.managerId,
+            status: seatNow.status,
+            accessLevel: seatNow.level,
+            profileHere: false,
+          }
         : row
       : null;
     return { ok: true, roleChange: rc, user: u, stale, ended, restored };
@@ -1184,7 +1292,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       metadata: { tokenVersionBumped: roleChange.bumped },
     });
   }
-  if (roleNext && Object.keys(data).length === 0 && lineNext === undefined && !profilePatch && statusNext === null) return NextResponse.json(user);
+  if (roleNext && Object.keys(data).length === 0 && lineNext === undefined && profileKeys.length === 0 && statusNext === null) return NextResponse.json(user);
 
   // A reactivation that cleared lines says so, in the log and the answer,
   // and open reviews follow a cleared manager (as a restore does).
@@ -1255,18 +1363,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
   }
 
-  // Moving into a (new) job title seeds its KRA and SOP defaults; best
+  // Moving into a (new) job title seeds its KRA and SOP defaults, for a
+  // seat anchored here only, as the bulk update does (E7; the step 5 review
+  // M1): a KRA or SOP assignment names no workspace, so one made here for
+  // someone here through a membership would show and count in the workspace
+  // their account is in, and not on their record here. Their job title is
+  // saved, and the answer says plainly that nothing was assigned. Best
   // effort, a seeding hiccup never fails the edit.
-  if (data.roleId && data.roleId !== target.roleId) {
-    try {
-      await seedAlignmentForUser({ userId: id, roleId: data.roleId as string, organizationId: ctx.organizationId, assignedBy: ctx.userId });
-    } catch (e) {
-      console.error("seedAlignmentForUser failed", e);
+  const roleBefore = target.seat.kind === "anchor" ? target.roleId : target.seat.placement?.roleId ?? null;
+  let alignmentNote: { alignmentNote: string } | Record<string, never> = {};
+  if (profile.roleId && profile.roleId !== roleBefore) {
+    if (target.seat.kind !== "anchor") alignmentNote = { alignmentNote: ALIGNMENT_NOT_HERE };
+    else {
+      try {
+        await seedAlignmentForUser({ userId: id, roleId: profile.roleId, organizationId: ctx.organizationId, assignedBy: ctx.userId });
+      } catch (e) {
+        console.error("seedAlignmentForUser failed", e);
+      }
     }
   }
 
   const keysNote = outcome.ended && "apiKeysRevoked" in outcome.ended && outcome.ended.apiKeysRevoked > 0 ? { apiKeysRevoked: outcome.ended.apiKeysRevoked } : {};
-  return NextResponse.json({ ...user, ...reactivationNote, ...keysNote });
+  return NextResponse.json({ ...user, ...reactivationNote, ...keysNote, ...alignmentNote });
 }
 
 // DELETE: remove (soft) or restore a person.

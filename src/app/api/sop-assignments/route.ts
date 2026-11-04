@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
 import { employedAmong } from "@/lib/people/employed.server";
 import { placedHere } from "@/lib/access/profile-here";
+import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -117,6 +118,18 @@ export async function POST(req: NextRequest) {
   // people named are kept only while they can still be given work here:
   // never someone deactivated or removed, never an id from another workspace.
   let resolvedUserIds: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
+  // Someone here through a membership is never given an SOP here
+  // (docs/plans/workspace-status-2.md, the step 5 review M1): an SOP
+  // assignment names no workspace, so it showed and counted in the workspace
+  // their account is in (My SOPs, the open count), and its notice and email
+  // went there. Refused in words, nothing written, so the person picking
+  // knows rather than seeing one fewer assigned.
+  if (resolvedUserIds.length > 0) {
+    const elsewhere = (await prisma.user.findMany({ where: { id: { in: resolvedUserIds } }, select: { id: true, organizationId: true } }))
+      .filter((u) => u.organizationId !== orgId)
+      .map((u) => u.id);
+    if (elsewhere.length > 0) return NextResponse.json({ error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere", userIds: elsewhere }, { status: 400 });
+  }
 
   if (departmentId) {
     const deptUsers = await prisma.user.findMany({

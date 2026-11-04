@@ -417,10 +417,13 @@ export async function directoryList(req: NextRequest): Promise<Response> {
       // (security L2).
       ...(peopleData && !m ? { phone: u.phone } : {}),
       // A row is selectable (and editable) only where the viewer holds the
-      // placement write: a dotted-line manager reads, never edits. Nobody
-      // edits the placement of someone here through a membership (D11).
-      canEdit: !m && u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id), { chainWritesMembership: !accessV2Resolver() }),
-      // False for someone here through a membership: their placement here is shown read-only (D18, product H1).
+      // placement write: a dotted-line manager reads, never edits. Someone
+      // here through a membership too: their placement here is written on
+      // their membership, by the same doors as anyone's
+      // (docs/plans/workspace-status-2.md E7, E8, step 5; before, nobody
+      // edited it, D11).
+      canEdit: u.id !== ctx.userId && canWritePersonGroup("placement", relationTo(ctx, u.id), { chainWritesMembership: !accessV2Resolver() }),
+      // False for someone here through a membership (D11): their name, phone, photo and birthday are the account's.
       profileHere: !m,
     };
   });

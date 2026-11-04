@@ -143,6 +143,11 @@ describe("someone who works here through a membership (D5, D11)", () => {
   it("a deactivation writes only their membership here: their account, their home and their sessions are untouched", async () => {
     key("k-b", "b", "pat");
     key("k-a", "a", "pat");
+    // A's department on the account, B's on the membership (D18).
+    db.seed("department", { id: "dep-a", name: "A's Finance", organizationId: "a" });
+    db.seed("department", { id: "dep-b", name: "B's Delivery", organizationId: "b" });
+    user("pat").departmentId = "dep-a";
+    seatOf("pat", "b")!.departmentId = "dep-b";
     const res = await patch("pat", { status: "INACTIVE" });
     // Before: 404 User not found.
     expect(res.status).toBe(200);
@@ -156,8 +161,11 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(db.tables.activityLog?.filter((r) => r.type === "api_key_revoked").map((r) => [r.organizationId, r.targetId, r.actorId])).toEqual([["b", "k-b", "u-admin"]]);
     const body = await res.json();
     expect(body).toMatchObject({ id: "pat", status: "INACTIVE", ...legacyLevelRow("EMPLOYEE"), profileHere: false, apiKeysRevoked: 1 });
-    // Nothing of their profile (A's job title, department) is sent.
-    expect(body).not.toHaveProperty("departmentId");
+    // Nothing of A's profile (the account's department) is sent: the
+    // placement answered is the one their membership here holds
+    // (workspace-status-2.md step 5).
+    expect(body.departmentId).toBe("dep-b");
+    expect(JSON.stringify(body)).not.toContain("dep-a");
     expect(st.logs.find((l) => l.type === "membership.changed")).toMatchObject({ description: "Deactivated Pat Lee", metadata: { seat: "membership", outcome: "membership_ended", accountMoved: false, apiKeysRevoked: 1 } });
   });
 
@@ -201,16 +209,31 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(st.logs.find((l) => l.type === "org_role.changed")).toMatchObject({ metadata: { tokenVersionBumped: false } });
   });
 
-  it("refuses any profile field with one plain sentence, writing nothing", async () => {
-    for (const body of [{ firstName: "Patricia" }, { departmentId: null }, { managerId: "olga" }, { status: "INACTIVE", phone: "1" }]) {
+  // workspace-status-2.md step 5 (E7): their profile and line here are
+  // written here, on their membership; only their shared identity is not.
+  // Before step 5 every field but the role and the status was refused with
+  // "their details here are read-only".
+  it("refuses their name, phone, photo and birthday with the shared-identity sentence, writing nothing", async () => {
+    for (const body of [{ firstName: "Patricia" }, { status: "INACTIVE", phone: "1" }, { dateOfBirth: "1990-01-01" }, { avatar: "x" }]) {
       const res = await patch("pat", body);
       expect(res.status).toBe(403);
       const json = await res.json();
-      expect(json).toMatchObject({ code: "profile_elsewhere", error: "Their job title, department and other details here are read-only while they are working in another workspace. You can change their role and status." });
+      expect(json).toMatchObject({ code: "identity_shared", error: "Their name, sign-in address, phone, photo and birthday are shared with another workspace, so only they can change them." });
       expect(json.error).not.toMatch(/--|—/);
     }
     expect(user("pat").firstName).toBe("Pat");
     expect(seatOf("pat", "b")?.status).toBe("ACTIVE");
+  });
+
+  // Reports to, the hours, the working week, the profile fields and the
+  // dotted lines: src/lib/people/workspace-profile-writes.test.ts.
+  it("writes their department on their membership here, never the account", async () => {
+    db.seed("department", { id: "dep-b", name: "B's Delivery", organizationId: "b" });
+    expect((await patch("pat", { departmentId: "dep-b" })).status).toBe(200);
+    expect(seatOf("pat", "b")!.departmentId).toBe("dep-b");
+    expect(user("pat").departmentId ?? null).toBeNull();
+    expect((await patch("pat", { departmentId: null })).status).toBe(200);
+    expect(seatOf("pat", "b")!.departmentId).toBeNull();
   });
 
   it("a removal ends their membership here and never deletes it; a restore brings it back under the seat check", async () => {
@@ -233,7 +256,7 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(st.logs.find((l) => l.type === "user_restored")).toMatchObject({ metadata: { seat: "membership", accountMoved: false } });
   });
 
-  it("the record answers identity, role and status here, and nothing of their profile", async () => {
+  it("the record answers identity, role and status here, and nothing of A's profile", async () => {
     db.seed("department", { id: "dep-a", name: "A's Finance", organizationId: "a" });
     user("pat").departmentId = "dep-a";
     seatOf("pat", "b")!.status = "INACTIVE";
@@ -242,7 +265,10 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toMatchObject({ id: "pat", email: "pat@x.test", isDeactivated: true, deletedAt: null, department: null, role: null, minimal: true, profileHere: false });
-    expect(body.access).toMatchObject({ editable: [], peopleData: false, remove: true, restore: false, profileHere: false });
+    expect(body.access).toMatchObject({ peopleData: false, remove: true, restore: false, profileHere: false });
+    // An Admin edits their profile here (step 5), never their shared identity.
+    expect(body.access.editable).toEqual(expect.arrayContaining(["roleId", "departmentId", "officeId", "managerId", "weeklyCapacityHours", "status"]));
+    for (const f of ["firstName", "lastName", "phone", "avatar", "dateOfBirth"]) expect(body.access.editable).not.toContain(f);
     expect(JSON.stringify(body)).not.toContain("Finance");
     // Nobody here at all: still a 404.
     person("ned", "a");

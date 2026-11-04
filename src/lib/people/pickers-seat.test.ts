@@ -362,7 +362,10 @@ describe("Workload", () => {
     const body = await json(await teamWorkload(req("/api/team/workload?from=2026-11-02&to=2026-11-15")));
     const people = body.people as Array<Record<string, unknown>>;
     expect(ids(people)).toEqual(["bea", "pat"]);
-    expect(people.find((p) => p.id === "pat")).toMatchObject({ departmentId: "dep-b-eng", weeklyCapacityHours: 10, workSchedule: { workdays: [1, 2], hoursPerDay: 5 }, canEditCapacity: false });
+    // Dana writes Pat's hours here, PATCH's own door (workspace-status-2.md
+    // step 5, E7); before step 5 the grid offered no edit for her.
+    expect(people.find((p) => p.id === "pat")).toMatchObject({ departmentId: "dep-b-eng", weeklyCapacityHours: 10, workSchedule: { workdays: [1, 2], hoursPerDay: 5 }, canEditCapacity: true });
+    expect(people.find((p) => p.id === "bea")).toMatchObject({ canEditCapacity: true });
     expect(ids((await json(await teamWorkload(req("/api/team/workload?from=2026-11-02&to=2026-11-15&dept=dep-a-ops")))).people)).toEqual([]);
     expect(ids((await json(await teamWorkload(req("/api/team/workload?from=2026-11-02&to=2026-11-15&dept=dep-b-eng")))).people)).toEqual(["bea", "pat"]);
   });

@@ -75,6 +75,15 @@
 // docs/plans/workspace-status-2.md step 3 (the surfaces): a review's
 // `subject`, so a read that selects the subject's line is answered as
 // Postgres answers it.
+//
+// docs/plans/workspace-status-2.md step 5 (a membership person's profile
+// edited here): a department's createdAt and updatedAt, filled on a create
+// as Postgres and Prisma fill them (a SCIM Group answers both); and, for the
+// step 5 review, a department's, an office's and a job title's people (and
+// a department's sub-departments, a job title's KRAs) as list relations, so
+// the Settings deletes' `_count` is answered as Postgres answers it (in an
+// `include` too), and the batch form of $transaction (each call already ran
+// in order; no rollback is modelled for it).
 
 import { Prisma } from "@/generated/prisma";
 
@@ -125,6 +134,11 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   idea: { votes: ["ideaVote", "ideaId"], comments: ["ideaComment", "ideaId"] },
   conversation: { members: ["conversationMember", "conversationId"] },
   meeting: { attendees: ["meetingAttendee", "meetingId"] },
+  // A department's, an office's and a job title's people and parts, for the
+  // Settings deletes' counts (workspace-status-2.md, the step 5 review M2).
+  department: { members: ["user", "departmentId"], subDepartments: ["department", "parentId"] },
+  office: { members: ["user", "officeId"] },
+  role: { users: ["user", "roleId"], kraTemplates: ["kRA", "roleId"] },
 };
 
 /** The filters a list relation takes in a `where`. */
@@ -182,6 +196,8 @@ const DEFAULTS: Record<string, () => Row> = {
   organizationMembership: () => ({ role: "EMPLOYEE", isPrimary: false, adminScopes: [], status: "ACTIVE", removedAt: null, endedWithAccount: false, managerId: null, createdAt: new Date() }),
   userDottedLine: () => ({ role: null, weight: null, startDate: null, endDate: null, createdAt: new Date(), updatedAt: new Date() }),
   invitation: () => ({ accepted: false, spaceId: null, spaceRole: null, createdAt: new Date() }),
+  // Its two stamps, as Postgres and Prisma fill them (a SCIM Group answers them: step 5).
+  department: () => ({ createdAt: new Date(), updatedAt: new Date() }),
 };
 
 const OPS = new Set(["not", "in", "notIn", "equals", "contains", "mode", "gt", "gte", "lt", "lte"]);
@@ -362,7 +378,9 @@ export function createSeatDb(): SeatDb {
     const out: Row = structuredClone(row);
     for (const [k, on] of Object.entries(a.include ?? {})) {
       if (!on) continue;
-      if (LISTS[model]?.[k]) out[k] = listOf(k, on);
+      // `include: { _count: ... }` counts as a select's does (the step 5 review M2).
+      if (k === "_count") out[k] = countOf(on);
+      else if (LISTS[model]?.[k]) out[k] = listOf(k, on);
       else if (RELATIONS[model]?.[k]) out[k] = relOf(k, on);
     }
     return out;
@@ -661,7 +679,11 @@ export function createSeatDb(): SeatDb {
           if (key === "$transaction") {
             // A transaction's client has no $transaction of its own, as Prisma's.
             if (inTx) return undefined;
-            return async (fn: (tx: unknown) => Promise<unknown>) => {
+            return async (fn: ((tx: unknown) => Promise<unknown>) | Array<Promise<unknown>>) => {
+              // The batch form (`$transaction([a, b])`): here each call already
+              // ran when it was made, in order, so its answers are awaited as
+              // given (no rollback is modelled for it).
+              if (Array.isArray(fn)) return Promise.all(fn);
               const before = structuredClone(db.tables);
               try {
                 return await fn(txClient);

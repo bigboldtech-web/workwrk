@@ -7,6 +7,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
+import { standingHere } from "@/lib/access/seated-here";
+import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -20,7 +22,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     where: { id, organizationId: orgId },
     select: { id: true, roleId: true },
   });
-  if (!target) return jsonError("User not found", 404);
+  if (!target) {
+    // Someone here through a membership: no KRA or SOP is seeded here
+    // (docs/plans/workspace-status-2.md, the step 5 review M1), in words.
+    const seat = await standingHere(orgId, id);
+    if (seat?.kind === "membership" && seat.kept) return jsonError(ALIGNMENT_NOT_HERE, 400);
+    return jsonError("User not found", 404);
+  }
 
   // Explicit roleId (e.g. applying a specific role's definition from the role
   // page) wins; otherwise fall back to the user's own assigned role.
