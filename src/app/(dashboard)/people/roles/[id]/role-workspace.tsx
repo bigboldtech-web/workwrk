@@ -40,7 +40,8 @@ import { KpiDialog, type KpiDialogKpi } from "@/components/alignment/kpi-dialog"
 // ─────────────────────────── types ───────────────────────────
 type Person = { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null };
 /** A role holder + how many of the role's template KRAs they're missing. */
-type Holder = Person & { missingKras: number };
+/** missingKras is null for someone here through a membership: no KRA is assigned to them here (the step 5 review M1). */
+type Holder = Person & { missingKras: number | null };
 type KpiDirection = "HIGHER" | "LOWER" | "MAINTAIN";
 type Kpi = {
   id: string; name: string; description: string | null; unit: string | null; frequency: string; type: string;
@@ -219,7 +220,7 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
                 <span className="truncate text-row text-ink">{personName(p)}</span>
               </Link>
               {/* Drift is people data: the server strips it for readers. */}
-              {canEdit ? (
+              {canEdit && p.missingKras !== null ? (
                 missing > 0 ? (
                   <>
                     <ToneChip tone="warning" label={`Missing ${missing} of ${totalTemplates} KRAs`} />

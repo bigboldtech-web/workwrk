@@ -5,7 +5,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
 import { employedAmong } from "@/lib/people/employed.server";
-import { placedHere } from "@/lib/access/profile-here";
+import { idsPlacedHere, placedHere } from "@/lib/access/profile-here";
 import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
@@ -131,6 +131,13 @@ export async function POST(req: NextRequest) {
     if (elsewhere.length > 0) return NextResponse.json({ error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere", userIds: elsewhere }, { status: 400 });
   }
 
+  // By department or everyone: the people ANCHORED here only, by their
+  // account's department, never someone here through a membership, whatever
+  // department their membership holds (docs/plans/workspace-status-2.md E15,
+  // step 8, kept anchored by the step 5 review M1): an SOP assignment names
+  // no workspace, so one made here for them would show and count in the
+  // workspace their account is in. A known limit, until SOP assignments are
+  // per workspace.
   if (departmentId) {
     const deptUsers = await prisma.user.findMany({
       // Everyone in it who can sign in (on leave or on probation included), never someone removed.
@@ -151,10 +158,25 @@ export async function POST(req: NextRequest) {
     resolvedUserIds = [...new Set([...resolvedUserIds, ...everyone.map((u) => u.id)])];
   }
 
+  // Said plainly (the step 8 review L5): the people placed there here
+  // through a membership whom the department or everyone would have reached
+  // (the same live seats), so the answer never reads "1 assigned" under a
+  // department the lists count as 3. A manager's reach narrows them as it
+  // narrows everyone else.
+  const callerLevel = (session.user as any).accessLevel as string;
+  const teamIds = ORG_WIDE_ASSIGNERS.has(callerLevel) ? null : new Set(await getTeamUserIds(orgId, getUserId(session)));
+  const notAssignedElsewhere = departmentId || all === true
+    ? (await idsPlacedHere(orgId, all === true ? "everyone" : { departmentIds: [departmentId] }, "live", { only: "membership" })).filter((uid) => !teamIds || teamIds.has(uid)).length
+    : 0;
+  const elsewhereNote: { notAssignedElsewhere?: number; alignmentNote?: string } = notAssignedElsewhere > 0
+    ? { notAssignedElsewhere, alignmentNote: `${notAssignedElsewhere} ${notAssignedElsewhere === 1 ? "person" : "people"} here from another workspace's account ${notAssignedElsewhere === 1 ? "was" : "were"} not assigned. ${ALIGNMENT_NOT_HERE}` }
+    : {};
+
   if (resolvedUserIds.length === 0) {
     if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {
       return jsonError("No one you chose can be given work here: they were deactivated or are not in this workspace.");
     }
+    if (elsewhereNote.alignmentNote) return NextResponse.json({ error: elsewhereNote.alignmentNote, code: "alignment_elsewhere", ...elsewhereNote }, { status: 400 });
     return jsonError("No users specified. Provide userIds[], departmentId or all:true");
   }
 
@@ -162,9 +184,7 @@ export async function POST(req: NextRequest) {
   // report tree. Org-wide roles (admin / exec / HR) assign anywhere. For a
   // department-wide assign, a manager's reach is the intersection with
   // their reports.
-  const callerLevel = (session.user as any).accessLevel as string;
-  if (!ORG_WIDE_ASSIGNERS.has(callerLevel)) {
-    const teamIds = new Set(await getTeamUserIds(orgId, getUserId(session)));
+  if (teamIds) {
     resolvedUserIds = resolvedUserIds.filter((uid) => teamIds.has(uid));
     if (resolvedUserIds.length === 0) {
       return jsonError("You can only assign SOPs to people who report to you.", 403);
@@ -177,7 +197,7 @@ export async function POST(req: NextRequest) {
     (await prisma.sOPAssignment.findMany({ where: { sopId, userId: { in: resolvedUserIds } }, select: { userId: true } })).map((a) => a.userId),
   );
   resolvedUserIds = resolvedUserIds.filter((uid) => !already.has(uid));
-  if (resolvedUserIds.length === 0) return jsonSuccess({ message: "Everyone chosen already has this SOP", count: 0 }, 200);
+  if (resolvedUserIds.length === 0) return jsonSuccess({ message: "Everyone chosen already has this SOP", count: 0, ...elsewhereNote }, 200);
 
   const assignerId = getUserId(session);
   const data = resolvedUserIds.map((uid: string) => ({
@@ -235,5 +255,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return jsonSuccess({ message: `${result.count} assignments created`, count: result.count }, 201);
+  return jsonSuccess({ message: `${result.count} assignments created`, count: result.count, ...elsewhereNote }, 201);
 }

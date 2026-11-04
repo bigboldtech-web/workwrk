@@ -14,7 +14,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOrgId } from "@/lib/api-helpers";
 import { personScope } from "@/lib/process-scope";
-import { placedHere } from "@/lib/access/profile-here";
+import { idsPlacedHere, placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function buildSopCompliance(session: any, req: NextRequest) {
@@ -31,8 +31,18 @@ export async function buildSopCompliance(session: any, req: NextRequest) {
   const departmentId = sp.get("departmentId");
   const mandatoryOnly = sp.get("mandatory") === "1";
   const where: Record<string, unknown> = { sop: { organizationId: orgId } };
-  if (!scope.orgWide && scope.userIds) where.userId = { in: Array.from(scope.userIds) };
-  if (departmentId) where.user = { departmentId };
+  // A department is the one each person's seat here holds: the account's
+  // for someone anchored here, the membership's for someone here through
+  // one (docs/plans/workspace-status-2.md E15, step 8), in any state (rows of
+  // assignments already made). Before, the account's, another workspace's
+  // for a membership person. No SOP is assigned to a membership person since
+  // the step 5 review M1; this groups any made before it where they belong.
+  let people: Set<string> | null = !scope.orgWide && scope.userIds ? new Set(scope.userIds) : null;
+  if (departmentId) {
+    const placed = await idsPlacedHere(orgId, { departmentIds: [departmentId] }, "any", people ? { among: people } : {});
+    people = new Set(placed);
+  }
+  if (people) where.userId = { in: Array.from(people) };
   if (mandatoryOnly) where.mandatory = true;
   if (q) {
     where.OR = [
@@ -46,16 +56,18 @@ export async function buildSopCompliance(session: any, req: NextRequest) {
     where: where as never,
     include: {
       sop: { select: { id: true, title: true, category: true, sopType: true } },
-      user: {
-        select: {
-          id: true, firstName: true, lastName: true,
-          // With its workspace: grouped and named only when this one's (D18; the final review, security M1).
-          department: { select: { id: true, name: true, organizationId: true } },
-        },
-      },
+      user: { select: { id: true, firstName: true, lastName: true, organizationId: true, departmentId: true } },
     },
   });
-  const assignments = read.map((a) => ({ ...a, user: placedHere(a.user, orgId) }));
+  // Each person grouped and named by the department their seat here holds,
+  // this workspace's own only (D18; E15, step 8).
+  const seats = await seatPlacementsHere(orgId, read.map((a) => a.user));
+  const deptRows = (await placementsHere(orgId, [...seats.values()])).department;
+  const assignments = read.map((a) => {
+    const d = seats.get(a.user.id)?.departmentId;
+    const dept = d ? deptRows.get(d) : undefined;
+    return { ...a, user: { id: a.user.id, firstName: a.user.firstName, lastName: a.user.lastName, department: dept ? { id: dept.id, name: dept.name } : null } };
+  });
 
   // Overall stats
   const total = assignments.length;

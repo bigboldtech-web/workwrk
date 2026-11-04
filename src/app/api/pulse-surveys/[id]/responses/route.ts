@@ -6,6 +6,7 @@ import { cultureOrganiserFromSession } from "@/lib/people/culture-gate";
 import { isPeopleTeamOrAdmin } from "@/lib/people/review-cycle-access";
 import { canManageSurvey } from "@/lib/people/survey-audience";
 import { ANONYMITY_FLOOR, meetsAnonymityFloor, shuffled } from "@/lib/people/anonymity";
+import { surveyRespondentsHere, surveySegmentIds } from "@/lib/performance/survey.server";
 
 /**
  * Manager-only aggregate view of a pulse survey's responses.
@@ -105,11 +106,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const allowSegmentFilter = survey.anonymous === false;
   const responseWhere: Prisma.SurveyResponseWhereInput = { surveyId: id };
   if (allowSegmentFilter && (officeId || departmentId)) {
-    const userFilter: Prisma.UserWhereInput = { organizationId: orgId, deletedAt: null };
-    if (officeId) userFilter.officeId = officeId;
-    if (departmentId) userFilter.departmentId = departmentId;
-    const segment = await prisma.user.findMany({ where: userFilter, select: { id: true } });
-    responseWhere.userId = { in: segment.map((u) => u.id) };
+    // The segment at each person's seat here, both halves (the step 8 review L6).
+    responseWhere.userId = { in: await surveySegmentIds(orgId, { officeId, departmentId }) };
   }
 
   const includeUser = survey.anonymous === false;
@@ -120,17 +118,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     select: { answers: true, createdAt: true, userId: true },
     orderBy: { createdAt: "desc" },
   });
-  const respondents = includeUser && rows.length
-    ? await prisma.user.findMany({
-        where: { id: { in: [...new Set(rows.map((r) => r.userId))] }, organizationId: orgId },
-        select: {
-          id: true, firstName: true, lastName: true,
-          office: { select: { id: true, name: true } },
-          department: { select: { id: true, name: true } },
-        },
-      })
-    : [];
-  const respondentById = new Map<string, Respondent>(respondents.map((u) => [u.id, u]));
+  // Named at their seat here, a respondent through a membership too, with
+  // the office and department their seat here holds (the step 8 review L6).
+  const respondents = includeUser && rows.length ? await surveyRespondentsHere(orgId, [...new Set(rows.map((r) => r.userId))]) : new Map<string, Respondent>();
+  const respondentById = new Map<string, Respondent>(
+    [...respondents.values()].map((u) => [u.id, { id: u.id, firstName: u.firstName, lastName: u.lastName, office: u.office, department: u.department }]),
+  );
   const responses = rows.map((r) => ({
     answers: r.answers,
     createdAt: r.createdAt,

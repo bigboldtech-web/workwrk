@@ -4,6 +4,8 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, isOrgAdmin, jsonError
 import { logAuditEvent } from "@/lib/activity";
 import { moveToTrash } from "@/lib/trash";
 import { parseProcessSettings } from "@/lib/process-settings";
+import { countPeopleHere, everyoneHereIds, peopleHereAmong, seatedHereAmong, type PersonHere } from "@/lib/access/seated-here";
+import { AUDIENCE_REACH, placementsHere } from "@/lib/access/profile-here";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -33,7 +35,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         assignments: { select: { id: true, userId: true, status: true, dueDate: true, mandatory: true, completedAt: true } },
       },
     }),
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+    // Everyone (a policy with no assignment rows): the people anchored here
+    // who are not removed, as before, and the people here through a live
+    // membership (docs/plans/workspace-status-2.md E15, step 8).
+    countPeopleHere({ organizationId: orgId, reach: AUDIENCE_REACH }),
     prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } }),
   ]);
   if (!policy) return jsonError("Not found", 404);
@@ -47,21 +52,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const latestAck = myAcks.slice().sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0] ?? null;
   const currentAckUserIds = new Set(policy.acknowledgments.filter((a) => (a.version ?? 0) >= policy.ackVersion).map((a) => a.userId));
 
-  // The Audience panel: everyone (no assignment rows) or the named people.
+  // The Audience panel: everyone (no assignment rows) or the named people,
+  // each at their seat here in any state, grouped by the department their
+  // seat here holds (E15, step 8): before, the people anchored here only,
+  // so someone here through a membership was an unnamed row in no department.
   const assigneeIds = policy.assignments.map((a) => a.userId);
-  const people = assigneeIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: assigneeIds }, organizationId: orgId },
-        select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { id: true, name: true } } },
-      })
-    : [];
-  const byId = new Map(people.map((u) => [u.id, u]));
+  const byId = assigneeIds.length ? await peopleHereAmong(orgId, assigneeIds, "any") : new Map<string, PersonHere>();
+  const deptRows = (await placementsHere(orgId, [...byId.values()].map((u) => u.seat))).department;
+  const departmentOf = (u: PersonHere | undefined) => (u?.seat.departmentId ? deptRows.get(u.seat.departmentId) ?? null : null);
   const departments = new Map<string, { id: string; name: string; count: number }>();
-  for (const u of people) {
-    if (!u.department) continue;
-    const d = departments.get(u.department.id) ?? { id: u.department.id, name: u.department.name, count: 0 };
+  for (const u of byId.values()) {
+    const dept = departmentOf(u);
+    if (!dept) continue;
+    const d = departments.get(dept.id) ?? { id: dept.id, name: dept.name, count: 0 };
     d.count++;
-    departments.set(u.department.id, d);
+    departments.set(dept.id, d);
   }
   const settings = (org?.settings as SettingsBlob | null) || {};
   const processSettings = parseProcessSettings(settings.process).value;
@@ -87,7 +92,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       people: full
         ? policy.assignments.map((a) => {
             const u = byId.get(a.userId);
-            return { assignmentId: a.id, id: a.userId, firstName: u?.firstName ?? null, lastName: u?.lastName ?? null, email: u?.email ?? null, avatar: u?.avatar ?? null, status: a.status, dueDate: a.dueDate, mandatory: a.mandatory, department: u?.department?.name ?? null };
+            return { assignmentId: a.id, id: a.userId, firstName: u?.firstName ?? null, lastName: u?.lastName ?? null, email: u?.email ?? null, avatar: u?.avatar ?? null, status: a.status, dueDate: a.dueDate, mandatory: a.mandatory, department: departmentOf(u)?.name ?? null };
           })
         : [],
     },
@@ -161,16 +166,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (requireReack && versionBumped) {
     await prisma.policyAssignment.updateMany({ where: { policyId: id, status: "COMPLETED" }, data: { status: "ASSIGNED", completedAt: null } });
     const assignees = await prisma.policyAssignment.findMany({ where: { policyId: id }, select: { userId: true } });
-    if (assignees.length) {
+    // Told only while their seat here can be told (AUDIENCE_REACH): an
+    // assignment row stays when a seat ends, so a version bump never tells
+    // someone this workspace ended (docs/plans/workspace-status-2.md, the
+    // step 8 review M2). The rows reopen for everyone, as before.
+    const told = await seatedHereAmong(getOrgId(session), assignees.map((a) => a.userId), AUDIENCE_REACH);
+    if (told.size) {
       await prisma.notification.createMany({
-        data: assignees.map((a) => ({ userId: a.userId, type: "policy.reacknowledge", title: "Policy changed, acknowledge again", message: `"${updated.title}" is now version ${updated.version}.`, link: `/policies/${id}` })),
+        data: [...told].map((userId) => ({ userId, type: "policy.reacknowledge", title: "Policy changed, acknowledge again", message: `"${updated.title}" is now version ${updated.version}.`, link: `/policies/${id}` })),
       });
     }
   }
   if (data.status === "PUBLISHED" && existing.status !== "PUBLISHED") {
     const orgId = getOrgId(session);
     const assignees = await prisma.policyAssignment.findMany({ where: { policyId: id }, select: { userId: true } });
-    const targets = assignees.length ? assignees.map((a) => a.userId) : (await prisma.user.findMany({ where: { organizationId: orgId, deletedAt: null }, select: { id: true } })).map((u) => u.id);
+    // Everyone, two halves (E15, step 8), or the assignees at their seat
+    // here (the step 8 review M2): nobody this workspace ended is told.
+    const targets = assignees.length ? [...(await seatedHereAmong(orgId, assignees.map((a) => a.userId), AUDIENCE_REACH))] : await everyoneHereIds(orgId, AUDIENCE_REACH);
     if (targets.length) {
       await prisma.notification.createMany({
         data: targets.map((uid) => ({ userId: uid, type: "policy_published", title: updated.requiresAck ? "New policy to acknowledge" : "New policy published", message: updated.title, link: `/policies/${id}` })),

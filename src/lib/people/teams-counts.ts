@@ -116,7 +116,10 @@ async function answeredCandorIds(userId: string): Promise<Set<string>> {
 
 /**
  * The viewer facts and the counts in one pass. `me` carries the fields the
- * audience rules read, from the boot's own user row.
+ * audience rules read: the office and department the viewer's seat HERE
+ * holds (the boot reads them with placementHereOf, the page gates from the
+ * viewer), the membership's for someone here through one, never the
+ * account's (docs/plans/workspace-status-2.md E15, step 8).
  */
 export async function teamsFactsAndCounts(
   userId: string,

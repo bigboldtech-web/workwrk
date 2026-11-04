@@ -79,6 +79,14 @@ export async function seedKraToRoleHolders(args: {
 }): Promise<{ peopleSeeded: number }> {
   const { kraId, roleId, organizationId } = args;
   const [holders, kra] = await Promise.all([
+    // The job title's holders ANCHORED here only, never someone here through
+    // a membership whose membership holds the title
+    // (docs/plans/workspace-status-2.md E15, step 8, kept anchored by the
+    // step 5 review M1): a KRA assignment names no workspace, and its
+    // readers (My KRAs, the KPI recorder, self-reports, the weight total)
+    // read every row of the person's, so one made here would show and count
+    // in the workspace their account is in. A known limit, until KRAs are
+    // per workspace.
     prisma.user.findMany({
       where: { roleId, organizationId, status: "ACTIVE" },
       select: { id: true },

@@ -21,6 +21,7 @@ import {
 import { announcementViewer } from "@/lib/announcement-server";
 import { isAnnouncementPriority, isAnnouncementType, isScheduled } from "@/lib/announcement-view";
 import { parseExpiry } from "../route";
+import { placementHereOf } from "@/lib/access/profile-here";
 
 /**
  * ONE announcement, for /announcements/[id] (spec-talk.md section 2.4 Data).
@@ -58,10 +59,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   let allowed = canReadAnyAnnouncement(viewer) || isAuthor;
   if (!allowed) {
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, departmentId: true, officeId: true },
-    });
+    // Their department and office at their seat here (E15, step 8), as the feed reads them.
+    const placed = await placementHereOf(orgId, userId);
+    const me = placed ? { id: userId, departmentId: placed.departmentId, officeId: placed.officeId } : null;
     const [tagIds, spaceIds] = await Promise.all([
       audience.type === "TAGS" ? getUserTagIds(orgId, userId) : Promise.resolve<string[]>([]),
       audience.type === "SPACE" ? viewerSpaceIds(orgId, userId) : Promise.resolve<string[]>([]),

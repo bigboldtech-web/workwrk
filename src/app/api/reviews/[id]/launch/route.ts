@@ -41,7 +41,13 @@ async function launchPlan(session: Session, id: string) {
 
   // The active people the cycle covers (review-cycle-rules.ts): the cycle's
   // own audience for the People team and Admin; a manager's cycle is always
-  // clipped to their chain. Removed people are never reviewed.
+  // clipped to their chain. Removed people are never reviewed. The people
+  // ANCHORED here only, by their account's department, whatever the
+  // audience (everyone, departments or names): a membership person's
+  // reviews here are a known limit of docs/plans/workspace-status-2.md (E8,
+  // the Risks list), with their KRAs, which a review's self-assessment
+  // reads across every workspace (the step 5 review M1), so step 8 (E15)
+  // leaves this audience anchored.
   const people = await prisma.user.findMany({
     where: { organizationId: orgId, status: "ACTIVE", deletedAt: null },
     select: { id: true, managerId: true, departmentId: true },

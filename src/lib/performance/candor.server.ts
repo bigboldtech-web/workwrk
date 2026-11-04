@@ -19,6 +19,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { viewerFromSession } from "@/lib/access/viewer";
+import { AUDIENCE_REACH, idsPlacedHere, peoplePlacedHere } from "@/lib/access/profile-here";
 import { sessionOnLegacyManagerTier } from "@/lib/page-gates";
 import { candorScopeAllowed, type CandorScopes } from "./candor";
 
@@ -37,11 +38,13 @@ export interface CandorCtx {
 export async function candorCtx(): Promise<CandorCtx | null> {
   const v = await viewerFromSession();
   if (!v || v.orgRole === "GUEST") return null;
-  const me = await prisma.user.findUnique({ where: { id: v.userId }, select: { departmentId: true } });
   return {
     userId: v.userId,
     organizationId: v.organizationId,
-    departmentId: me?.departmentId ?? null,
+    // Their department at their seat here (the viewer reads it there: the
+    // membership's for someone here through one), never the account's,
+    // which is another workspace's (docs/plans/workspace-status-2.md E15, step 8).
+    departmentId: v.departmentId ?? null,
     peopleTeamOrAdmin: v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true,
     isAgent: v.isAgent,
   };
@@ -108,8 +111,13 @@ export async function candorScopesFor(ctx: CandorCtx): Promise<CandorScopes> {
   const v = await viewerFromSession();
   const reportTree = v?.reportTree ?? new Set<string>();
   if (!reportTree.size) return { everyone: false, departmentIds: [] };
+  // Everyone a session would ask (notifyCandorOpen's people), each in the
+  // department their seat here holds (docs/plans/workspace-status-2.md E15,
+  // step 8): the people anchored here who are not removed, as before, and
+  // the people here through a live membership. An Inbox row and an email go
+  // to the account, so nobody this workspace ended is asked.
   const [members, departments] = await Promise.all([
-    prisma.user.findMany({ where: { organizationId: ctx.organizationId, deletedAt: null }, select: { id: true, departmentId: true } }),
+    peoplePlacedHere(ctx.organizationId, "everyone", AUDIENCE_REACH),
     prisma.department.findMany({ where: { organizationId: ctx.organizationId }, select: { id: true, headId: true } }),
   ]);
   return candorChainScopes({ userId: ctx.userId, reportTree, members, departments });
@@ -138,10 +146,11 @@ export async function notifyCandorOpen(
 ): Promise<void> {
   const { sendEmail } = await import("@/lib/email");
   const { genericNotificationTemplate } = await import("@/lib/email-templates");
-  const users = await prisma.user.findMany({
-    where: { organizationId: orgId, deletedAt: null, id: { not: creatorId }, ...(session.departmentId ? { departmentId: session.departmentId } : {}) },
-    select: { id: true, email: true, firstName: true },
-  });
+  // Everyone in the scope (the workspace, or the department their seat here
+  // holds), two halves at AUDIENCE_REACH (E15, step 8), never the owner.
+  const asked = (await idsPlacedHere(orgId, session.departmentId ? { departmentIds: [session.departmentId] } : "everyone", AUDIENCE_REACH)).filter((id) => id !== creatorId);
+  if (!asked.length) return;
+  const users = await prisma.user.findMany({ where: { id: { in: asked } }, select: { id: true, email: true, firstName: true } });
   if (!users.length) return;
   await prisma.notification.createMany({
     data: users.map((u) => ({

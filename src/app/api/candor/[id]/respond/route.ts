@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cleanCandorAnswers, normalizeCandorPrompts } from "@/lib/performance/candor";
+import { placementHereOf } from "@/lib/access/profile-here";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -28,11 +29,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // that department (mirrors the list-visibility gate in /api/candor GET).
   // The current user's department is read for AUTHORIZATION ONLY, it is never
   // written to the response, so anonymity is preserved.
+  // The department is the one their seat here holds: the membership's for
+  // someone here through one (docs/plans/workspace-status-2.md E15, step 8),
+  // never the account's, which is another workspace's.
   if (candor.departmentId) {
-    const me = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { departmentId: true },
-    });
+    const me = await placementHereOf(orgId, userId);
     if (me?.departmentId !== candor.departmentId) {
       return jsonError("This session isn't open to you", 403);
     }

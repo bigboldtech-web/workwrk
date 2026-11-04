@@ -1492,3 +1492,198 @@ The list is unchanged: 154 files, (a) 96, (b) 36, (c) 22; 21 writers. MERGED sta
 3. **Okta workspaces clear a manager in WorkwrK**, since emptying it in Okta does not reach here (step 7's Okta note).
 4. **A manager the provider names by address** is the person with a live seat here under that address before one deactivated here.
 5. **The same refused manager is logged again after any change of the person's line here**, whoever made it.
+
+## Step 8, built
+
+Branch `workspace-status-2` in ~/theywrk-launch, on 39b5e6cd (steps 1 to 5 and 7 committed on main f16c2220), not committed. **No SQL, no schema change, no flag.** It ships in the one merge of steps 1 to 9.
+
+### The rule
+
+Everywhere an audience or a count is built from the people placed in a department, a job title, an office or the whole workspace, it reads them at the seat here (E15): the people anchored here by their account's placement, and the people here through a membership by the placement that membership holds (D18), in two indexed halves, never one OR with a membership sublink (as step 6 reads seats).
+- **An audience** (who is told, who may read or answer: announcements, policies, surveys, Candor, goals, a job title's holders) keeps the rule it had for people anchored here and needs a **live** seat for a membership person (an ACTIVE one where the anchored rule was ACTIVE). Nobody this workspace ended is in one: what it sends (a notification row, an email) belongs to the account and is read in whichever workspace the account is in.
+- **A count** keeps its own rule. The Settings counts read **kept** seats for both kinds, the rule their deletes refuse by (the step 5 review M2), so a department, an office or a job title only Pat holds is no longer offered for a Delete that then refuses. Someone B deactivated is in none of the audiences, and is counted in these lists exactly as a deactivated person anchored here is (their seat still holds the department).
+- **No double count.** The membership half leaves out the people anchored here (membershipHereWhere), so someone anchored here who still holds a stale membership row here is counted once, at their account.
+- **One viewer's own placement** (am I in this audience?) is the one their seat here holds: the hydrated viewer's (viewer.ts already reads it there) or placementHereOf.
+- **Anchored on purpose (step 5's M1 ruling, which overrides E15's "SOP and KRA seeding").** KRA seeding to a job title's holders (seedKraToRoleHolders), an SOP assigned to a department or to everyone, the role page's role-instance person picker (its Apply definition seeds KRAs and SOPs), scripts/reconcile-role-kras.mjs and a review cycle's launch keep reading the people anchored here only. A membership person's KRAs, SOPs and reviews here are the plan's known limit; each place says so in a comment where the code decides it, and the contract test pins it.
+
+### The helpers (src/lib/access/profile-here.ts)
+
+- `placementHereOf(organizationId, userId, reach = "any")`: the department, job title and office the person's seat here holds (the account's where anchored here, the membership's otherwise), or null when they hold no seat here at that reach. Two reads at most, by key.
+- `peoplePlacedHere(organizationId, by, reach, { among, only })` and `idsPlacedHere`: everyone placed in any of these departments, job titles or offices (or `"everyone"`), each with their placement here and name card, the two halves ("User_organizationId_idx"; "OrganizationMembership_organizationId_idx"). `among` narrows to a scope; `only` reads one half for a caller that reads the other itself.
+- `membershipPlacedCounts(organizationId, column, reach = "kept")`: the membership half of a listed count, added by each caller to its own relation `_count` of the people anchored here.
+- `AUDIENCE_REACH` = `{ anchored: "kept", membership: "live" }`, the reach most audiences read.
+- `membershipsPlacedHere` (step 5) stays, for the deletes.
+
+### Each audience or count: before, now, test
+
+Tests are in src/lib/people/audiences-placed.test.ts (new, 18 tests, on the in-memory database through the real routes and helpers) unless another file is named. The case: Pat anchored at A (A's Operations, an Analyst, London), with a stale A membership row placed in Operations too, and a live B membership placed in B's Design as a Designer in Leeds, Dana her manager there; Lee anchored in B in Design; Rita anchored at A, placed in B's Design and deactivated by B; Rex anchored at A, placed in B's Design and removed by B; Bo owns B, Ari owns A; Gus a Guest in B through a membership placed in Design.
+
+- **The helpers.** Test: "place Pat by her B membership in B and by her account in A, each at her seat's state, never twice" (Pat once in A's Operations despite her stale A row; B's ids place nobody in A; a filter naming nothing places nobody).
+- **Announcements** (announcement-audience.ts resolveAnnouncementAudienceUserIds: ALL, DEPARTMENTS, OFFICES; and so the post's notifications and emails, the reminder, the scheduled publish cron, the editor's counts). Before: the people anchored here only. Now: idsPlacedHere at AUDIENCE_REACH. Test: "a B announcement to Design, to Leeds or to everyone reaches Pat, and nobody B ended" (and A's audience to Operations holds Pat once).
+- **Who reads an announcement** (the feed GET /api/announcements, the link GET /api/announcements/[id], the command palette's announcements in /api/search). Before: the account's department and office (A's for Pat in B). Now: placementHereOf. Test: "Pat, in B, reads B's Design and Leeds posts in her feed and by their link, and not Engineering's" (in A she reads A's Operations post; a Guest is unchanged: Gus gets 404 for the feed and the link).
+- **The acknowledgement roster** (GET /api/announcements/[id]/acknowledge). Before: each person by the account (deletedAt null) and the account's department. Now: each at their seat here at the audience's reach, under the department their seat holds. Test: "the acknowledgement roster lists Pat under B's Design, and nobody B ended".
+- **Policies**: POST /api/policies/[id]/assignments by department and for everyone (before: people anchored here who can sign in; now: idsPlacedHere at `live`), its GET's department (before: the account's, hidden for Pat; now: the seat's), GET /api/policies/[id] (the everyone count, the Audience panel's people and departments: before, people anchored here only, so Pat was an unnamed row in no department), its publish notice for everyone, GET /api/policies (the everyone count and audience figures) and POST's publish notice (everyoneHereIds and countPeopleHere at AUDIENCE_REACH), policy-compliance.ts and policy-ledger.ts (before: people anchored here only, the account's department; now: peoplePlacedHere at AUDIENCE_REACH, the seat's department). Tests: "B's policy assigned to Design reaches Pat, shows her under Design, and never Rita or Rex"; "B's policy for everyone counts Pat, and its compliance and ledger list her under Design".
+- **Surveys** (survey.server.ts: `surveyAudienceIds` replaces `audienceUserWhere`, for the stats, the open notice and the reminders; surveyCtx; POST /api/pulse-surveys/[id]/respond; the Surveys page gate in culture-gate.ts). Before: offices, departments and everyone were the people anchored here; the viewer's office and department the account's. Now: idsPlacedHere at AUDIENCE_REACH; the viewer's from the seat. Tests: "B's survey to Design counts Pat, tells her, and takes her answer; nobody B ended is told"; "the Surveys page opens to Pat in B, targeted by B's Design survey at her seat there"; survey-audience-stats.test.ts (its mock answers the two halves now, each read's shape held, and a new case: "counts a respondent here through a membership placed in the department as still in it").
+- **Candor** (candor.server.ts candorCtx, candorScopesFor's members, notifyCandorOpen; POST /api/candor/[id]/respond). Before: the account's department, and the people anchored here. Now: the viewer's seat department, and peoplePlacedHere and idsPlacedHere at AUDIENCE_REACH. Test: "B's Candor session for Design takes Pat's answer and tells her, and nobody B ended".
+- **The boot's facts** (GET /api/boot: the Candor and Surveys rows and counts, teams-counts.ts). Before: the account's office and department (boot/route.ts 243-245). Now: placementHereOf. Test: "the boot's facts count B's open Design survey and Candor session for Pat in B, and none in A".
+- **Goals** (goal-audience.ts resolveGoalMembersBatch's department and job title audiences; canSeeGoal's and goalVisibilityOr's viewer; teamAudienceVisibilityOr, which now takes the workspace; GET /api/okrs and /api/okrs/my-okrs; goal-contributor.ts). Before: the people anchored here (ACTIVE) and the account's department and job title, for the viewer and for each team member; a membership person was never a contributor, not even by name. Now: peoplePlacedHere at `active`, then everyone at their seat (peopleHereAmong `active`); placementHereOf for the viewer (`kept` for the contributor); the team's placements at their seats. Tests: "a B goal for Design and one for Designers hold Pat as a member, and never Rita or Rex"; "Pat, in B, sees both goals and contributes to them; her goal list reads B's Design"; "Dana sees the Designers goal through Pat, who reports to her in B, by the title Pat holds in B".
+- **The Settings counts**: GET /api/departments (`_count.members`), GET /api/offices (`_count.members`), GET /api/roles (`_count.users`), GET /api/roles/[id] (the holders), GET /api/roles/[id]/alignment (`holders.users`), the job title page's People tab (people/roles/[id]: a membership holder's row shows no KRA drift and no Seed, since none is assigned to them here), workspace-export's departments.csv. Before: the people anchored here only. Now: each adds the membership half at kept seats; `removedMembers` and `removedHolders` stay the people anchored here (their account's key or history). Tests: "B's Design, Designer and Leeds count Pat (and Rita, whose kept seat a delete refuses by), never Rex; A counts Pat once"; "a job title's template counts its holders here through a membership too".
+- **Structure's No manager** (settings/structure). Before: people anchored here with no line. Now: both halves, live, the membership's own line (E1). No test of its own (a server page; pinned by the contract).
+- **A job title's holders**: job-title-holders.ts (the SOP step owner rule: a run's task goes to a holder at their seat, with that seat's status, removal and level), POST /api/role-boundaries/request (the owner role's ACTIVE holders, and the requester's job title here), workflow/engine.ts's approver (the actor at their seat, live for a membership person; no caller in the app). Tests: "B's Designer holders are Pat at her B seat with Lee, Rita and Rex as the step owner rule reads them"; "a request to the Designer-owned area tells Pat, and never Rita or Rex". The engine has no test of its own (no caller).
+- **Filters**: the kudos wall's department filter (GET /api/kudos?dept=: the anchored half by the relation as before, the membership half read on its own, `only: "membership"`), SOP compliance's department filter and grouping (sop-compliance.ts: the seat's department; no SOP is assigned to a membership person since M1, so this places any made before it). Test: "the wall's Design filter holds Pat's kudos, given or received, and the SOP compliance groups her under Design".
+- **The AI company profile's headcount** (organization/ai-profile): both halves, kept. No test of its own.
+- **scripts/report-escalation-thresholds.ts** (report only): a job title's holders in two halves, each with the line their seat holds, and the named person at their seat. Type checked, not run.
+
+### The contract test (E16)
+
+- Flipped to (a), each with its reason: the job title page, settings/structure, departments, kudos, offices, roles/[id]/alignment, roles/[id], roles, job-title-holders.ts, workspace-export.server.ts, teams-counts.ts, sop-compliance.ts, scripts/report-escalation-thresholds.ts. To (c), on purpose (M1 and the known limit): reviews/[id]/launch, sop-assignments, alignment-assign.ts, scripts/reconcile-role-kras.mjs. profile-here.ts's reason names the new helpers.
+- No longer found, so they left the list (they read no placement column themselves now, only through the helpers): the three announcement routes, candor respond, okrs and okrs/my-okrs, the policy assignments and policy routes, pulse-surveys respond, role-boundaries/request, search, goal-audience.ts, goal-contributor.ts, culture-gate.ts, candor.server.ts, survey.server.ts, policy-compliance.ts, policy-ledger.ts, workflow/engine.ts. A read of the account's placement that came back would make the scanner find them again and fail.
+- **MERGED is [2, 3, 4, 5, 7, 8], equal to MERGE_NEEDS**; the done gate holds for every step (no (b) entry and no step writer left).
+- New test, "holds step 8's audiences and counts at the seat here, two halves, and KRA and SOP seeding anchored": the helpers' two halves, every caller above by count, the boot's old read gone, goal-audience.ts reading no account placement, and the anchored-only reads of KRA seeding and SOP assignment held (and marked (c) with the review launch and the reconcile script).
+- The list: **135 files** (121 in src/, 13 in scripts/, 1 in prisma/), (a) 109, (b) 0, (c) 26; 21 writers.
+
+### Decisions made here (worst case first)
+
+- **Audiences: the anchored rule unchanged, a membership seat live.** Worst case of live for both: a policy's compliance list or a Candor session drops someone anchored here and deactivated today, a change for everyone that this step did not need. Worst case of kept for a membership: B deactivates Pat and she still gets B's announcements and policies in A. Step 6 ruled the same for named audiences.
+- **Settings counts: kept for both.** Worst case of live: Rita, deactivated in B and still placed in Design, keeps the department's Delete refused while its count says 0, the bug this step closes. Worst case of kept: a deactivated person is counted, as one anchored here always was.
+- **KRA, SOP and review audiences stay anchored** (the ruling on the step 5 review M1). Worst case of widening: a B KRA or SOP shows and counts in A for Pat, and her A self-assessment reads it. Worst case of not: B's Designers who work here from another workspace's account have no KRAs here (the known limit, said in words where they could be given one).
+- **A membership holder on the job title page shows no drift and no Seed.** Worst case of showing "Missing N of N KRAs" with Seed: a button that always refuses. Worst case of "Up to date": a claim that is untrue. Showing nothing is true: none is assigned here.
+- **The kudos filter's membership half is an id list beside the anchored relation filter.** Worst case of one OR with a membership sublink in the kudos read: the plan the halves rule exists to avoid. Worst case of this: a department with thousands of members through memberships puts a long id list in the read (the same as the policy and survey audiences already read).
+- **teamAudienceVisibilityOr takes the workspace.** Worst case of reading a team member's placement without it: the account's, another workspace's.
+
+### Tests
+
+- **New: 20.** audiences-placed.test.ts 18, survey-audience-stats.test.ts 1, the contract's step 8 test 1.
+- **Changed: 4.** survey-audience-stats.test.ts 3 (the mock answers the two halves and holds each read's shape in place of the old count calls; no assertion weakened, the numbers asserted are the same), the contract's "lists each file" (its entries).
+- **On step 7's code** (39b5e6cd exported to the scratchpad with `git archive`, these test files, the test double and the new profile-here.ts copied in): **17 of the 18 audiences-placed tests fail**, each on an assertion (Pat missing from an audience, a 404 or 403 for her, a count one or two short, Rita's and Rex's B rows missing from the holders). The one that passes there is the helper test, only because the new profile-here.ts was copied in; on 39b5e6cd itself the helpers do not exist. The new survey stats test and its 3 changed neighbours fail there (the old code reads by a count the new mock does not answer), and so do the contract's step 8 test and "lists each file". In all, **19 of the 20 new tests fail on step 7's code**, and the 4 changed ones too.
+- The test double (seat-test-db.ts): a goal's audience rows, a policy's assignments and acknowledgements, a KRA's KPIs, a survey's responses, a department's job titles and a job title's instances as list relations; an ownership area's owning job title and an SOP assignment's SOP and person as relations.
+- Every test related to a changed source (`vitest related`): 262 files, 3,383 tests, all pass. The touched folders (src/lib/access, people, performance, goals, workflow, export; the announcement, policy, goal, SOP compliance and alignment modules; src/app/api announcements, policies, okrs, candor, pulse-surveys, departments, offices, roles, kudos, role-boundaries, search, boot, sop-assignments, reviews, organization; the People and Settings pages; scripts): 185 files, 2,803 tests, all pass. The whole suite (`TZ=UTC npx vitest run`): 978 files, 13,940 tests, all pass.
+- Type check clean, run twice (6 GB heap). ESLint on every touched file: no new problem; the 11 errors it reports are on 39b5e6cd too, on no line this step wrote (organization/ai-profile 3 and sop-assignments 5 `no-explicit-any`, workspace-export.server.ts 3 accessLevel rules). `node scripts/check-schema-sql.mjs` passes.
+
+### Files
+
+- Changed: src/lib/access/profile-here.ts, job-title-holders.ts, object-share/goal.ts (the new teamAudienceVisibilityOr argument only); src/lib/announcement-audience.ts, goal-audience.ts, goals/goal-contributor.ts, performance/candor.server.ts, performance/survey.server.ts, people/culture-gate.ts, people/teams-counts.ts (a comment), policy-compliance.ts, policy-ledger.ts, sop-compliance.ts, alignment-assign.ts (a comment), export/workspace-export.server.ts, workflow/engine.ts; src/app/api announcements, announcements/[id], announcements/[id]/acknowledge, boot, candor/[id]/respond, departments, kudos, offices, okrs, okrs/my-okrs, organization/ai-profile, policies, policies/[id], policies/[id]/assignments, pulse-surveys/[id]/respond, reviews/[id]/launch (a comment), role-boundaries/request, roles, roles/[id], roles/[id]/alignment, search, sop-assignments (a comment) (each route.ts); src/app/(dashboard)/people/roles/[id]/page.tsx and role-workspace.tsx, settings/structure/page.tsx; scripts/report-escalation-thresholds.ts, scripts/reconcile-role-kras.mjs (a comment); this section.
+- New test: src/lib/people/audiences-placed.test.ts. Changed tests: src/lib/performance/survey-audience-stats.test.ts, src/lib/access/workspace-lines.contract.test.ts. Test double: src/lib/access/seat-test-db.ts.
+
+### Left for later steps and the final sweep
+
+- The known limit, unchanged: a membership person's KRAs, SOP assignments, KPI history, reviews, performance scores (services/performanceScoreService.ts recalculates the people anchored here), skills and analytics here. The next step makes them per workspace.
+- The object share module behind ACCESS_V2_TABLES (object-share/goal.ts keeps the account's placement for its own check), as one piece when the flag is turned on.
+- A kudos card names a membership person's department as nothing (ownHere), as before; the filter now finds them.
+- Step 9's live proof: measure a whole-workspace audience (an announcement or a policy for everyone, a Candor session) at 5,000 people, where each half is one indexed read and a notice is one createMany; and EXPLAIN the membership half with a department filter on Postgres (the local database here is too small for the planner to use an index).
+
+### Deploy notes (step 8, in the one merge)
+
+No SQL to apply, no schema change, no environment flag. Rollback is the revert; nothing is written differently except to the people the rules below now reach.
+
+What customers will notice, from the deploy on:
+1. **Announcements, policies, surveys, Candor sessions and goals aimed at a department, a job title, an office or everyone reach the people who work here from another workspace's account and are placed there here**, and those people see them, answer them and acknowledge them in this workspace. Before, they were left out whatever this workspace's HR placed them in.
+2. **Nobody this workspace deactivated or removed is told anything** by these audiences, whatever their status in another workspace. People anchored here keep the rule each audience had for them.
+3. **The acknowledgement roster, a policy's Audience panel, the policy compliance dashboard, the ledger and SOP compliance** list those people under this workspace's department.
+4. **Settings' Departments, Offices and Job titles count them**, so Delete is offered only where it goes through. A job title's People tab lists them, without a KRA drift note: KRAs and SOPs are still not assigned to people who work here from another workspace's account.
+5. **The Candor and Surveys rows, their counts and pages** open for them where they are asked; **the kudos wall's department filter** finds their kudos; **a request to an area's owner** reaches the owners who hold the job title through a membership; an SOP run's step owned by a job title can go to them.
+6. **Unchanged, on purpose:** assigning an SOP to a department or to everyone, seeding a job title's KRAs and launching a review cycle reach the people anchored here only (the step 5 review M1).
+7. Each of these audiences is two indexed reads instead of one.
+
+## Step 8, review fixes
+
+The review is ~/workwrk-launch-backup/agents/workspace-status-2/step8-review.md: no high finding, three medium and eight low, each fixed as the coordinator ruled. Same branch, still not committed. **No SQL, no schema change, no flag.**
+
+### M1: the recurring survey cron reads the one survey audience
+
+- cron/surveys-rotate had its own audience reader, for the people anchored here only (a named audience lost its membership people too, and a tag audience was read with no seat check). It is gone: the next round's notice and email, and the "closes soon" reminder, both call survey.server.ts `surveyAudienceIds(survey.organizationId, survey)`, the two halves at AUDIENCE_REACH. So every later round of B's Design pulse reaches Pat, and a tag survey never reaches Rita or Rex.
+- **Why the scanner missed it:** the read was `prisma.user.findMany({ where, ... })`, with the `where` held in a variable and its placement set on that variable elsewhere (`const where: Prisma.UserWhereInput = {...}; where.officeId = ...`). The scanner looked only inside the call's arguments.
+- **The scanner now catches that shape.** A User or membership read whose `where` is held in a variable (the `where` shorthand, or `where: name`) is a placement read when the file assigns a placement key on that variable, or the variable's initializer names one. The same holds for a call chain broken over lines (`prisma.user\n  .findUnique(`), the shape that hid the boot route's old read.
+  - The self-test holds each shape and its negatives: a held `where` with no placement, and a membership's access level.
+  - On the reviewed tree, the widened scanner finds the old cron (and the old announcement-audience.ts).
+  - On today's tree it finds no new file.
+- The cron reads no placement itself now, so the contract pins it ("holds the step 8 review's fixes"): two calls of surveyAudienceIds, and no local reader, tag resolver or held `where` left.
+
+### M2: every policy notice sent from assignment rows tells only a seat here that can be told
+
+An assignment row stays when a seat ends, and step 8 makes these rows for everyone placed in a department. Each notice now passes its targets through `seatedHereAmong(orgId, ids, AUDIENCE_REACH)`:
+- policies/[id] PATCH: the "Policy changed, acknowledge again" notice. The rows still reopen for everyone, as before.
+- policies/[id] PATCH: the publish notice to the assignees.
+- remindPolicyAssignees (policy-remind.ts): one filter covers all three reminder doors, the ledger's Remind everyone pending, one person's Remind, and the due-soon pass. The count answered is who was told.
+
+### M3: a tag's announcement audience is read at the seat here
+
+resolveAnnouncementAudienceUserIds reads a tag's holders through `seatedHereAmong(..., AUDIENCE_REACH)`, as surveys already did. That covers the post's notice and email with its preview, the scheduled publish, the reminder, and the roster's count. The other tag audiences were checked:
+- Surveys read a tag's holders at the seat (and the cron now does too, M1).
+- Goals read a tag's holders at an ACTIVE seat (peopleHereAmong).
+- Policies and Candor have no tag audience.
+- The viewer's own tag checks (feed, survey answer, goal visibility) are the viewer's.
+
+### The lows
+
+- **L1. The weekly policy reminder** (send-reminders, policy-ack) reads the policy's audience as its dashboard and ledger do: the assignees when it has any, else everyone here, both halves (seatedHereAmong, everyoneHereIds). Live seats: the rule this reminder had for people anchored here (LIVE_PERSON), and the one every audience needs of a membership person. Before, it reached everyone anchored here even for a policy assigned to three people, and nobody here through a membership.
+- **L2. The Surveys organiser list counts again.** surveyAudienceStats counts the audience (`countPlacedHere`: one count per half for a placed audience; the seat check for a named one) and reads only the respondents by id against the same halves (`surveyAudienceIds(..., responderIds)`). `idsPlacedHere` now selects ids only, with no name card (Candor's chain scope benefits too).
+- **L3. `membershipPlacedCounts` uses a groupBy**: one row per department, job title or office, never one per membership.
+- **L4. Ask AI's Owner snapshot** counts the headcount in both halves (countPeopleHere, kept) and each department's members as Settings does: people anchored here and not removed, plus the membership half (membershipPlacedCounts).
+- **L5. SOP assignment by department or for everyone says who it left out.**
+  - The answer carries `notAssignedElsewhere` and `alignmentNote`, for example "1 person here from another workspace's account was not assigned. KRAs and SOPs are not assigned to people who work here from another workspace's account." It counts the membership people placed there at the same live seats, narrowed by a manager's reach.
+  - If they are the only people there, it is a 400 in those words, never "No users specified".
+  - The assign dialog shows the note as a toast after the count. This is no new surface.
+  - Nothing is assigned to them (the step 5 M1 ruling).
+- **L6. A named survey names a respondent here through a membership.** The results (pulse-surveys/[id]/responses) and the export read the respondents at their seat here, in any state (an answer stays after its author leaves, as before), with the office and department their seat here holds (`surveyRespondentsHere`). An office or department segment reads both halves (`surveySegmentIds`, kept, as the segment read the people anchored here before).
+  - These readers are shown to the same people as before: the survey's runners.
+  - Anonymous surveys are unchanged: no segment, no names, the floor.
+  - Both routes read no placement themselves now and left the contract list, pinned instead.
+- **L7. GET /api/roles/[id]** sends a holder's address only to a reader of their people data (person-access.server.ts readsPeopleDataOf, the record's rule), for both kinds and for a role instance's person. Anyone else gets an empty address.
+- **L8. The tests:**
+  - The Guest case now uses a valid seat. Gus is anchored in B, a Guest by the stored org role the Guest invitation writes; a membership is never a Guest and AccessLevel has no GUEST value. He is placed in Design before the audience assertions, and is in its audience exactly as before this step (the anchored rule). The token-only Guest checks are gone.
+  - New: Pat is in B's Design audiences while her account lives, and in none (announcement by department and by tag, survey, Candor, policy assignment by department) once A deactivates her account (D12). A Settings count keeps her kept seat, as the delete refuses by it.
+  - New: the step 5 M1 holds by behaviour:
+    - seedKraToRoleHolders seeds Lee only;
+    - SOP assignment by department and for everyone assigns no membership person, and says so (L5);
+    - the review launch preview counts Lee only.
+  - Still without a route test, pinned by the contract: the Structure page's No manager count, the AI company profile headcount, Ask AI's snapshot (its route needs the model) and the workflow engine (no caller).
+
+### The contract test (E16)
+
+- **The scanner** catches a held `where` and a call chain broken over lines (M1), each held by the self-test.
+- **Removed (no longer found; pinned):** pulse-surveys/[id]/responses and its export (L6). api/ai's reason names L4.
+- **New test, "holds the step 8 review's fixes":** the cron's two calls, the four notice filters, the tag filter, the weekly reminder's halves, the survey count and respondent reads, the three groupBys, the snapshot's counts, the SOP note on its three answers, the survey segment and respondents in both routes, and the role route's address rule. It also checks that the replaced readers are gone.
+- **The step 8 test's pins** follow the helpers' new shape. The SOP route may read the membership half only once, for its note, never to assign.
+- The list: **133 files** (119 in src/, 13 in scripts/, 1 in prisma/), (a) 109, (b) 0, (c) 24; 21 writers. MERGED stays [2, 3, 4, 5, 7, 8].
+
+### Files
+
+- **Changed:**
+  - src/app/api/cron/surveys-rotate/route.ts, policies/[id]/route.ts, email/send-reminders/route.ts, ai/route.ts, sop-assignments/route.ts, pulse-surveys/[id]/responses/route.ts and its export, roles/[id]/route.ts;
+  - src/lib/policy-remind.ts, announcement-audience.ts, performance/survey.server.ts, access/profile-here.ts;
+  - src/components/process/assign-dialog.tsx;
+  - this section.
+- **Test double (seat-test-db.ts):** a tag assignment's tag, a policy's workspace, an assignment's policy, and a review cycle's reviews.
+- **Tests:**
+  - src/lib/people/audiences-placed-review.test.ts (new, 10);
+  - audiences-placed.test.ts (the Guest case);
+  - survey-audience-stats.test.ts (its mock answers the counts and the respondent reads);
+  - the contract (the scanner, its self-test, the entries, the step 8 pins and the new test).
+
+### Tests
+
+- **New: 11.** audiences-placed-review 10, and the contract's review test 1.
+- **Changed: 9 tests in 4 files.** survey-audience-stats 4 (no assertion weakened: the same numbers, and each read's shape held more strictly, counts and respondent reads in place of the audience rows). The contract's scanner self-test, "lists each file" and the step 8 pins. audiences-placed's first announcement test (the Guest).
+- **On the reviewed step 8 code** (39b5e6cd with ~/workwrk-launch-backup/agents/workspace-status-2/step8.diff applied in the scratchpad, these test files and the test double copied in):
+  - All 10 audiences-placed-review tests fail, each on an assertion: Pat missing from the cron's later round, Rita and Rex told by every notice and reminder and by the tag audience, the weekly reminder reaching Bo for a policy assigned to two and never Pat, the survey list reading rows, the named results showing one Design respondent, every address sent to Lee, the SOP answer saying nothing.
+  - The L8 account test fails there on its tag assertion. Its placement assertions hold there too (a guard: membershipHereWhere already needed a live account).
+  - Fail there as well: the 4 changed survey stats tests, the contract's new test, "lists each file" and the step 8 pins.
+  - Pass there by design: audiences-placed's 18, including the reworded Guest case (the anchored rule is unchanged on both), and the scanner self-test (the scanner lives in the test file).
+- **Related set** (`vitest related` over every changed source): 263 files, 3,393 tests, all pass.
+- **The touched folders** (src/lib/people, performance and access; src/app/api cron, email, pulse-surveys, policies, sop-assignments, roles and ai; src/components/process; the announcement and policy modules): 149 files, 2,298 tests, all pass.
+- **Whole suite** (`TZ=UTC npx vitest run`): 979 files, 13,951 tests, all pass.
+- **Type check:** clean, run twice (6 GB heap).
+- **ESLint** on every file touched in this pass: no new problem. The 15 errors and 3 warnings it reports in ai/route.ts, send-reminders and sop-assignments are on the reviewed step 8 tree too, the same counts on lines this pass did not write.
+- **Schema guard:** `node scripts/check-schema-sql.mjs` passes.
+
+### Deploy notes, added to step 8's
+
+1. **A recurring survey's later rounds and its "closes soon" reminder reach everyone its first round reached:** people placed here through a membership, and a named or tagged audience at the seat here. Nobody this workspace ended is told.
+2. **Policy notices from assignments** (Policy changed, acknowledge again; Published; Remind everyone pending; one person's Remind; the due-soon reminder) **no longer reach someone this workspace deactivated or removed through their membership, or removed when anchored here.** The assignment rows themselves are unchanged and still reopen for everyone on a re-acknowledgement.
+3. **An announcement to a tag no longer reaches someone this workspace ended who still holds the tag.**
+4. **The weekly policy reminder reaches a policy's own assignees, when it has any, instead of everyone,** and reaches the people here through a membership for a policy for everyone.
+5. **Assigning an SOP to a department or to everyone says how many people here from another workspace's account were not assigned, and why.**
+6. **A named survey's results and export name respondents who work here from another workspace's account,** under this workspace's office and department, and the office and department filters find them.
+7. **The job title API sends a holder's email address only to the people who may read that person's people data.** The job title page already hid it from everyone below the manager tier.
+8. **Ask AI's company snapshot counts people and department members as Settings does.**

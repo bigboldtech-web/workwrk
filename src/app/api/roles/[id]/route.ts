@@ -5,7 +5,8 @@ import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
-import { membershipsPlacedHere } from "@/lib/access/profile-here";
+import { membershipsPlacedHere, peoplePlacedHere } from "@/lib/access/profile-here";
+import { peopleCtx, readsPeopleDataOf } from "@/lib/people/person-access.server";
 import { KPI_ORDER } from "@/lib/alignment";
 
 // GET: the full role-definition bundle: the Block-B view of a role.
@@ -53,13 +54,26 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!role) return jsonError("Role not found", 404);
 
   // All ownership areas in the org, so the boundary editor can pick any.
-  const allAreas = await prisma.ownershipArea.findMany({
-    where: { organizationId: orgId },
-    include: { ownerRole: { select: { id: true, title: true } } },
-    orderBy: { name: "asc" },
-  });
+  // The holders: the people anchored here (Role.users), and the people here
+  // through a membership whose membership holds the title, kept seats, the
+  // rule DELETE refuses by (docs/plans/workspace-status-2.md E15, step 8).
+  const [allAreas, placedThrough, ctx] = await Promise.all([
+    prisma.ownershipArea.findMany({
+      where: { organizationId: orgId },
+      include: { ownerRole: { select: { id: true, title: true } } },
+      orderBy: { name: "asc" },
+    }),
+    peoplePlacedHere(orgId, { roleIds: [id] }, "kept", { only: "membership" }),
+    peopleCtx(),
+  ]);
+  // A holder's email only to a reader of their people data (the record's
+  // rule, person-access.server.ts readsPeopleDataOf), for both kinds (the
+  // step 8 review L7): any session could read every holder's address here.
+  const emailFor = <T extends { id: string; email: string }>(p: T): T => (ctx && readsPeopleDataOf(ctx, p.id) ? p : { ...p, email: "" });
+  const users = [...role.users, ...placedThrough.map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar }))].map(emailFor);
+  const instances = role.instances.map((i) => ({ ...i, user: i.user ? emailFor(i.user) : i.user }));
 
-  return jsonSuccess({ role, allAreas });
+  return jsonSuccess({ role: { ...role, users, instances }, allAreas });
 }
 
 // PUT: Edit role

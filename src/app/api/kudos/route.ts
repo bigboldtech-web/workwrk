@@ -5,7 +5,7 @@ import { viewerFromSession } from "@/lib/access/viewer";
 import { giveKudos } from "@/lib/kudos-give";
 import { toCsv } from "@/lib/people/people-csv";
 import type { Prisma } from "@/generated/prisma";
-import { ownHere } from "@/lib/access/profile-here";
+import { idsPlacedHere, ownHere } from "@/lib/access/profile-here";
 
 /**
  * A giver or receiver as the feed shows them: a job title and a department
@@ -75,7 +75,23 @@ export async function GET(req: NextRequest) {
   else if (value) where.companyValue = value;
   if (q) where.message = { contains: q, mode: "insensitive" };
   if (person) and.push({ OR: [{ giverId: person }, { receiverId: person }] });
-  if (dept) and.push({ OR: [{ giver: { departmentId: dept } }, { receiver: { departmentId: dept } }] });
+  if (dept) {
+    // A giver or receiver in this department here: the people anchored here
+    // by their account's department, as before, and the people here through
+    // a membership by the department that membership holds, in any state (a
+    // filter of kudos already given; docs/plans/workspace-status-2.md E15,
+    // step 8). The membership half is read on its own by
+    // "OrganizationMembership_organizationId_idx", never an OR with a
+    // membership sublink in the kudos read.
+    const placedThere = await idsPlacedHere(orgId, { departmentIds: [dept] }, "any", { only: "membership" });
+    and.push({
+      OR: [
+        { giver: { departmentId: dept } },
+        { receiver: { departmentId: dept } },
+        ...(placedThere.length ? [{ giverId: { in: placedThere } }, { receiverId: { in: placedThere } }] : []),
+      ],
+    });
+  }
   const DATE = /^\d{4}-\d{2}-\d{2}$/;
   if ((fromRaw && DATE.test(fromRaw)) || (toRaw && DATE.test(toRaw))) {
     where.createdAt = {

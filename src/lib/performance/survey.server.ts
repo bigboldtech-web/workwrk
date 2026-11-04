@@ -10,9 +10,9 @@
 //
 // Server only.
 
-import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { seatedHereAmong } from "@/lib/access/seated-here";
+import { peopleHereAmong, seatedHereAmong } from "@/lib/access/seated-here";
+import { AUDIENCE_REACH, countPlacedHere, idsPlacedHere, placementsHere, type PlacedBy } from "@/lib/access/profile-here";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getUserTagIds, resolveUserIdsByTags } from "@/lib/user-tags";
 import { canManageSurvey, inSurveyAudience, surveyOpenNow } from "@/lib/people/survey-audience";
@@ -31,16 +31,16 @@ export interface SurveyCtx {
 export async function surveyCtx(session: unknown): Promise<SurveyCtx | null> {
   const v = await viewerFromSession();
   if (!v || v.orgRole === "GUEST") return null;
-  const [me, tagIds] = await Promise.all([
-    prisma.user.findUnique({ where: { id: v.userId }, select: { officeId: true, departmentId: true } }),
-    getUserTagIds(v.organizationId, v.userId),
-  ]);
+  const tagIds = await getUserTagIds(v.organizationId, v.userId);
   const { sessionOnLegacyManagerTier } = await import("@/lib/page-gates");
   return {
     userId: v.userId,
     organizationId: v.organizationId,
-    officeId: me?.officeId ?? null,
-    departmentId: me?.departmentId ?? null,
+    // Their office and department at their seat here (the viewer reads them
+    // there: the membership's for someone here through one), never the
+    // account's (docs/plans/workspace-status-2.md E15, step 8).
+    officeId: v.officeId ?? null,
+    departmentId: v.departmentId ?? null,
     tagIds,
     peopleTeamOrAdmin: v.orgRole === "OWNER" || v.orgRole === "ADMIN" || v.peopleTeam === true,
     legacyManagerTier: await sessionOnLegacyManagerTier(session),
@@ -60,23 +60,50 @@ export function surveyFaces(ctx: SurveyCtx, s: SurveyRow, hasResponded: boolean)
 }
 
 /**
- * The users an audience reaches (active, not removed). People named by id
- * (picked by name, or a tag's holders) are read at the seat each holds here
- * (docs/plans/workspace-status-2.md E12, step 6): anchored here and not
- * removed, as before, or here through a membership whose seat here is live,
- * since what the audience is sent belongs to the account. An audience by
- * office, department or the whole workspace reads the people anchored here
- * until step 8 (E15) reads placements for both kinds.
+ * The users an audience reaches, by id. People named by id (picked by name,
+ * or a tag's holders) are read at the seat each holds here
+ * (docs/plans/workspace-status-2.md E12, step 6); an audience by office,
+ * department or the whole workspace reads everyone placed there here, the
+ * people anchored here by their account's placement and the people here
+ * through a membership by the placement that membership holds, two halves
+ * (E15, step 8; before, the people anchored here only). Both at
+ * AUDIENCE_REACH: anchored here and not removed, as before, or here through
+ * a membership whose seat here is live, since what the audience is sent
+ * belongs to the account.
  */
-export async function audienceUserWhere(organizationId: string, s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">): Promise<Prisma.UserWhereInput> {
-  const named = async (ids: string[]): Promise<Prisma.UserWhereInput> => ({ id: { in: [...(await seatedHereAmong(organizationId, ids, { anchored: "kept", membership: "live" }))] } });
-  if (s.audienceType === "USERS") return named(s.userIds);
-  if (s.audienceType === "TAGS") return named(await resolveUserIdsByTags(organizationId, s.tagIds));
-  const where: Prisma.UserWhereInput = { organizationId, deletedAt: null };
-  if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
-  else if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
-  else if (s.audienceType !== "ALL") where.id = { in: [] };
-  return where;
+export async function surveyAudienceIds(
+  organizationId: string,
+  s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">,
+  among?: readonly string[],
+): Promise<string[]> {
+  const spec = await audienceSpec(organizationId, s);
+  if (!spec) return [];
+  if ("named" in spec) {
+    const ids = among ? spec.named.filter((id) => among.includes(id)) : spec.named;
+    return [...(await seatedHereAmong(organizationId, ids, AUDIENCE_REACH))];
+  }
+  return idsPlacedHere(organizationId, spec.placed, AUDIENCE_REACH, among ? { among } : {});
+}
+
+/** How many surveyAudienceIds would answer: a count per half for a placed audience, never a row per person (the step 8 review L2). */
+async function surveyAudienceCount(organizationId: string, s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">): Promise<number> {
+  const spec = await audienceSpec(organizationId, s);
+  if (!spec) return 0;
+  if ("named" in spec) return (await seatedHereAmong(organizationId, spec.named, AUDIENCE_REACH)).size;
+  return countPlacedHere(organizationId, spec.placed, AUDIENCE_REACH);
+}
+
+/** Who a survey names: people by id (picked by name, a tag's holders), or a placement (offices, departments, everyone); null for nobody. */
+async function audienceSpec(
+  organizationId: string,
+  s: Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">,
+): Promise<{ named: string[] } | { placed: PlacedBy | "everyone" } | null> {
+  if (s.audienceType === "USERS") return { named: s.userIds };
+  if (s.audienceType === "TAGS") return { named: await resolveUserIdsByTags(organizationId, s.tagIds) };
+  if (s.audienceType === "OFFICES") return { placed: { officeIds: s.officeIds } };
+  if (s.audienceType === "DEPARTMENTS") return { placed: { departmentIds: s.departmentIds } };
+  if (s.audienceType === "ALL") return { placed: "everyone" };
+  return null;
 }
 
 /**
@@ -106,18 +133,70 @@ export function surveyAudienceStatsFrom(counts: { currentAudience: number; respo
  * list and the survey page never disagree.
  */
 export async function surveyAudienceStats(organizationId: string, s: { id: string } & Pick<SurveyRow, "audienceType" | "officeIds" | "departmentIds" | "userIds" | "tagIds">) {
-  const where = await audienceUserWhere(organizationId, s);
+  // The audience is counted (two counts for a placed audience, the step 8
+  // review L2: the survey list runs this once per row), and only the
+  // respondents are checked against it by id.
   const [currentAudience, responders] = await Promise.all([
-    prisma.user.count({ where }),
+    surveyAudienceCount(organizationId, s),
     prisma.surveyResponse.findMany({ where: { surveyId: s.id }, select: { userId: true } }),
   ]);
   const responderIds = [...new Set(responders.map((r) => r.userId))];
   // A respondent whose user row is gone entirely is not in the audience
   // now, so they count once as someone the survey reached.
-  const respondersStillInAudience = responderIds.length
-    ? await prisma.user.count({ where: { AND: [where, { id: { in: responderIds } }] } })
-    : 0;
+  const respondersStillInAudience = responderIds.length ? (await surveyAudienceIds(organizationId, s, responderIds)).length : 0;
   return surveyAudienceStatsFrom({ currentAudience, responses: responderIds.length, respondersStillInAudience });
+}
+
+/**
+ * The people in a named survey's results segment (an office, a department,
+ * or both) at their seat here: the people anchored here by their account's
+ * placement and the people here through a membership by the one their
+ * membership holds, not removed (the rule the segment read the people
+ * anchored here by before). docs/plans/workspace-status-2.md, the step 8
+ * review L6.
+ */
+export async function surveySegmentIds(organizationId: string, seg: { officeId?: string | null; departmentId?: string | null }): Promise<string[]> {
+  const parts: string[][] = [];
+  if (seg.officeId) parts.push(await idsPlacedHere(organizationId, { officeIds: [seg.officeId] }, "kept"));
+  if (seg.departmentId) parts.push(await idsPlacedHere(organizationId, { departmentIds: [seg.departmentId] }, "kept"));
+  if (parts.length === 0) return [];
+  return parts.reduce((a, b) => a.filter((id) => b.includes(id)));
+}
+
+/** Who answered a named survey, as its results and export name them. */
+export interface SurveyRespondentHere {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  office: { id: string; name: string } | null;
+  department: { id: string; name: string } | null;
+}
+
+/**
+ * A named survey's respondents at their seat here, in any state (an answer
+ * stays after its author leaves, and is named as before), each with the
+ * office and department their seat here holds, this workspace's own only.
+ * Before, the people anchored here only: an answer from someone here
+ * through a membership showed with no name (the step 8 review L6).
+ */
+export async function surveyRespondentsHere(organizationId: string, ids: readonly string[]): Promise<Map<string, SurveyRespondentHere>> {
+  const here = await peopleHereAmong(organizationId, ids, "any");
+  const rows = await placementsHere(organizationId, [...here.values()].map((p) => p.seat));
+  const out = new Map<string, SurveyRespondentHere>();
+  for (const p of here.values()) {
+    const office = p.seat.officeId ? rows.office.get(p.seat.officeId) : undefined;
+    const department = p.seat.departmentId ? rows.department.get(p.seat.departmentId) : undefined;
+    out.set(p.id, {
+      id: p.id,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      email: p.email,
+      office: office ? { id: office.id, name: office.name } : null,
+      department: department ? { id: department.id, name: department.name } : null,
+    });
+  }
+  return out;
 }
 
 /** "Everyone", "Engineering", "12 people" for a survey's audience. */
@@ -150,8 +229,8 @@ export async function notifySurveyAudience(
   organizationId: string,
   opts: { onlyUnanswered?: boolean; excludeUserId?: string } = {},
 ): Promise<number> {
-  const where = await audienceUserWhere(organizationId, survey);
-  let audience = await prisma.user.findMany({ where, select: { id: true, email: true, firstName: true } });
+  const ids = await surveyAudienceIds(organizationId, survey);
+  let audience = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, email: true, firstName: true } }) : [];
   if (opts.excludeUserId) audience = audience.filter((u) => u.id !== opts.excludeUserId);
   const link = `/surveys/${survey.id}`;
   if (opts.onlyUnanswered) {

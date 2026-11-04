@@ -1,6 +1,7 @@
 // GET  /api/departments: every Member (never a Guest). Each row carries the
 //      head, the parent, the colour, `_count.members` over CURRENT people
-//      only, `_count.roles` and `removedMembers` (removed people never block
+//      only (anchored here or here through a membership placed in it),
+//      `_count.roles` and `removedMembers` (removed people never block
 //      a delete; the drawer says they will be taken out of the department).
 //      A bare array, as every caller reads it.
 //      With ?withAccess=1 a caller who may write departments also gets
@@ -15,6 +16,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { personHere } from "@/lib/access/seated-here";
+import { membershipPlacedCounts } from "@/lib/access/profile-here";
 import { viewerFromSession } from "@/lib/access/viewer";
 import { getSessionOrFail, getOrgId, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
@@ -46,8 +48,18 @@ export async function GET(req: NextRequest) {
     _count: { _all: true },
   });
   const removedBy = new Map(removed.map((r) => [r.departmentId, r._count._all]));
+  // `_count.members` counts everyone placed in it here who is not removed:
+  // the people anchored here (Department.members) and the people here
+  // through a membership whose membership holds it, kept seats, the rule
+  // DELETE /api/departments/[id] refuses by (docs/plans/workspace-status-2.md
+  // E15, step 8). Before, the people anchored here only, so a department only
+  // Pat held was offered for a Delete that then refused. `removedMembers`
+  // stays the people anchored here: theirs is the account's key the delete
+  // clears; a removed membership's copy has none and is never shown.
+  const placedThrough = await membershipPlacedCounts(orgId, "departmentId", "kept");
   const rows = departments.map((d) => ({
     ...d,
+    _count: { ...d._count, members: d._count.members + (placedThrough.get(d.id) ?? 0) },
     hue: departmentHue(d.color).index,
     removedMembers: removedBy.get(d.id) ?? 0,
   }));

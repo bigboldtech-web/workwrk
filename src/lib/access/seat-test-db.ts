@@ -91,6 +91,17 @@
 // answered as Postgres answers it; and a User's updatedAt on a create
 // (`@updatedAt`; never on a seed, whose rows say what they hold), so the
 // resource SCIM's POST answers carries its stamp.
+//
+// docs/plans/workspace-status-2.md step 8 (audiences and counts by
+// placement): a goal's audience rows (`assignees`), a policy's assignments
+// and acknowledgements, a KRA's KPIs, a survey's responses and a
+// department's job titles as list
+// relations, and an ownership area's owning job title and an SOP
+// assignment's SOP and person, so a goal's visibility, a policy's panel,
+// the Settings lists, a boundary request and SOP compliance are answered as
+// Postgres answers them; and (the step 8 review) a tag assignment's tag, a
+// policy's workspace and an assignment's policy, for the tag audiences and
+// the policy reminder doors.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -115,6 +126,16 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   spaceMember: { user: ["user", "userId"] },
   userSkill: { user: ["user", "userId"] },
   idea: { submitter: ["user", "submitterId"], reviewer: ["user", "reviewerId"] },
+  // Step 8: an ownership area's owning job title (a boundary request reaches
+  // its holders), and an SOP assignment's SOP and person (the compliance page).
+  ownershipArea: { ownerRole: ["role", "ownerRoleId"] },
+  sOPAssignment: { sop: ["sOP", "sopId"], user: ["user", "userId"] },
+  // The step 8 review: a tag assignment's tag (a tag audience reads only
+  // tags not archived), a policy's workspace and an assignment's policy (the
+  // reminder doors filter by them).
+  tagAssignment: { tag: ["tag", "tagId"] },
+  policy: { organization: ["organization", "organizationId"] },
+  policyAssignment: { policy: ["policy", "policyId"] },
 };
 
 /** A model's list relations (one to many): name to [table, the key on the other table that names this row]. */
@@ -142,10 +163,20 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   conversation: { members: ["conversationMember", "conversationId"] },
   meeting: { attendees: ["meetingAttendee", "meetingId"] },
   // A department's, an office's and a job title's people and parts, for the
-  // Settings deletes' counts (workspace-status-2.md, the step 5 review M2).
-  department: { members: ["user", "departmentId"], subDepartments: ["department", "parentId"] },
+  // Settings deletes' counts (workspace-status-2.md, the step 5 review M2),
+  // and (step 8) a department's job titles, as the Settings list counts them.
+  department: { members: ["user", "departmentId"], subDepartments: ["department", "parentId"], roles: ["role", "departmentId"] },
   office: { members: ["user", "officeId"] },
-  role: { users: ["user", "roleId"], kraTemplates: ["kRA", "roleId"] },
+  role: { users: ["user", "roleId"], kraTemplates: ["kRA", "roleId"], instances: ["roleInstance", "roleId"] },
+  // workspace-status-2.md step 8 (audiences by placement): a goal's audience
+  // rows, a policy's assignments and acknowledgements, a KRA's KPIs, a
+  // survey's responses (and above, a job title's instances).
+  oKR: { assignees: ["goalAssignee", "okrId"] },
+  policy: { assignments: ["policyAssignment", "policyId"], acknowledgments: ["policyAcknowledgment", "policyId"] },
+  kRA: { kpis: ["kPI", "kraId"] },
+  pulseSurvey: { responses: ["surveyResponse", "surveyId"] },
+  // The step 8 review: a review cycle's reviews (its launch refuses a cycle that has them).
+  reviewCycle: { reviews: ["review", "cycleId"] },
 };
 
 /** The filters a list relation takes in a `where`. */

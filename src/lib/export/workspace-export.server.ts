@@ -42,7 +42,7 @@
 // Server-only.
 
 import { prisma } from "@/lib/prisma";
-import { ownHere } from "@/lib/access/profile-here";
+import { membershipPlacedCounts, ownHere } from "@/lib/access/profile-here";
 import { getBoardStatuses, makeStatusLookup } from "@/lib/board-items-shared";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { docToMarkdown } from "@/lib/docs/content-markdown";
@@ -183,9 +183,16 @@ export async function prepareWorkspaceExport(
         createdAt: true, deletedAt: true,
       },
     }),
+    // Each department's member count: the people anchored here placed in it
+    // (Department.members, as before) and the people here through a
+    // membership whose membership holds it, kept seats, added below
+    // (docs/plans/workspace-status-2.md E15, step 8).
     prisma.department.findMany({
       where: { organizationId: orgId },
       select: { id: true, name: true, _count: { select: { members: true } } },
+    }).then(async (rows) => {
+      const through = await membershipPlacedCounts(orgId, "departmentId", "kept");
+      return rows.map((d) => ({ ...d, _count: { members: d._count.members + (through.get(d.id) ?? 0) } }));
     }),
     prisma.task.findMany({
       where: { organizationId: orgId },

@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { settingsGateAllows, SettingsDenied } from "@/components/settings/settings-gate";
 import { sessionIsWorkspaceAdmin } from "@/lib/access/workspace-admin";
 import { roleCountsFor } from "@/lib/access/role-counts";
+import { anchoredHereWhere, membershipHereWhere } from "@/lib/access/seated-here";
 import { StructureClient } from "./structure-client";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,17 @@ export default async function StructurePage() {
   if (!(await settingsGateAllows("structure"))) return <SettingsDenied page="structure" />;
   const orgId = u.organizationId;
 
-  const [counts, unlinked] = await Promise.all([
+  // Everyone live here with no Reports to here, two halves
+  // (docs/plans/workspace-status-2.md E15, step 8): the people anchored here
+  // by their account's line, and the people here through a live membership
+  // by the line that membership holds (E1), never the account's, which is
+  // another workspace's. Before, the people anchored here only.
+  const [counts, unlinkedAnchored, unlinkedThrough] = await Promise.all([
     roleCountsFor(orgId),
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null, status: { not: "INACTIVE" }, managerId: null } }),
+    prisma.user.count({ where: { ...anchoredHereWhere(orgId, "live"), managerId: null } }),
+    prisma.organizationMembership.count({ where: { ...membershipHereWhere(orgId, "live"), managerId: null } }),
   ]);
+  const unlinked = unlinkedAnchored + unlinkedThrough;
 
   return <StructureClient counts={counts} unlinked={unlinked} canEdit={sessionIsWorkspaceAdmin(session)} />;
 }

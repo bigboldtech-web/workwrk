@@ -14,7 +14,7 @@ import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, sweepMembershipSelect, taskPeople } from "@/lib/reminder-sweep";
 import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead, type DigestManager } from "@/lib/access/digest-recipients";
-import { membershipHereWhere } from "@/lib/access/seated-here";
+import { everyoneHereIds, membershipHereWhere, seatedHereAmong } from "@/lib/access/seated-here";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -572,15 +572,25 @@ async function handle(req: NextRequest) {
     // Fan out across policies, and within each policy fan out across users.
     const perPolicyCounts = await Promise.all(
       policies.map(async (p) => {
-        const [allUsers, ackRows] = await Promise.all([
-          prisma.user.findMany({
-            where: { organizationId: p.organizationId, ...LIVE_PERSON },
-            select: { id: true, email: true },
-          }),
+        // The policy's audience as its dashboard and ledger read it (the
+        // step 8 review L1): its assignees when it has any, else everyone
+        // here, each at their seat, the two halves
+        // (docs/plans/workspace-status-2.md E15). Live seats, the rule this
+        // reminder had for the people anchored here (LIVE_PERSON) and the
+        // one every audience needs of a membership person, so nobody this
+        // workspace ended is emailed. Before, everyone anchored here, even
+        // for a policy assigned to three people, and nobody here through a
+        // membership.
+        const [assigned, ackRows] = await Promise.all([
+          prisma.policyAssignment.findMany({ where: { policyId: p.id }, select: { userId: true } }),
           prisma.policyAcknowledgment.findMany({
             where: { policyId: p.id }, select: { userId: true },
           }),
         ]);
+        const audience = assigned.length
+          ? [...(await seatedHereAmong(p.organizationId, assigned.map((a) => a.userId), "live"))]
+          : await everyoneHereIds(p.organizationId, "live");
+        const allUsers = audience.length ? await prisma.user.findMany({ where: { id: { in: audience } }, select: { id: true, email: true } }) : [];
         const acked = new Set(ackRows.map((a) => a.userId));
         const pending = allUsers.filter((u) => !acked.has(u.id));
         const results = await Promise.all(

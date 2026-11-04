@@ -3,7 +3,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
-import { resolveUserIdsByTags } from "@/lib/user-tags";
+import { surveyAudienceIds } from "@/lib/performance/survey.server";
 import { cronRefusal } from "@/lib/cron-auth";
 import { cronJob, cronResult } from "@/lib/cron-result";
 
@@ -39,24 +39,6 @@ function nextCloseAt(from: Date, frequency: string | null): Date | null {
     case "QUARTERLY": d.setUTCMonth(d.getUTCMonth() + 3); return d;
     default: return null;
   }
-}
-
-async function resolveAudienceUserIds(s: {
-  organizationId: string;
-  audienceType: string;
-  officeIds: string[];
-  departmentIds: string[];
-  userIds: string[];
-  tagIds: string[];
-}): Promise<string[]> {
-  // Tags are polymorphic (no User relation), so resolve them separately.
-  if (s.audienceType === "TAGS") return resolveUserIdsByTags(s.organizationId, s.tagIds);
-  const where: Prisma.UserWhereInput = { organizationId: s.organizationId, deletedAt: null };
-  if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
-  else if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
-  else if (s.audienceType === "USERS") where.id = { in: s.userIds };
-  const rows = await prisma.user.findMany({ where, select: { id: true } });
-  return rows.map((r) => r.id);
 }
 
 async function rotateOne(survey: {
@@ -110,7 +92,13 @@ async function rotateOne(survey: {
 
   // Notify the audience of the new cycle. Mirrors POST /api/pulse-surveys
   // behaviour: in-app notification row + email (queued, respects prefs).
-  const audienceIds = await resolveAudienceUserIds(survey);
+  // The one audience reader every survey door uses (survey.server.ts
+  // surveyAudienceIds, docs/plans/workspace-status-2.md E15, step 8 and its
+  // review M1): by name, by tag, by office, department or everyone, the two
+  // halves at AUDIENCE_REACH. Its own anchored-only reader left out the
+  // people here through a membership, and told a tag's holders this
+  // workspace had ended.
+  const audienceIds = await surveyAudienceIds(survey.organizationId, survey);
   if (audienceIds.length > 0) {
     const audience = await prisma.user.findMany({
       where: { id: { in: audienceIds } },
@@ -165,7 +153,8 @@ async function sendReminders(survey: {
   organizationId: string;
   closesAt: Date | null;
 }): Promise<number> {
-  const audienceIds = await resolveAudienceUserIds(survey);
+  // The same reader as the new round's notice above (the step 8 review M1).
+  const audienceIds = await surveyAudienceIds(survey.organizationId, survey);
   if (audienceIds.length === 0) return 0;
 
   const responded = await prisma.surveyResponse.findMany({

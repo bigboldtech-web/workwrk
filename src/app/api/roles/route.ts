@@ -6,6 +6,7 @@ import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADER
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isAssignableSeniority } from "@/lib/people/seniority";
 import type { AccessLevel } from "@/generated/prisma";
+import { membershipPlacedCounts } from "@/lib/access/profile-here";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -62,8 +63,15 @@ export async function GET(req: NextRequest) {
     weightByRole.set(kra.roleId, (weightByRole.get(kra.roleId) ?? 0) + w);
   }
 
+  // `_count.users` counts the people here through a membership whose
+  // membership holds the title too (kept seats), as DELETE /api/roles/[id]
+  // refuses by (docs/plans/workspace-status-2.md E15, step 8), so the list
+  // never offers a Delete that then refuses. `removedHolders` stays the
+  // people anchored here (their history keeps the title on the account).
+  const placedThrough = await membershipPlacedCounts(orgId, "roleId", "kept");
   const rows = roles.map((r) => ({
     ...r,
+    _count: { ...r._count, users: r._count.users + (placedThrough.get(r.id) ?? 0) },
     // Role.level is SENIORITY (display only, access 2.1); the alias is the
     // name every new reader uses until the column is renamed at step 8.
     seniority: r.level,

@@ -47,6 +47,7 @@ import { teamsFactsAndCounts, EMPTY_TEAMS_COUNTS, type TeamsCounts, type TeamsVi
 import { levelHeldIn } from "@/lib/access/acting-workspace";
 import { inboxAutoClearOn, trashPurgeOn } from "@/lib/purge-jobs";
 import { billingConfigured } from "@/lib/billing-live";
+import { placementHereOf } from "@/lib/access/profile-here";
 
 export const dynamic = "force-dynamic";
 
@@ -240,8 +241,11 @@ const NO_TEAMS_FACTS: TeamsViewerFacts = { hasReports: false, candorInvited: fal
 
 async function countsAndFacts(userId: string, orgId: string): Promise<{ counts: BootCounts; teams: TeamsViewerFacts }> {
   const now = new Date();
-  const teamsPass = prisma.user
-    .findUnique({ where: { id: userId }, select: { officeId: true, departmentId: true } })
+  // The Candor and survey facts by the office and department the viewer's
+  // seat here holds: the membership's for someone here through one, never
+  // the account's, which is another workspace's (docs/plans/workspace-status-2.md
+  // E15, step 8).
+  const teamsPass = placementHereOf(orgId, userId)
     .then((me) => teamsFactsAndCounts(userId, orgId, { officeId: me?.officeId ?? null, departmentId: me?.departmentId ?? null }, now))
     .catch((e: unknown) => {
       console.error("boot counts: teams", e);

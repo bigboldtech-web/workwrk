@@ -6,7 +6,8 @@ import { policyAssignedTemplate } from "@/lib/email-templates";
 import { inScope, personScope } from "@/lib/process-scope";
 import { parseProcessSettings, defaultAckDueDate } from "@/lib/process-settings";
 import { employedAmong } from "@/lib/people/employed.server";
-import { ownHere } from "@/lib/access/profile-here";
+import { idsPlacedHere, placementsHere } from "@/lib/access/profile-here";
+import { peopleHereAmong } from "@/lib/access/seated-here";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SettingsBlob = Record<string, any>;
@@ -25,12 +26,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const assignments = (await prisma.policyAssignment.findMany({ where: { policyId: id }, orderBy: [{ status: "asc" }, { createdAt: "desc" }] }))
     .filter((a) => inScope(scope, a.userId));
-  const users = await prisma.user.findMany({
-    where: { id: { in: assignments.map((a) => a.userId) } },
-    // With its workspace: named only when this one's (D18; the final review, security M1).
-    select: { id: true, firstName: true, lastName: true, email: true, avatar: true, department: { select: { name: true, organizationId: true } } },
-  });
-  const byId = new Map(users.map((u) => [u.id, u]));
+  // Each person at their seat here, in any state (a row stays on the list
+  // after they leave), named by the department their seat here holds: the
+  // membership's for someone here through one (docs/plans/workspace-status-2.md
+  // E15, step 8). Before, the account's, so they showed no department here.
+  const byId = await peopleHereAmong(orgId, assignments.map((a) => a.userId), "any");
+  const departments = (await placementsHere(orgId, [...byId.values()].map((u) => u.seat))).department;
 
   return jsonSuccess({
     assignments: assignments.map((a) => {
@@ -45,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         name: u ? `${u.firstName} ${u.lastName}` : "Unknown",
         email: u?.email ?? null,
         avatar: u?.avatar ?? null,
-        department: ownHere(u?.department, orgId)?.name ?? null,
+        department: (u?.seat.departmentId ? departments.get(u.seat.departmentId)?.name : null) ?? null,
       };
     }),
   });
@@ -76,14 +77,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // The people named are kept only while they can still be given work here:
   // never someone deactivated or removed, never an id from another workspace.
   let resolved: string[] = Array.isArray(userIds) ? await employedAmong(orgId, userIds) : [];
+  // By department or everyone: everyone placed there here who can sign in
+  // (on leave or on probation included), never someone deactivated or
+  // removed, the two halves (docs/plans/workspace-status-2.md E15, step 8):
+  // the people anchored here by their account's department, and the people
+  // here through a membership by the department that membership holds,
+  // while that seat is live. Before, the people anchored here only, so B's
+  // mandatory policy for Engineering never reached Pat, placed there on her
+  // B membership, and B's compliance list never showed her.
   if (typeof departmentId === "string" && departmentId) {
-    // Everyone in it who can sign in (on leave or on probation included), never someone removed.
-    const deptUsers = await prisma.user.findMany({ where: { departmentId, organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
-    resolved = [...new Set([...resolved, ...deptUsers.map((u) => u.id)])];
+    resolved = [...new Set([...resolved, ...(await idsPlacedHere(orgId, { departmentIds: [departmentId] }, "live"))])];
   }
   if (all === true) {
-    const allUsers = await prisma.user.findMany({ where: { organizationId: orgId, status: { not: "INACTIVE" }, deletedAt: null }, select: { id: true } });
-    resolved = [...new Set([...resolved, ...allUsers.map((u) => u.id)])];
+    resolved = [...new Set([...resolved, ...(await idsPlacedHere(orgId, "everyone", "live"))])];
   }
   if (resolved.length === 0) {
     if (Array.isArray(userIds) && userIds.length > 0 && !departmentId && all !== true) {

@@ -9,6 +9,8 @@ import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-a
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
 import { reportsHereOf } from "@/lib/access/acting-workspace";
+import { countPeopleHere } from "@/lib/access/seated-here";
+import { membershipPlacedCounts } from "@/lib/access/profile-here";
 
 // GET: Load conversation history for persistent context
 export async function GET(req: NextRequest) {
@@ -84,7 +86,11 @@ export async function POST(req: NextRequest) {
     recentActivity,
     performanceScores,
   ] = await Promise.all([
-    prisma.user.count({ where: { organizationId: orgId, deletedAt: null } }),
+    // Everyone here who is not removed, the two halves, and each
+    // department's members as Settings counts them (anchored here and not
+    // removed, plus the people here through a membership placed in it, kept
+    // seats): docs/plans/workspace-status-2.md E15, the step 8 review L4.
+    countPeopleHere({ organizationId: orgId, reach: "kept" }),
     prisma.user.findMany({
       where: { organizationId: orgId, deletedAt: null },
       select: {
@@ -99,13 +105,16 @@ export async function POST(req: NextRequest) {
       },
       take: 100,
     }),
-    prisma.department.findMany({
-      where: { organizationId: orgId },
-      include: {
-        head: { select: { firstName: true, lastName: true } },
-        _count: { select: { members: true } },
-      },
-    }),
+    Promise.all([
+      prisma.department.findMany({
+        where: { organizationId: orgId },
+        include: {
+          head: { select: { firstName: true, lastName: true } },
+          _count: { select: { members: { where: { deletedAt: null } } } },
+        },
+      }),
+      membershipPlacedCounts(orgId, "departmentId", "kept"),
+    ]).then(([rows, through]) => rows.map((d) => ({ ...d, _count: { members: d._count.members + (through.get(d.id) ?? 0) } }))),
     prisma.kPIRecord.findMany({
       where: { kpi: { organizationId: orgId } },
       include: {
