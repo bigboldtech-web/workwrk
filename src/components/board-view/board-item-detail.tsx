@@ -1490,6 +1490,21 @@ function TitleField({
   );
 }
 
+/** Whether the description rests as its rendered body: only while it is not
+ *  being edited and has something to render. An empty one shows the editor. */
+export function descriptionRestsAsBody(editing: boolean, value: string): boolean {
+  return !editing && value.trim().length > 0;
+}
+
+/** How each event moves the description in and out of editing. Opening it,
+ *  a click into the box (focus) and a keystroke all mean it is being edited,
+ *  so an empty description that the first letter makes non-empty stays the
+ *  editor instead of swapping to the rendered body under the person's cursor.
+ *  Leaving it (blur) and Esc put it back to rest. */
+export function descriptionEditingAfter(event: "open" | "focus" | "type" | "blur" | "escape"): boolean {
+  return event === "open" || event === "focus" || event === "type";
+}
+
 function DescriptionField({
   item,
   canEdit,
@@ -1571,7 +1586,7 @@ function DescriptionField({
   // It rests only when there is something to render. An empty description
   // shows the editor, because a blank rounded box with a toolbar is the
   // invitation to write one.
-  if (!editing && value.trim()) {
+  if (descriptionRestsAsBody(editing, value)) {
     return (
       <div
         role="button"
@@ -1581,12 +1596,12 @@ function DescriptionField({
           // A link inside the body is a link. Only a click on the prose
           // itself opens the editor.
           if ((e.target as HTMLElement).closest("a")) return;
-          setEditing(true);
+          setEditing(descriptionEditingAfter("open"));
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setEditing(true);
+            setEditing(descriptionEditingAfter("open"));
           }
         }}
         className="w-full cursor-text rounded-md border border-transparent px-3 py-2 text-start outline-none transition-colors hover:border-line hover:bg-hover focus-visible:border-brand focus-visible:shadow-[0_0_0_3px_var(--os-focus-halo)]"
@@ -1596,15 +1611,22 @@ function DescriptionField({
     );
   }
 
+  // An empty description shows this editor without `editing` set, so the
+  // field must mark itself as being edited the moment it is used: focus (a
+  // click into the box) and the first keystroke both set it. Without this the
+  // first letter made `value.trim()` true while `editing` was still false,
+  // the branch above swapped the textarea for the rendered body, and the
+  // person was thrown out of the box after one letter.
   return (
     <div
+      onFocus={() => setEditing(descriptionEditingAfter("focus"))}
       onKeyDown={(e) => {
         // Esc leaves the field without closing the whole drawer, and it
         // COMMITS rather than reverts: words a person typed are theirs.
         if (e.key === "Escape") {
           e.stopPropagation();
           commit();
-          setEditing(false);
+          setEditing(descriptionEditingAfter("escape"));
         }
       }}
     >
@@ -1616,13 +1638,14 @@ function DescriptionField({
         maxRows={12}
         autoFocus={editing}
         onChange={(next) => {
+          setEditing(descriptionEditingAfter("type"));
           setSave((s) => onTyped(s, next));
           onDraftChange(next);
         }}
         onBlur={() => {
           // Save first, then rest. Nothing in flight is dropped.
           commit();
-          setEditing(false);
+          setEditing(descriptionEditingAfter("blur"));
         }}
       />
     </div>
