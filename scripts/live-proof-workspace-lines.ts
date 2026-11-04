@@ -678,7 +678,7 @@ async function main() {
   const { getSolidReportTree, getEffectiveReportTree } = await import("../src/lib/reporting-line");
   const { digestManagersOf } = await import("../src/lib/access/digest-recipients");
   const { idsPlacedHere } = await import("../src/lib/access/profile-here");
-  const { ALIGNMENT_NOT_HERE } = await import("../src/lib/people/person-fields");
+  const { JOB_TITLE_SAVED_NOT_ASSIGNED } = await import("../src/lib/people/person-fields");
 
   // ── Setup: two workspaces and their people, through the routes ────
   step = "setup";
@@ -968,7 +968,7 @@ async function main() {
   const kras5 = await prisma.kRAAssignment.count({ where: { userId: pat.id } });
   const sops5 = await prisma.sOPAssignment.count({ where: { userId: pat.id } });
   check("Hana (HR, B's People team) gives Pat B's Designer job title (200): on her B membership", title5.status === 200 && (await seat(pat.id, B))?.roleId === bDesigner, title5.body);
-  check(`the new job title assigns her no KRA and no SOP, and the answer says so ("${ALIGNMENT_NOT_HERE}")`, title5.body.alignmentNote === ALIGNMENT_NOT_HERE && kras5 === 0 && sops5 === 0, { note: title5.body.alignmentNote, kras5, sops5 });
+  check(`the new job title assigns her no KRA and no SOP, and the answer says so ("${JOB_TITLE_SAVED_NOT_ASSIGNED}")`, title5.body.alignmentNote === JOB_TITLE_SAVED_NOT_ASSIGNED && kras5 === 0 && sops5 === 0, { note: title5.body.alignmentNote, kras5, sops5 });
   const leeTitle = await hana.json("PATCH", `/api/users/${lee.id}`, { roleId: bDesigner, departmentId: bDesign });
   const leeKra = await prisma.kRAAssignment.count({ where: { userId: lee.id, kraId: KRA_ID } });
   check("the same job title for Lee, anchored in B, assigns him its KRA (the rule stays for people anchored here)", leeTitle.status === 200 && leeKra === 1, { status: leeTitle.status, leeKra });
