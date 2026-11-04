@@ -103,8 +103,46 @@ describe("the check (read-only)", () => {
     const lost = cte(CHECK_BODY, "lost");
     expect(lost).toContain(`SELECT CASE WHEN j."qualifies" AND j."certain" THEN j."lineAtT0" END AS "expected"`);
     expect(lost).toMatch(/WHERE NOT j\."explained"\s+AND CASE WHEN e\."ambiguous" THEN j\."line" IS DISTINCT FROM j\."lineAtT0" ELSE j\."line" IS DISTINCT FROM e\."expected" END$/);
-    // Recoverable only when nothing may have written it on purpose, the manager stands, it was not put back before, and the row is not a moment old.
-    expect(lost).toMatch(/CASE\s+WHEN j\."touched" THEN '[^']+: set it by hand'\s+WHEN e\."ambiguous" THEN '[^']+: set it by hand'\s+WHEN e\."expected" IS NOT NULL AND j\."managerEnded" THEN '(?:[^']|'')+: set it by hand'\s+WHEN j\."putBack" THEN '[^']+: set it by hand'\s+WHEN j\."justWritten" THEN '[^']+'\s+ELSE 'recoverable'\s+END AS "state"/);
+    // Recoverable only when nothing may have written it on purpose, the manager stands, today's rules take the line (the fixes review, finding 7), it was not put back before, and the row is not a moment old.
+    expect(lost).toMatch(/CASE\s+WHEN j\."touched" THEN '[^']+: set it by hand'\s+WHEN e\."ambiguous" THEN '[^']+: set it by hand'\s+WHEN e\."expected" IS NOT NULL AND j\."managerEnded" THEN '(?:[^']|'')+: set it by hand'\s+WHEN e\."expected" IS NOT NULL\s+AND EXISTS \([\s\S]+?\)\s+THEN '(?:[^']|'')+: set it by hand'\s+WHEN e\."expected" IS NOT NULL\s+AND EXISTS \(WITH RECURSIVE [\s\S]+?\)\s+THEN '(?:[^']|'')+: set it by hand'\s+WHEN j\."putBack" THEN '[^']+: set it by hand'\s+WHEN j\."justWritten" THEN '[^']+'\s+ELSE 'recoverable'\s+END AS "state"/);
+  });
+
+  // The fixes review, finding 7: a line put back is checked against today's
+  // rules for a new line there, as managerCandidateIn and wouldLoopIn check
+  // one. Since the window, A may have made Max an Agent (rule 6 lets it, since
+  // nobody reported to him in A), or set his line to Pat: putting Pat back
+  // under him would then put her under an Agent, or close a loop.
+  it("leaves to the Admin a line whose manager is on the Agent tier at their seat there now, or that would close a loop there", () => {
+    const lost = cte(CHECK_BODY, "lost");
+    // The Agent tier at the seat there: the account's level where anchored there, the membership's role otherwise, a removed seat none.
+    expect(lost).toContain(`WHEN e."expected" IS NOT NULL
+                AND EXISTS (SELECT 1 FROM "User" x
+                              LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                             WHERE x."id" = e."expected"
+                               AND CASE WHEN x."organizationId" = j."organizationId" THEN x."accessLevel" = 'AGENT' ELSE xs."role" = 'AGENT' END)
+             THEN 'their manager there is on the Agent tier now, and an Agent can''t be anyone''s manager: set it by hand'`);
+    // The loop: from that manager up that workspace's lines as they stand (each seat's line, a removed membership never, a deleted account never), at most 64 steps, reaching the person.
+    expect(lost).toContain(`AND EXISTS (WITH RECURSIVE up ("id", "step") AS (
+                              SELECT e."expected", 0
+                              UNION
+                              SELECT n."next", up."step" + 1
+                                FROM up
+                                CROSS JOIN LATERAL (SELECT CASE WHEN x."organizationId" = j."organizationId" THEN x."managerId" ELSE xs."managerId" END AS "next"
+                                                      FROM "User" x
+                                                      LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                                                     WHERE x."id" = up."id" AND x."deletedAt" IS NULL) n
+                               WHERE up."step" < 64 AND n."next" IS NOT NULL)
+                            SELECT 1 FROM up WHERE up."id" = j."userId")
+             THEN 'putting it back would make a loop in that workspace''s reporting lines: set it by hand'`);
+    // Before the line is put back once already or a moment old, so the Admin is told the reason that will not pass.
+    expect(lost.indexOf("Agent tier now")).toBeLessThan(lost.indexOf(`WHEN j."putBack"`));
+    expect(lost.indexOf("make a loop")).toBeLessThan(lost.indexOf(`WHEN j."putBack"`));
+    // Both read the tier and the line the app reads (manager-candidate.ts managerCandidateIn and lineAbove: seatsHeldFor, isAgentOf, LOOP_WALK_CAP).
+    const candidate = read("src/lib/access/manager-candidate.ts");
+    expect(candidate).toContain(`if (isAgentOf(seat.level)) return "agent_cannot_manage";`);
+    expect(candidate).toContain("const LOOP_WALK_CAP = 64;");
+    expect(read("src/lib/access/org-role.ts")).toContain(`return accessLevel === "AGENT";`);
+    expect(read("src/lib/access/acting-workspace.ts")).toMatch(/if \(r\.organizationId === organizationId\) out\.set\(r\.id, \{ level: r\.accessLevel,[\s\S]+?if \(seatIsKept\(h\)\) out\.set\(h\.userId, \{ level: h\.role,/);
   });
 
   it("counts as written on purpose a line write recorded for that person there, a join there, an Agent's reports moved or a bulk change of managers there, by either release, never the deploy's own rows", () => {
@@ -142,8 +180,11 @@ describe("the check (read-only)", () => {
     expect(CHECK_BODY).toMatch(/a\."type" = 'reporting_line_changed'\s+AND a\."id" NOT LIKE 'deploy-%'\s+AND \(a\."oldValue" \? 'dottedManagerId' OR a\."metadata" \? 'dottedManagerIds'\)/);
     const header = (/^\/\*([\s\S]*?)\*\//.exec(CHECK)?.[1] ?? "").replace(/\s+/g, " ");
     for (const words of [
-      "NOT in the deploy manifest", "psql -v ON_ERROR_STOP=1", "again right after the redeploy",
-      "If (a), (b) or (d) lists anything, run 2026-11-03-workspace-lines-window-recovery.sql, then this again.",
+      "NOT in the deploy manifest", "psql -v ON_ERROR_STOP=1",
+      // The fixes review, findings 1 and 4: after a deploy that stopped after the file, the redeploy's T1; the recovery for (a) and (d), (b) cleared through (a).
+      "run this right after the redeploy, with the redeploy's T1",
+      "If (a) or (d) lists a recoverable row, run 2026-11-03-workspace-lines-window-recovery.sql, then this again.",
+      "List (b) has no state: the recovery clears each of its lines that (a) lists as recoverable",
       // The final review, integrity H1: read from the snapshot, so a move back after the reload hides nothing, and the check is no less complete for being run late.
       "SO THIS READS THE SNAPSHOT", "a move back after the reload included", "as complete an hour after the reload as a minute after it", "Run it at once all the same",
       `DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";`,
@@ -208,6 +249,48 @@ describe("the recovery", () => {
     for (const words of ["FROM THE SNAPSHOT AND THE FILE'S OWN RULES", "NEVER OVER A LINE WRITTEN ON PURPOSE", "a second run changes nothing", "Nothing is deleted", "The handovers (list (c)) and everything not recoverable are set by hand"]) {
       expect(header).toContain(words);
     }
+  });
+});
+
+// The fixes review of the final fixes, findings 1 and 4. The deploy
+// applies each manifest file in its own transaction and stops at the first
+// failure, so a failure of any later file (2026-11-04's check or its lock
+// waits) leaves 2026-11-03 committed and the release before serving on the
+// new lines, with no "reloaded at" notice; and T1 is read by lists (a) and
+// (e) only.
+describe("a deploy that stops after the file, and which lists read T1", () => {
+  it("says in each header that a later file's failure leaves the file committed: redeploy at once, then the check and the recovery with the redeploy's T1", () => {
+    const flat = (sql: string) => (/^\/\*([\s\S]*?)\*\//.exec(sql)?.[1] ?? "").replace(/\s+/g, " ");
+    const week = flat(read("prisma/sql/2026-11-04-week-rows-per-workspace.sql"));
+    for (const words of ["IF THIS FILE FAILS", "has ALREADY COMMITTED", "the release before is serving on the new lines", "with no \"reloaded at\" notice printed", "Fix the cause and redeploy at once", "with the redeploy's T1"]) {
+      expect(week).toContain(words);
+    }
+    // Before: "the release before keeps serving on the old keys", which was never the whole truth.
+    expect(week).not.toContain("keeps serving on the old keys");
+    const main = flat(MAIN);
+    for (const words of ["this file stays committed when a later one fails (2026-11-04-week-rows-per-workspace.sql", "or a Prisma migration", "A failure before the reload prints no \"reloaded at\" notice", "redeploy at once, then run the check and the recovery with the redeploy's T1"]) {
+      expect(main).toContain(words);
+    }
+    expect(flat(RECOVERY)).toContain("After a deploy that stopped after that file (the check's header says which), T1 is the redeploy's.");
+    const readme = read("prisma/sql/README.md");
+    const row = (file: string) => new RegExp(`^\\| \`${file.replace(/[.]/g, "\\.")}\` \\| .*$`, "m").exec(readme)?.[0] ?? "";
+    expect(row("2026-11-04-week-rows-per-workspace.sql")).toContain("**If this file fails, by that check or by its lock waits running out, `2026-11-03-workspace-lines.sql` has already committed**");
+    expect(row("2026-11-03-workspace-lines.sql")).toContain("this file has already committed and the release before is serving on the new lines; fix the cause, redeploy at once, then run the check and the recovery with the redeploy's T1");
+    expect(row("2026-11-01-membership-status.sql")).toContain("followed only by `2026-11-03-workspace-lines.sql` and `2026-11-04-week-rows-per-workspace.sql`");
+    expect(row(CHECK_FILE)).toContain("(no `state`: the recovery clears each that (a) lists as recoverable)");
+  });
+
+  it("reads T1 in (a) and (e) only, as the header says", () => {
+    const statements = CHECK_BODY.split(/;\s*\n/).map((x) => x.trim()).filter((x) => x.length > 0);
+    const list = (tag: string) => statements.find((x) => x.includes(tag)) ?? "";
+    const readsT1 = (sql: string) => /w\."t1"/.test(sql);
+    expect(readsT1(list("lost AS ("))).toBe(true);
+    expect(readsT1(list(`a."createdAt" BETWEEN w."t0" AND w."t1"`))).toBe(true);
+    expect(readsT1(list(`WHERE u."managerId" IS NOT NULL`))).toBe(false);
+    expect(readsT1(list(`AS "endedManagerId"`))).toBe(false);
+    expect(readsT1(list("missing AS ("))).toBe(false);
+    const header = (/^\/\*([\s\S]*?)\*\//.exec(CHECK)?.[1] ?? "").replace(/\s+/g, " ");
+    expect(header).toContain("T1 is read by (a), which judges the seats held at T0 or made before T1 (a T1 later than the reload counts seats the new release made as the window's), and by (e); (b), (c) and (d) never read it.");
   });
 });
 

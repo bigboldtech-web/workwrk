@@ -59,11 +59,16 @@
 // Security > Provisioning's "Let your identity provider set Reports to"
 // (org-policy.ts idpSetsReportsToOf), off by default: until an Admin turns
 // it on, every route reads the push's manager through scimManagerAsked,
-// which answers nothing asked, so POST, PUT and PATCH write nothing of the
-// line and log nothing about it, and GET still names the line here. Why
-// off: Entra's default mapping sends every person's manager, and a restart
-// of its provisioning would replace every Reports to Admins set here, which
-// they never chose to hand to the provider.
+// which answers nothing asked, so the manager a POST, PUT or PATCH sends
+// writes nothing of the line and logs nothing about it, and GET still names
+// the line here. What a push does to lines whatever the setting stays as it
+// was: a reactivation clears this workspace's lines that no longer hold (and
+// those of the seats that come back with the account in other workspaces),
+// and a deprovision hands the person's reports here up the line, each with
+// its Audit row (the fixes review, finding 2). Why off: Entra's default
+// mapping sends every person's manager, and a restart of its provisioning
+// would replace every Reports to Admins set here, which they never chose to
+// hand to the provider.
 //
 // A written line is logged as reporting_line_changed (actor the identity
 // provider) and the person's open reviews follow it in the same
@@ -307,8 +312,11 @@ async function logRefusal(
       oldValue: { managerId: r.before },
       // What the provider sent, in the Audit drawer's Diff ("Manager asked"):
       // the provider's own value, so its admin can see the mapping at work
-      // (the final review, product M4). Null for a refused clear.
-      newValue: { managerAsked: r.asked },
+      // (the final review, product M4). Null for a refused clear. The line
+      // here is on both sides, since it did not change: the Diff lists every
+      // key of either side, and with it on the old side only, "Manager id"
+      // read as cleared, in bold (the fixes review, finding 3).
+      newValue: { managerId: r.before, managerAsked: r.asked },
       metadata: { scim: true, asked: r.asked, reason: r.reason },
     },
   });

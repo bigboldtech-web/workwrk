@@ -2,8 +2,13 @@
    the read-only check of the window (docs/plans/workspace-status-2.md, the
    step 1 review H1 and the final review, integrity H1). NOT in the deploy
    manifest: run by hand, with psql -v ON_ERROR_STOP=1, as soon as the new
-   release serves; and, if a deploy stopped after that file, again right
-   after the redeploy.
+   release serves. A deploy that stopped after that file (a later file of
+   the manifest such as 2026-11-04-week-rows-per-workspace.sql, a Prisma
+   migration, the unpack, the checksum, the swap or the new release's check
+   failed) left it committed and the release before serving on the new
+   data until the next deploy: run this right after the redeploy, with the
+   redeploy's T1, so the window runs from that file to the reload that
+   ended it.
 
    THE WINDOW is from the file (T0) to the new release's first request (T1).
    In it the release before serves on the new data: its moves (the switcher,
@@ -40,7 +45,10 @@
       written on purpose since the window opened and still as written (the
       newest line write recorded for that person there names it) is not
       listed. "state" is "recoverable" for what the recovery puts back, and
-      otherwise says why it is left for that workspace's Admin.
+      otherwise says why it is left for that workspace's Admin: among the
+      reasons, a manager on the Agent tier at their seat there now, or a
+      line that would close a loop there as the lines stand now (today's
+      rules for a new line, the fixes review, finding 7).
    3. (b) Every account or membership line naming someone with no row in
       that workspace. The file left none and the new release writes none:
       each is a line carried in. The recovery clears the ones (a) marks
@@ -54,10 +62,15 @@
    6. (e) The release before's dotted-line writes in the window, from their
       Audit rows, for reference.
 
-   If (a), (b) or (d) lists anything, run
-   2026-11-03-workspace-lines-window-recovery.sql, then this again. When
-   this lists nothing recoverable and that workspace's Admin has set the
-   rest, drop the snapshot by hand, with exactly:
+   If (a) or (d) lists a recoverable row, run
+   2026-11-03-workspace-lines-window-recovery.sql, then this again. List (b)
+   has no state: the recovery clears each of its lines that (a) lists as
+   recoverable, and its other rows go to that workspace's Admin. T1 is
+   read by (a), which judges the seats held at T0 or made before T1 (a T1
+   later than the reload counts seats the new release made as the
+   window's), and by (e); (b), (c) and (d) never read it. When this lists
+   nothing recoverable and that workspace's Admin has set the rest, drop
+   the snapshot by hand, with exactly:
      DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts";
      DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted";
    No file runs those two statements. */
@@ -186,6 +199,33 @@ lost AS (
            WHEN j."touched" THEN 'a line was written for them there since the deploy: set it by hand'
            WHEN e."ambiguous" THEN 'their manager joined that workspace around the deploy: set it by hand'
            WHEN e."expected" IS NOT NULL AND j."managerEnded" THEN 'that manager''s seat there ended since the deploy: set it by hand'
+           /* Today's rules for a new line there (the fixes review, finding 7; manager-candidate.ts
+              managerCandidateIn and wouldLoopIn): never under someone on the Agent tier at their seat
+              there (the account's level where anchored there, the membership's role otherwise, a
+              removed seat none: acting-workspace.ts seatsHeldFor, org-role.ts isAgentOf), and never a
+              loop through that workspace's lines as they stand now (lineAbove: from that manager up,
+              each step the line of the seat held there, the account's where anchored there, a
+              membership not removed otherwise, stopping where the line leaves the workspace, at most
+              64 steps). Either may have come since the window: nobody reported to them there then. */
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (SELECT 1 FROM "User" x
+                              LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                             WHERE x."id" = e."expected"
+                               AND CASE WHEN x."organizationId" = j."organizationId" THEN x."accessLevel" = 'AGENT' ELSE xs."role" = 'AGENT' END)
+             THEN 'their manager there is on the Agent tier now, and an Agent can''t be anyone''s manager: set it by hand'
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (WITH RECURSIVE up ("id", "step") AS (
+                              SELECT e."expected", 0
+                              UNION
+                              SELECT n."next", up."step" + 1
+                                FROM up
+                                CROSS JOIN LATERAL (SELECT CASE WHEN x."organizationId" = j."organizationId" THEN x."managerId" ELSE xs."managerId" END AS "next"
+                                                      FROM "User" x
+                                                      LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                                                     WHERE x."id" = up."id" AND x."deletedAt" IS NULL) n
+                               WHERE up."step" < 64 AND n."next" IS NOT NULL)
+                            SELECT 1 FROM up WHERE up."id" = j."userId")
+             THEN 'putting it back would make a loop in that workspace''s reporting lines: set it by hand'
            WHEN j."putBack" THEN 'put back once already and changed since: set it by hand'
            WHEN j."justWritten" THEN 'written a moment ago: run the check again in two minutes'
            ELSE 'recoverable'

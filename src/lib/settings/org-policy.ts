@@ -144,9 +144,11 @@ export const IDP_SETS_REPORTS_TO = "identityProviderSetsReportsTo" as const;
  * Whether this workspace lets its identity provider set Reports to (Security
  * > Provisioning; docs/plans/workspace-status-2.md, the final review, product
  * H1). Off unless an Admin turned it on: until then SCIM ignores the
- * enterprise extension's manager on every push and writes nothing of the
- * line (src/lib/scim-manager.ts scimManagerAsked), so an Entra restart never
- * replaces the Reports to Admins set here. Pure; tested.
+ * enterprise extension's manager on every push, and the manager sent writes
+ * nothing of the line (src/lib/scim-manager.ts scimManagerAsked), so an
+ * Entra restart never replaces the Reports to Admins set here. A
+ * reactivation's clears and a deprovision's handover are not the provider's
+ * manager, and happen either way. Pure; tested.
  */
 export function idpSetsReportsToOf(settings: unknown): boolean {
   return rec(rec(settings).security)[IDP_SETS_REPORTS_TO] === true;

@@ -113,8 +113,16 @@ export default async function RolePage(props: {
   // attached later (or a legacy holder) silently drifts. One grouped count
   // query; the workspace renders an amber "missing N of M" note + a Seed
   // action (POST /api/users/[id]/seed-alignment) per drifted holder.
+  //
+  // The holders here through a membership are counted too (the fixes
+  // review, finding 8): none is assigned a KRA here (the step 5 review M1),
+  // but one whose account was here when this title was set (just after
+  // joining by invitation) holds its KRAs, and the template KRAs are this
+  // workspace's own, so the count is of this workspace's rows only. Before,
+  // every such row said "KRAs not assigned here", even for someone holding
+  // them all.
   const templateKraIds = role.kraTemplates.map((k) => k.id);
-  const holderIds = role.users.map((u) => u.id);
+  const holderIds = [...role.users.map((u) => u.id), ...placedThrough.map((p) => p.id)];
   const seededCounts = new Map<string, number>();
   if (templateKraIds.length > 0 && holderIds.length > 0) {
     const grouped = await prisma.kRAAssignment.groupBy({
@@ -159,10 +167,14 @@ export default async function RolePage(props: {
         missingKras: (templateKraIds.length - (seededCounts.get(u.id) ?? 0)) as number | null,
       })),
       // No KRA is assigned here to someone who works here from another
-      // workspace's account (the step 5 review M1), so their row shows no
-      // drift and offers no Seed (null: the client draws nothing for it).
+      // workspace's account (the step 5 review M1), so their row offers no
+      // Seed; it shows what they hold of this title's KRAs (`elsewhere`).
       ...placedThrough
-        .map((p) => ({ ...stripEmail({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar }), missingKras: null as number | null }))
+        .map((p) => ({
+          ...stripEmail({ id: p.id, firstName: p.firstName, lastName: p.lastName, email: p.email, avatar: p.avatar }),
+          missingKras: (templateKraIds.length - (seededCounts.get(p.id) ?? 0)) as number | null,
+          elsewhere: true,
+        }))
         .sort((a, b) => a.firstName.localeCompare(b.firstName)),
     ],
     allAreas,

@@ -5,7 +5,8 @@
    -v ON_ERROR_STOP=1, right after the check, with T1 (the new release's
    first request, UTC: the deploy log's "live: build" notice says "reloaded
    at YYYY-MM-DD HH:MM:SS UTC") written in place of <T1> in each of its three
-   statements; then run the check again.
+   statements; then run the check again. After a deploy that stopped after
+   that file (the check's header says which), T1 is the redeploy's.
 
    FROM THE SNAPSHOT AND THE FILE'S OWN RULES. The file copied every
    account's line and every dotted line into "_deploy_lines_2026_11_03_accounts"
@@ -32,7 +33,11 @@
    join there, an Agent's reports moved or a bulk change of managers there),
    whose manager there joined around the deploy or ended since, or whose
    row was written in the last two minutes, is left for that workspace's
-   Admin (the check says which). Under each person's row lock (FOR UPDATE OF
+   Admin (the check says which). So is a line today's rules would refuse as
+   a new one (the fixes review, finding 7): its manager is on the Agent tier
+   at their seat there now, or it would close a loop in that workspace's
+   lines as they stand now. Either may have come since the window, as
+   nobody then reported to that manager there. Under each person's row lock (FOR UPDATE OF
    u, the lock every move and line write of the app waits for), read again
    under it: an account written since this statement began is left for the
    next run, and a row is written only while it still holds the line read.
@@ -156,6 +161,33 @@ lost AS (
            WHEN j."touched" THEN 'a line was written for them there since the deploy: set it by hand'
            WHEN e."ambiguous" THEN 'their manager joined that workspace around the deploy: set it by hand'
            WHEN e."expected" IS NOT NULL AND j."managerEnded" THEN 'that manager''s seat there ended since the deploy: set it by hand'
+           /* Today's rules for a new line there (the fixes review, finding 7; manager-candidate.ts
+              managerCandidateIn and wouldLoopIn): never under someone on the Agent tier at their seat
+              there (the account's level where anchored there, the membership's role otherwise, a
+              removed seat none: acting-workspace.ts seatsHeldFor, org-role.ts isAgentOf), and never a
+              loop through that workspace's lines as they stand now (lineAbove: from that manager up,
+              each step the line of the seat held there, the account's where anchored there, a
+              membership not removed otherwise, stopping where the line leaves the workspace, at most
+              64 steps). Either may have come since the window: nobody reported to them there then. */
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (SELECT 1 FROM "User" x
+                              LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                             WHERE x."id" = e."expected"
+                               AND CASE WHEN x."organizationId" = j."organizationId" THEN x."accessLevel" = 'AGENT' ELSE xs."role" = 'AGENT' END)
+             THEN 'their manager there is on the Agent tier now, and an Agent can''t be anyone''s manager: set it by hand'
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (WITH RECURSIVE up ("id", "step") AS (
+                              SELECT e."expected", 0
+                              UNION
+                              SELECT n."next", up."step" + 1
+                                FROM up
+                                CROSS JOIN LATERAL (SELECT CASE WHEN x."organizationId" = j."organizationId" THEN x."managerId" ELSE xs."managerId" END AS "next"
+                                                      FROM "User" x
+                                                      LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                                                     WHERE x."id" = up."id" AND x."deletedAt" IS NULL) n
+                               WHERE up."step" < 64 AND n."next" IS NOT NULL)
+                            SELECT 1 FROM up WHERE up."id" = j."userId")
+             THEN 'putting it back would make a loop in that workspace''s reporting lines: set it by hand'
            WHEN j."putBack" THEN 'put back once already and changed since: set it by hand'
            WHEN j."justWritten" THEN 'written a moment ago: run the check again in two minutes'
            ELSE 'recoverable'
@@ -298,6 +330,33 @@ lost AS (
            WHEN j."touched" THEN 'a line was written for them there since the deploy: set it by hand'
            WHEN e."ambiguous" THEN 'their manager joined that workspace around the deploy: set it by hand'
            WHEN e."expected" IS NOT NULL AND j."managerEnded" THEN 'that manager''s seat there ended since the deploy: set it by hand'
+           /* Today's rules for a new line there (the fixes review, finding 7; manager-candidate.ts
+              managerCandidateIn and wouldLoopIn): never under someone on the Agent tier at their seat
+              there (the account's level where anchored there, the membership's role otherwise, a
+              removed seat none: acting-workspace.ts seatsHeldFor, org-role.ts isAgentOf), and never a
+              loop through that workspace's lines as they stand now (lineAbove: from that manager up,
+              each step the line of the seat held there, the account's where anchored there, a
+              membership not removed otherwise, stopping where the line leaves the workspace, at most
+              64 steps). Either may have come since the window: nobody reported to them there then. */
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (SELECT 1 FROM "User" x
+                              LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                             WHERE x."id" = e."expected"
+                               AND CASE WHEN x."organizationId" = j."organizationId" THEN x."accessLevel" = 'AGENT' ELSE xs."role" = 'AGENT' END)
+             THEN 'their manager there is on the Agent tier now, and an Agent can''t be anyone''s manager: set it by hand'
+           WHEN e."expected" IS NOT NULL
+                AND EXISTS (WITH RECURSIVE up ("id", "step") AS (
+                              SELECT e."expected", 0
+                              UNION
+                              SELECT n."next", up."step" + 1
+                                FROM up
+                                CROSS JOIN LATERAL (SELECT CASE WHEN x."organizationId" = j."organizationId" THEN x."managerId" ELSE xs."managerId" END AS "next"
+                                                      FROM "User" x
+                                                      LEFT JOIN "OrganizationMembership" xs ON xs."userId" = x."id" AND xs."organizationId" = j."organizationId" AND xs."removedAt" IS NULL
+                                                     WHERE x."id" = up."id" AND x."deletedAt" IS NULL) n
+                               WHERE up."step" < 64 AND n."next" IS NOT NULL)
+                            SELECT 1 FROM up WHERE up."id" = j."userId")
+             THEN 'putting it back would make a loop in that workspace''s reporting lines: set it by hand'
            WHEN j."putBack" THEN 'put back once already and changed since: set it by hand'
            WHEN j."justWritten" THEN 'written a moment ago: run the check again in two minutes'
            ELSE 'recoverable'

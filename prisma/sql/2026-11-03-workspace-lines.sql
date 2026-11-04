@@ -185,11 +185,16 @@
    someone writes by hand meanwhile turns their row into one to set by hand.
    T0 is in this column's comment; T1 (the reload) is taken from the deploy
    log, whose "live: build" notice says "reloaded at YYYY-MM-DD HH:MM:SS
-   UTC". A DEPLOY THAT STOPS AFTER THIS FILE (the unpack, the checksum,
-   the swap or the new release's check failed, and the build before it is
-   put back) leaves the release before this one serving on the new data, and
-   every move until the next deploy loses a line: redeploy at once, then run
-   the check and the recovery.
+   UTC". A DEPLOY THAT STOPS AFTER THIS FILE leaves the release before this
+   one serving on the new data, and every move until the next deploy loses
+   or carries a line: the deploy applies each manifest file in its own
+   transaction and stops at the first failure, so this file stays committed
+   when a later one fails (2026-11-04-week-rows-per-workspace.sql, by its
+   check or its lock waits running out), or a Prisma migration, or the
+   unpack, the checksum, the swap or the new release's check (and the build
+   before it is put back). A failure before the reload prints no "reloaded
+   at" notice. Fix the cause, redeploy at once, then run the check and the
+   recovery with the redeploy's T1.
 
    Rollback: drop the snapshot, DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_accounts"; DROP TABLE IF EXISTS "_deploy_lines_2026_11_03_dotted"; put the account lines back from their audit rows, UPDATE "User" u SET "managerId" = a."oldValue" ->> 'managerId' FROM "ActivityLog" a WHERE a."id" = 'deploy-line-cleared-' || u."id" AND u."managerId" IS NULL AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."oldValue" ->> 'managerId'); delete the dotted copies, DELETE FROM "UserDottedLine" WHERE "id" LIKE 'deploy-dotted-%'; re-insert the removed rows from their audit rows, INSERT INTO "UserDottedLine" ("id", "userId", "managerId", "organizationId", "role", "weight", "startDate", "endDate", "createdAt", "updatedAt") SELECT substr(a."id", 23), a."targetId", a."metadata" ->> 'managerId', a."organizationId", a."metadata" ->> 'note', (a."metadata" ->> 'weight')::double precision, (a."metadata" ->> 'startDate')::timestamp(3), (a."metadata" ->> 'endDate')::timestamp(3), (a."metadata" ->> 'createdAt')::timestamp(3), (now() AT TIME ZONE 'UTC') FROM "ActivityLog" a WHERE a."id" LIKE 'deploy-dotted-removed-%' AND EXISTS (SELECT 1 FROM "User" x WHERE x."id" = a."targetId") AND EXISTS (SELECT 1 FROM "User" y WHERE y."id" = a."metadata" ->> 'managerId') ON CONFLICT DO NOTHING; delete the audit rows these consumed, so a later apply writes its own, DELETE FROM "ActivityLog" WHERE "id" LIKE 'deploy-line-cleared-%' OR "id" LIKE 'deploy-dotted-removed-%'; keep the oldest row of each person and manager (a line saved in two workspaces after the deploy is two rows), DELETE FROM "UserDottedLine" d USING "UserDottedLine" e WHERE e."userId" = d."userId" AND e."managerId" = d."managerId" AND (e."createdAt", e."id") < (d."createdAt", d."id"); drop the columns, ALTER TABLE "UserDottedLine" DROP CONSTRAINT IF EXISTS "UserDottedLine_organizationId_fkey"; DROP INDEX IF EXISTS "UserDottedLine_userId_managerId_organizationId_key"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_managerId_idx"; DROP INDEX IF EXISTS "UserDottedLine_organizationId_userId_idx"; ALTER TABLE "UserDottedLine" DROP COLUMN IF EXISTS "organizationId"; ALTER TABLE "OrganizationMembership" DROP CONSTRAINT IF EXISTS "OrganizationMembership_managerId_fkey"; DROP INDEX IF EXISTS "OrganizationMembership_managerId_organizationId_idx"; ALTER TABLE "OrganizationMembership" DROP COLUMN IF EXISTS "managerId"; restore the old unique, CREATE UNIQUE INDEX IF NOT EXISTS "UserDottedLine_userId_managerId_key" ON "UserDottedLine"("userId", "managerId"). A line set in one workspace after the deploy, or moved by a swap since (a membership's manager, the account's line after a move, a dotted line saved there), goes with its column: the release before this one holds one line per account. */
 

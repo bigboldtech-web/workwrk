@@ -7,13 +7,13 @@
       table was made, so this is a guard, not a repair. If a row has none
       (a column whose NOT NULL was dropped by hand), the file stops with an
       exception naming the table and how many rows, before it changes
-      anything: the file rolls back whole, the deploy stops before the
-      build and the release before keeps serving on the old keys. Such a
-      row would be unique to nothing under the new key (NULLs are distinct
-      in a unique index), so a second week row of the same person could
-      be written beside it. Nothing is guessed and nothing is deleted:
-      give each such row its workspace by hand (the workspace of its time
-      entries, or its person's) and deploy again.
+      anything: the file rolls back whole (the old keys stay) and the
+      deploy stops before the build. Such a row would be unique to nothing
+      under the new key (NULLs are distinct in a unique index), so a second
+      week row of the same person could be written beside it. Nothing is
+      guessed and nothing is deleted: give each such row its workspace by
+      hand (the workspace of its time entries, or its person's), then
+      redeploy at once (IF THIS FILE FAILS, below).
    2. THE NEW UNIQUE KEYS, ADDED FIRST:
       "WeeklyReview_userId_organizationId_periodStart_key" on ("userId",
       "organizationId", "periodStart") and
@@ -49,6 +49,18 @@
    THE KEYS' LOCKS. Each CREATE UNIQUE INDEX holds off writes of its table
    for the length of its build (a share lock; reads go on), and each DROP
    takes its table for a moment. The tables are a row per person and week.
+
+   IF THIS FILE FAILS (its check above, or its lock waits running out
+   after the deploy's tries), the file rolls back, but
+   2026-11-03-workspace-lines.sql, before it in the manifest, has ALREADY
+   COMMITTED: the deploy applies each file in its own transaction
+   (scripts/deploy-migrations.mjs) and stops at the first failure. So the
+   release before is serving on the new lines, the window of that file is
+   open, and every move, end, restore and join it makes loses or carries a
+   line, with no "reloaded at" notice printed. Fix the cause and redeploy at
+   once; then run the window check and its recovery
+   (prisma/sql/after-deploy/2026-11-03-workspace-lines-window-check.sql and
+   ...-window-recovery.sql) with the redeploy's T1.
 
    BEFORE OR AFTER THE CODE. Either order reads: the new release looks a
    week up by the three columns, which the database answers with or without

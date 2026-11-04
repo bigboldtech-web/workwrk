@@ -63,10 +63,21 @@ async function calcKpiScore(userId: string, organizationId: string): Promise<num
   return Math.min(Math.round((avg / 120) * 100), 100);
 }
 
-async function calcManagerRating(userId: string): Promise<number | null> {
+/**
+ * The review parts read this workspace's review cycles only, as the KPI and
+ * SOP parts read its KPIs and SOPs (the final review, product M5: reviews
+ * and self-assessments are read per workspace wherever they are read; the
+ * fixes review, finding 5). A review names no workspace of its own: its
+ * cycle does. Before, Pat's completed review in client B, newer than her
+ * review in her agency A, was the manager rating in the score A's managers
+ * read on her A record, and B's peer feedback and her B self-ratings were
+ * its peer and self parts.
+ */
+async function calcManagerRating(userId: string, organizationId: string): Promise<number | null> {
   const review = await prisma.review.findFirst({
     where: {
       subjectId: userId,
+      cycle: { organizationId },
       status: "COMPLETED",
       managerRating: { not: null },
     },
@@ -80,10 +91,11 @@ async function calcManagerRating(userId: string): Promise<number | null> {
   return Math.min(Math.round(rating), 100);
 }
 
-async function calcPeerRating(userId: string): Promise<number | null> {
+async function calcPeerRating(userId: string, organizationId: string): Promise<number | null> {
   const feedback = await prisma.peerFeedback.findMany({
     where: {
       receiverId: userId,
+      review: { cycle: { organizationId } },
       status: "SUBMITTED",
       rating: { not: null },
     },
@@ -98,10 +110,11 @@ async function calcPeerRating(userId: string): Promise<number | null> {
   return Math.min(Math.round(avg), 100);
 }
 
-async function calcSelfRating(userId: string): Promise<number | null> {
+async function calcSelfRating(userId: string, organizationId: string): Promise<number | null> {
   const review = await prisma.review.findFirst({
     where: {
       subjectId: userId,
+      cycle: { organizationId },
       selfRatings: { not: undefined },
       status: { in: ["MANAGER_REVIEW", "CALIBRATION", "COMPLETED"] },
     },
@@ -220,6 +233,21 @@ export async function calculatePerformanceScore(
   organizationId: string
 ): Promise<{ score: number | null; breakdown: ScoreBreakdown }> {
   const weights = await getOrgWeights(organizationId);
+  // THE WORKSPACE THE SCORE IS READ IN (the fixes review, finding 5). A
+  // person holds one score row a month (unique by person and period), read
+  // only by the workspace it names (getLatestScore, getScoreHistory and the
+  // other reads filter by it), and a record shows it only where the person
+  // is anchored. So it is the score of the workspace the account is
+  // anchored to, and only that workspace writes it. A recalculation asked
+  // from another workspace (a kudos in client B for Pat, anchored at her
+  // agency A) writes nothing: before, it wrote B's parts onto her A row
+  // (B's KPI, SOP and review parts, none of them hers, so her score lost
+  // them), or deleted that row when nothing was left. A's next
+  // recalculation of her keeps it current.
+  const anchored = await prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
+  if (anchored?.organizationId !== organizationId) {
+    return { score: null, breakdown: { kpiScore: null, managerRating: null, peerRating: null, selfRating: null, sopCompliance: null, kudosBonus: 0, weights } };
+  }
   // The month this row is (the server's month, as it always was). The goal
   // part reads the periods BELONGING to it, never "the current period"
   // (docs/plans/recurring-goals.md G1), so at 01:00 IST on 1 November a UTC
@@ -229,9 +257,9 @@ export async function calculatePerformanceScore(
   const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okr, taskScore] =
     await Promise.all([
       calcKpiScore(userId, organizationId),
-      calcManagerRating(userId),
-      calcPeerRating(userId),
-      calcSelfRating(userId),
+      calcManagerRating(userId, organizationId),
+      calcPeerRating(userId, organizationId),
+      calcSelfRating(userId, organizationId),
       calcSopCompliance(userId, organizationId),
       calcKudosBonus(userId),
       okrPartsFor(userId, period),
@@ -279,6 +307,10 @@ export async function calculatePerformanceScore(
     update: {
       score: compositeScore,
       breakdown: breakdown as unknown as Prisma.InputJsonValue,
+      // The month's row names the workspace whose score it now holds: one
+      // made before the person switched would otherwise hold this
+      // workspace's score under the other's name, read there.
+      organizationId,
       calculatedAt: new Date(),
     },
   });

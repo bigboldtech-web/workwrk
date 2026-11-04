@@ -573,12 +573,33 @@ describe("a refused manager's row says what the provider sent, in the Audit draw
     expect(rows("reporting_line_refused").at(-1)).toMatchObject({ newValue: { managerAsked: null }, metadata: { reason: "removed" } });
     for (const r of rows("reporting_line_refused")) expect(String(r.description)).not.toMatch(/-{2}|\u2014|\u2013/);
   });
+
+  // The fixes review, finding 3: the Audit drawer's Diff (settings/audit/
+  // page.tsx) lists every key of either side and bolds each one whose two
+  // sides differ. With the line on the old side only, "Manager id" read as
+  // cleared, in bold, for a manager left exactly as it was.
+  it("keeps the line here on both sides, so the Diff shows only Manager asked as changed", async () => {
+    expect((await patch("lee", [azureSet("ada")])).status).toBe(200);
+    expect(account("lee").managerId).toBe("dana");
+    const [refused] = rows("reporting_line_refused");
+    expect(refused).toMatchObject({ oldValue: { managerId: "dana" }, metadata: { reason: "agent" } });
+    expect(refused.newValue).toEqual({ managerId: "dana", managerAsked: "ada" });
+    // The Diff's own rule: a key is changed when its two sides differ.
+    const o = refused.oldValue as Record<string, unknown>;
+    const n = refused.newValue as Record<string, unknown>;
+    const changed = [...new Set([...Object.keys(o), ...Object.keys(n)])].filter((k) => JSON.stringify(o[k]) !== JSON.stringify(n[k]));
+    expect(changed).toEqual(["managerAsked"]);
+  });
 });
 
 // The final review, product H1: the identity provider sets Reports to only
-// where the workspace turned it on. Off, every push's manager is ignored:
-// nothing of the line is written or logged, no role lock is taken, and the
-// rest of the push lands; GET still names the line here.
+// where the workspace turned it on. Off, the manager a push sends is
+// ignored: it writes nothing of the line, logs nothing and takes no role
+// lock, and the rest of the push lands; GET still names the line here. What
+// a push does to lines whatever the setting is unchanged (the fixes review,
+// finding 2): a reactivation still clears the lines here that no longer
+// hold, and a deprovision still hands the person's reports up the line,
+// each logged.
 describe("with \"Let your identity provider set Reports to\" off (the default), SCIM ignores the manager", () => {
   const off = () => { db.row("organization", "b").settings = {}; };
 

@@ -112,7 +112,7 @@ const MERGE_NEEDS: readonly Step[] = [2, 3, 4, 5, 7, 8];
 
 /** Every file the search finds, at step 1 (main f16c2220 plus step 1). */
 const ENTRIES: Record<string, Entry> = {
-  "src/app/(dashboard)/people/roles/[id]/page.tsx": { kinds: ["profile"], mark: "a", why: "a job title's holders: the people anchored here (Role.users) and the people here through a membership whose membership holds it, kept seats, as DELETE refuses by (membershipsPlacedHere's half, peoplePlacedHere, E15, step 8); a membership holder's row shows no KRA drift, since none is assigned to them here (the step 5 review M1)" },
+  "src/app/(dashboard)/people/roles/[id]/page.tsx": { kinds: ["profile"], mark: "a", why: "a job title's holders: the people anchored here (Role.users) and the people here through a membership whose membership holds it, kept seats, as DELETE refuses by (membershipsPlacedHere's half, peoplePlacedHere, E15, step 8); a membership holder's row counts what they hold of the title's KRAs here and offers no Seed, since none is assigned to them here (the step 5 review M1, the fixes review finding 8)" },
   "src/app/(dashboard)/reviews/[id]/appraisal-letter.ts": { kinds: ["profile"], mark: "a", why: "renders the join date its route reads; reads no column" },
   "src/app/(dashboard)/reviews/[id]/cycle-types.ts": { kinds: ["profile"], mark: "a", why: "a type only" },
   "src/app/(dashboard)/settings/structure/page.tsx": { kinds: ["line"], mark: "a", why: "No manager: the people live here with no line here, two halves: the account's line for people anchored here, the membership's own line otherwise (E1, E15, step 8)" },
@@ -1006,8 +1006,8 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/lib/settings/org-settings-sections.ts", /identityProviderSetsReportsTo: z\.boolean\(\)\.optional\(\),/, 1],
       ["src/app/api/settings/route.ts", /type: "security\.provisioning\.updated",/, 1],
       ["src/app/(dashboard)/settings/security/page.tsx", /idp\.save\(\{ \[IDP_SETS_REPORTS_TO\]: v \}\)/, 1],
-      // M4: the refused manager's row carries what was sent.
-      ["src/lib/scim-manager.ts", /newValue: \{ managerAsked: r\.asked \},/, 1],
+      // M4: the refused manager's row carries what was sent, beside the line here, unchanged (the fixes review, finding 3).
+      ["src/lib/scim-manager.ts", /newValue: \{ managerId: r\.before, managerAsked: r\.asked \},/, 1],
       // M5: every reader of a person's KRAs, KPI numbers and SOPs reads this workspace's only.
       ["src/app/api/me/kras/route.ts", /where: \{ userId: u\.id, status: "ACTIVE", kra: \{ organizationId: u\.organizationId \} \}/, 1],
       ["src/app/api/users/[id]/kpis/route.ts", /where: \{ userId, status: "ACTIVE", kra: \{ organizationId: orgId \} \}/, 1],
@@ -1029,7 +1029,8 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/lib/analytics.ts", /sop: \{ organizationId: orgId \}/, 3],
       ["src/lib/performance/review-cycle.server.ts", /sop: \{ organizationId \}/, 2],
       ["src/app/api/email/send-reminders/route.ts", /a\.kra\.organizationId === a\.user\.organizationId/, 1],
-      ["src/app/api/cron/kpi-reminders/route.ts", /r\.kpi\.organizationId === r\.user\.organizationId/, 1],
+      // Counted per workspace by the database (the fixes review, finding 6), the same rule: the workspace the account is in.
+      ["src/app/api/cron/kpi-reminders/route.ts", /where: \{ status: \{ in: OPEN \}, kpi: \{ organizationId \}, user: \{ organizationId \} \},/, 1],
       // Lows: Working on and the shared-identity line, the counts, the words.
       ["src/components/people/person-record.tsx", /\{workingOnShown\(person\) \? <WorkingOnSection/, 1],
       ["src/components/people/person-record.tsx", /\{sharedIdentityShown\(person\) \?/, 1],
@@ -1049,5 +1050,27 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/app/api/team/attention/route.ts", /none: \{ status: "ACTIVE" \} \}/],
     ];
     for (const [file, re] of byPerson) expect(code(file), `${file} ${re}`).not.toMatch(re);
+  });
+
+  it("holds the fixes review of the final fixes: the score's review parts and its workspace, the reminders' count, a job title's holders", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const held: Array<[string, RegExp, number]> = [
+      // Finding 5: the manager and self parts by the review cycle's workspace, the peer part by its review's, each passed the workspace.
+      ["src/services/performanceScoreService.ts", /subjectId: userId,\n\s+cycle: \{ organizationId \},/, 2],
+      ["src/services/performanceScoreService.ts", /receiverId: userId,\n\s+review: \{ cycle: \{ organizationId \} \},/, 1],
+      ["src/services/performanceScoreService.ts", /calc(Manager|Peer|Self)Rating\(userId, organizationId\)/, 3],
+      // Finding 5: written only for the workspace the account is anchored to, and the month's row takes its name.
+      ["src/services/performanceScoreService.ts", /if \(anchored\?\.organizationId !== organizationId\) \{/, 1],
+      ["src/services/performanceScoreService.ts", /breakdown: breakdown as unknown as Prisma\.InputJsonValue,\n\s+organizationId,\n\s+calculatedAt: new Date\(\),\n\s+\},\n\s+\}\);/, 1],
+      // Finding 6: grouped by the database, per workspace holding an open record.
+      ["src/app/api/cron/kpi-reminders/route.ts", /prisma\.kPI\.groupBy\(\{\n\s+by: \["organizationId"\],/, 1],
+      // Finding 8: a job title's membership holders are counted with everyone.
+      ["src/app/(dashboard)/people/roles/[id]/page.tsx", /const holderIds = \[\.\.\.role\.users\.map\(\(u\) => u\.id\), \.\.\.placedThrough\.map\(\(p\) => p\.id\)\];/, 1],
+    ];
+    for (const [file, re, n] of held) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // What they replaced is gone: an open KPI record read one by one, the review parts by person alone.
+    expect(code("src/app/api/cron/kpi-reminders/route.ts")).not.toMatch(/kPIRecord\.findMany/);
+    expect(code("src/services/performanceScoreService.ts")).not.toMatch(/calc(Manager|Peer|Self)Rating\(userId\)/);
   });
 });

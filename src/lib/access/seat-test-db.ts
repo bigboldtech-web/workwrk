@@ -118,6 +118,10 @@
 // (ACTIVE, "ongoing"; ASSIGNED), `aggregate` with `_avg` and `_count`, and
 // findUniqueOrThrow, so the readers of a person's KRAs, KPI numbers and
 // SOPs are answered, per workspace, as Postgres answers them.
+//
+// The fixes review of the final fixes: a peer feedback's review (the
+// performance score's peer part, finding 5) and a KPI's records as a list
+// relation (the KPI reminders' workspaces, finding 6).
 
 import { Prisma } from "@/generated/prisma";
 
@@ -159,6 +163,8 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   weeklyReview: { user: ["user", "userId"], manager: ["user", "managerId"] },
   timesheet: { user: ["user", "userId"], approver: ["user", "approverId"] },
   timeEntry: { timesheet: ["timesheet", "timesheetId"] },
+  // The fixes review (finding 5): a peer feedback's review, whose cycle names its workspace.
+  peerFeedback: { review: ["review", "reviewId"] },
 };
 
 /** A model's list relations (one to many): name to [table, the key on the other table that names this row]. */
@@ -197,6 +203,8 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   oKR: { assignees: ["goalAssignee", "okrId"] },
   policy: { assignments: ["policyAssignment", "policyId"], acknowledgments: ["policyAcknowledgment", "policyId"] },
   kRA: { kpis: ["kPI", "kraId"], assignments: ["kRAAssignment", "kraId"] },
+  // The fixes review (finding 6): a KPI's records (the KPI reminders find the workspaces that hold an open one).
+  kPI: { records: ["kPIRecord", "kpiId"] },
   pulseSurvey: { responses: ["surveyResponse", "surveyId"] },
   // The step 8 review: a review cycle's reviews (its launch refuses a cycle that has them).
   reviewCycle: { reviews: ["review", "cycleId"] },
