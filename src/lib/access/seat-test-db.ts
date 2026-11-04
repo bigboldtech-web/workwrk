@@ -71,6 +71,10 @@
 // (CASCADE), and every line naming it becomes null (SET NULL); a delete of
 // a workspace takes its accounts, memberships and dotted lines with it.
 // `updateManyAndReturn`, the rows it wrote, projected by its select.
+//
+// docs/plans/workspace-status-2.md step 3 (the surfaces): a review's
+// `subject`, so a read that selects the subject's line is answered as
+// Postgres answers it.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -85,7 +89,7 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   apiKey: { organization: ["organization", "organizationId"] },
   kRAAssignment: { kra: ["kRA", "kraId"] },
   kPIRecord: { kpi: ["kPI", "kpiId"], user: ["user", "userId"] },
-  review: { cycle: ["reviewCycle", "cycleId"] },
+  review: { cycle: ["reviewCycle", "cycleId"], subject: ["user", "subjectId"] },
   userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"], organization: ["organization", "organizationId"] },
   kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
   kudosReaction: { kudos: ["kudos", "kudosId"] },

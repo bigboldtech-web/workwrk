@@ -22,12 +22,14 @@
 // in this workspace". A line no workspace reads (its manager works in none
 // of the person's workspaces) is this workspace's to take off.
 //
-// Both answer how many lines are kept for another workspace (`keptElsewhere`,
-// batch 7), never whose, and the person record leaves those lines out of the
-// names it shows, so Edit details never offers to take one off. Before, a
-// dotted manager who is an Agent here and a manager in the person's other
-// workspace was listed on the record, the dialog let it be removed, the PUT
-// answered 200 and kept it: the line came back on the next load.
+// The PUT answers how many lines it kept for another workspace
+// (`keptElsewhere`, batch 7), never whose. Before, a dotted manager who is
+// an Agent here and a manager in the person's other workspace was listed on
+// the record, the dialog let it be removed, the PUT answered 200 and kept
+// it: the line came back on the next load. Since workspace-status-2 step 3
+// the GET and the record read THIS workspace's rows only (E2), so neither
+// lists nor counts another workspace's; the PUT's keep list retires in step
+// 4 (E6).
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -38,7 +40,7 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
-import { levelsHeldIn, workspaceDottedLines } from "@/lib/access/acting-workspace";
+import { levelsHeldIn, personSeatIn, workspaceDottedLines } from "@/lib/access/acting-workspace";
 import { othersDottedLines } from "@/lib/access/manager-lines";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
@@ -85,30 +87,39 @@ function writesDottedLines(ctx: PeopleCtx, id: string): boolean {
   return canWritePersonGroup("placement", relation, { managerTierSelf: false, chainWritesMembership: !accessV2Resolver() }) && relation !== "self";
 }
 
+/**
+ * GET answers THIS workspace's dotted lines of the person (workspace-status-2.md
+ * E2, step 3): the rows whose organizationId is this workspace, for a
+ * subject of either kind (anchored here, or here through a membership,
+ * acting-workspace.ts personSeatIn). Before, it read the person's rows of
+ * every workspace, so after the one-time SQL a line held in two workspaces
+ * listed its manager twice, and a line held only in another workspace whose
+ * manager has a seat here was listed here, copied here by the next save and
+ * never removable here. No count of another workspace's lines is answered
+ * (E6): none is read.
+ */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await peopleCtx();
   if (!ctx) return err(401, "Unauthorized");
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
   const { id } = await params;
-  const user = await prisma.user.findFirst({ where: { id, organizationId: ctx.organizationId }, select: { id: true } });
-  if (!user) return err(404, "Not found");
+  if (!(await personSeatIn(ctx.organizationId, id))) return err(404, "Not found");
   const stored = await prisma.userDottedLine.findMany({
-    where: { userId: id },
+    where: { userId: id, organizationId: ctx.organizationId },
     select: { managerId: true, role: true, manager: { select: { id: true, firstName: true, lastName: true, avatar: true } } },
   });
-  // The lines this workspace manages: never another workspace's (batch 6),
-  // nor a line to someone who holds no level here. A line to someone
+  // A line to someone with no seat here is never named. A line to someone
   // deactivated here is listed, by their membership as when anchored here
   // (kept seats, step 1 review M2): PUT replaces every line of this
   // workspace not in its body, so one the list left out would be deleted by
   // the next save.
-  const [held, others] = await Promise.all([levelsHeldIn(ctx.organizationId, stored.map((r) => r.managerId), prisma, { keptSeats: true }), othersDottedLines(ctx.organizationId, id)]);
-  const rows = stored.filter((r) => held.has(r.managerId) && !others.has(r.managerId));
+  const held = await levelsHeldIn(ctx.organizationId, stored.map((r) => r.managerId), prisma, { keptSeats: true });
+  const rows = stored.filter((r) => held.has(r.managerId));
   // `below` is the person's report tree (solid and dotted), so the Edit
   // details picker can leave every one of them out. Only a writer gets it:
   // a reader has no picker, and the list is placement data.
   const below = writesDottedLines(ctx, id) ? [...(await peopleBelow(ctx.organizationId, id))] : undefined;
-  return NextResponse.json({ managers: rows.map((r) => ({ ...r.manager, note: r.role })), keptElsewhere: others.size, ...(below ? { below } : {}) });
+  return NextResponse.json({ managers: rows.map((r) => ({ ...r.manager, note: r.role })), ...(below ? { below } : {}) });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -8,6 +8,7 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { activityTargetsReadable, nodeCtxFromSession } from "@/lib/access/node-access";
 import { ACCESS_ACTIVITY_TYPES } from "@/lib/access/access-activity";
 import { PERSONAL_TEAMMATE_ACTIVITY_TYPES } from "@/lib/access/personal-activity";
+import { reportsHereOf } from "@/lib/access/acting-workspace";
 
 // GET: Load conversation history for persistent context
 export async function GET(req: NextRequest) {
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
         accessLevel: true,
         department: { select: { name: true } },
         role: { select: { title: true } },
-        _count: { select: { directReports: true, kraAssignments: true } },
+        _count: { select: { kraAssignments: true } },
       },
       take: 100,
     }),
@@ -169,6 +170,13 @@ export async function POST(req: NextRequest) {
     }),
   ]);
 
+  // Each person's reports HERE (docs/plans/workspace-status-2.md E1, step
+  // 3): the people whose line in this workspace names them, both halves
+  // (reportsHereOf), never the cross-workspace directReports count, which
+  // also counted the accounts whose line names them in another workspace.
+  const reportsOf = new Map<string, number>();
+  for (const r of await reportsHereOf(orgId, users.map((u) => u.id))) reportsOf.set(r.managerId, (reportsOf.get(r.managerId) ?? 0) + 1);
+
   const askerCtx = await nodeCtxFromSession().catch(() => null);
   const activityFlags = askerCtx
     ? await activityTargetsReadable(askerCtx, recentActivity).catch(() => recentActivity.map(() => false))
@@ -182,7 +190,7 @@ ORGANIZATION DATA:
 - Departments: ${departments.map(d => `${d.name} (${d._count.members} members, head: ${d.head ? d.head.firstName + ' ' + d.head.lastName : 'vacant'})`).join('; ')}
 
 PEOPLE${totalUserCount > users.length ? ` (showing ${users.length} of ${totalUserCount})` : ""}:
-${users.map(u => `- ${u.firstName} ${u.lastName}: ${u.role?.title || 'No role'}, ${u.department?.name || 'No dept'}, Status: ${u.status}, Level: ${u.accessLevel}, KRAs: ${u._count.kraAssignments}, Reports: ${u._count.directReports}`).join('\n')}
+${users.map(u => `- ${u.firstName} ${u.lastName}: ${u.role?.title || 'No role'}, ${u.department?.name || 'No dept'}, Status: ${u.status}, Level: ${u.accessLevel}, KRAs: ${u._count.kraAssignments}, Reports: ${reportsOf.get(u.id) ?? 0}`).join('\n')}
 
 COMPOSITE PERFORMANCE SCORES (current period):
 ${performanceScores.length > 0 ? performanceScores.map(s => {

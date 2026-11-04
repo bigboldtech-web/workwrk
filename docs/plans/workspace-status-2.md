@@ -231,6 +231,21 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
          - 138 filters out `subject.managerId`, the account's line. For a membership subject (step 5) that drops a B dotted manager who is Pat's A manager.
          - Named, except the 138 filter, which step 5 names too.
      11. **The signed-in join, accept-invite**: it writes no membership line. Since step 2 the reads take the membership's line, so Pat joining B with an existing account shows no manager in B and is in nobody's B tree until the E10 write lands. Named.
+   - **From the step 3 review** ("For step 4"; ~/workwrk-launch-backup/agents/workspace-status-2/step3-review.md). Each is a screen step 3 made read THIS workspace's line while a write, or a screen tied to one, still uses the account's line or every workspace's rows. All must close in the one merge. File:line on the step 3 tree.
+     1. **The handover GET summary, users/[id]/handover/route.ts 236-244** (account lines naming the leaver, then liveHereAmong): the one surface still naming another workspace's reports. In B, Max's Remove and Transfer dialog lists Kai and Pat (their A lines; both hold seats in B) while his B record lists Bea only; Dana's lists Lee only while her record lists Lee, Max and Pat. Pairing 3. Fix: reportsHereOf (kept).
+     2. **The deactivation and removal gate, handover.server.ts 819-852** (handoverReportCount, pendingHandover): Dana's B record shows three reports, the gate counts Lee only, so Bo can deactivate Dana after handing over Lee and Pat and Max stay under her in B. Pairing 2, held by handover.server.test.ts's `it.fails` cases.
+     3. **The dotted-lines PUT's keep list, users/[id]/dotted-lines/route.ts 154 and 181-183** (othersDottedLines, manager-lines.ts 422-431, every workspace's rows by person).
+        - These rows are now listed wherever a B row's manager holds a kept seat here: the record (users/[id]/route.ts 478 for a membership person, 560-563 for someone anchored here), the dotted-lines GET (107-116), the chart (directory-list.server.ts 472 and 512), Edit details and the org chart's picker.
+        - Two shapes are listed there and never taken off by the PUT: (a) a B row to an Agent here who is a live manager in another workspace the person works in (named in step 3); (b) a B row to someone deactivated here through a membership who is live in another workspace the person works in (Rita): levelsHeldIn's live default leaves her out, linesElsewhere answers "relied", dottedIsOthers keeps the row. Before step 3 the GET hid it (`!others.has`); now it lists it (kept seats).
+        - Worst case: Bo removes Rita from Pat's dotted lines in B; Edit details ticks the save and says "1 line kept for another workspace they work in, left as it is" (edit-details-dialog.tsx 438-450), untrue since E2; the org chart's picker (org-tree.tsx 134-142) says nothing; Rita is back on the next load.
+        - Fix: writeDottedHere replaces this workspace's rows with the body; othersDottedLines, `elsewhere`, `checked` and `keptElsewhere` go. dotted-lines/route.test.ts's two "kept for another workspace" describes pin the keep list and are rewritten. The filter at 149 (`subject.managerId`, the account's line) is step 5's.
+     4. **PATCH Reports to's 409 manager_elsewhere, users/[id]/route.ts 901-912** (managerLineIsOthers): the record no longer says "Reports to someone in another workspace" and the dialog's placeholder (edit-details-dialog.tsx 234 and 400) never says "Someone in another workspace", but PATCH still asks "changes it there too" when an anchored person's line names an Agent here, or someone with no level here, who is a live manager in another workspace the person works in. Untrue since E1. Pairing 8.
+     5. **The Agent move's preview, handover.server.ts 702-737** (agentPlanFor, previewAgentReports): it counts every workspace's dotted rows to the Agent (711), while the Members drawer's agentReports and the record count B's rows only; its `stays` names the people whose dotted line is another workspace's, which says in B that Pat has a dotted line to Max in A. Pairing 6.
+     6. **The stale-line clears on a restore and a reactivation, users/[id]/route.ts 1048-1051 and 1368, scim-reactivate.ts 123** (manager-candidate.ts staleLinesOf): B's restore of Pat can clear her account line, which is A's, and delete A's dotted copy; the answer's `linesCleared` then names a clear B's record never showed. users/[id]/seat-lines.test.ts "a line nobody relies on any more is cleared on a restore" pins that cross-workspace clear (the account line becomes null) and is rewritten. Pairing 7.
+     7. **The client words with no source any more** (the contract test skips "use client" files, and named-here.ts is now (a), so no done gate reminds this step):
+        - person-record.tsx 117, 120 and 667-679 (managerElsewhere, dottedElsewhere) and edit-details-dialog.tsx 35, 38, 234 and 400: step 3's GETs never send these, so the branches are dead;
+        - edit-details-dialog.tsx 238 and 440-450 (`dottedKept`, fed by the PUT's keptElsewhere), and dottedElsewhereWords (named-here.ts 34) with its named-here.test.ts case: they go with the keep list (item 3).
+     8. **The signed-in join, accept-invite**: Pat joining B with her existing account under an invitation naming Dana shows no manager on any step 3 surface in B until E10's write lands. Pairing 11.
 
 5. **A membership person's profile and lines are edited here (E7, E8, E9 ii, E10).**
    - PATCH for a membership person writes job title, department, office, weekly hours, working week, profile fields and Reports to on the membership (writeProfileHere, writeLineHere) under the role lock (lines), the person's lock and sameSeat. Personal and birthday fields are refused with SHARED_IDENTITY_REFUSAL. A new job title seeds its KRAs and SOPs.
@@ -263,6 +278,7 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
    - A bulk-imported invitation lands Pat's colleague under the right manager. SCIM sets a manager in B.
    - The raw walks run on Postgres.
    - **The walk through a manager anchored elsewhere, measured at 5,000 people** (the step 2 review L1): Max anchored at A leads 5,000 people there and reports to Dana in B; every request Dana makes in B walks through him (viewer.ts reportTreeFor), and the anchored half reads his A rows from the heap by "User_managerId_idx" only to drop them by workspace. Measure Dana's tree in B; add an index on "User"("managerId", "organizationId") in a later SQL file only if it is slow.
+   - **The Directory's sort by reports at 5,000 people** (the step 3 review L3): since step 3 it is made in memory for every query (directory-list.server.ts orderedInMemory), so each page turn and each export sorted by reports reads every matching person's keys (directoryOrder) and runs reportsHereOf over all their ids (two `IN` lists the size of the workspace). Measure a page and the export at 5,000 people; if slow, keep the ordered ids for the session, or count with one grouped statement per half.
    - No 500 in the dev server's log.
 
 ## Deploy notes (draft)
@@ -826,3 +842,132 @@ Changed in this pass: src/lib/people/send-invitation.server.ts, src/lib/access/d
 ### Deploy notes, added to step 2's
 
 5. **An invitation can no longer name a deactivated manager as Reports to.** Before, it was sent, and the person joined with no manager.
+
+## Step 3, built
+
+Branch `workspace-status-2` in ~/theywrk-launch, on 5a7e9c57 (steps 1 and 2 committed on main f16c2220), not committed. **No SQL, no schema change, no flag.** It ships only in the one merge of steps 1 to 4.
+
+### The rule
+
+Every surface that shows a manager line shows THIS workspace's, through the reads steps 1 and 2 built (acting-workspace.ts, profile-here.ts), never a rule of its own:
+- **the manager** is the line the person's seat here holds: User.managerId for someone anchored here, the membership's own managerId for someone here through one (personSeatIn, seatsHeldFor, linesHereOf), never the anchored workspace's own stale row and never the account's line read for a membership person;
+- **the dotted lines** are the rows whose organizationId is this workspace;
+- **the reports** are reportsHereOf's (both halves, kept seats), never the cross-workspace `directReports` relation or its `_count`;
+- a manager, dotted manager or report is **named only while they hold a kept seat here** (namedHere, managersWithSeatHere), as phase 1 does;
+- who may see a name is unchanged: the card's names are every Member's, a Guest gets no reports and no Directory, people data stays with its readers.
+
+named-here.ts keeps only its seat filter (E6): the record's `managerElsewhere` and `dottedElsewhere` are gone, and manager-lines.ts recordLinesOfOthers, their only source, is deleted.
+
+### Each surface: before, now, test
+
+Tests are in src/lib/people/workspace-lines-surfaces.test.ts (new, 21 tests) unless another file is named. The case: Pat anchored at A under Max, working at B through a membership under Dana; a dotted line to Kai in A and to Lee in B. Max contracts for B as a Manager under Dana, where Bea reports to him; in A, Max reports to Ada and Kai reports to Max. Kai works in B through a membership with no line there. Abe reports to Pat in A, Zoe in B; Lee reports to Dana in B. Every surface is read in B and in A, and most again after Pat switches into B (the real swap, her stale B row then naming Lee, which no reader may take).
+
+- **The person record, GET /api/users/[id]** (users/[id]/route.ts).
+  - Before: for someone anchored here, the account's line, every workspace's dotted rows (with batch 7's `dottedElsewhere` count and `managerElsewhere` flag) and the `directReports` relation filtered to seats here; for a membership person, the account's line (A's), no dotted lines, and the `directReports` relation. So Pat's B record named Max, and Dana's B record listed Lee only.
+  - Now: the anchored card reads its manager relation (the account's line is this workspace's) and `dottedLineToManagers` with `where: { organizationId }`; membershipRecord reads the manager its membership's line names, this workspace's dotted rows and, for both kinds, the reports here (reportRowsHere: reportsHereOf, then the rows in name order). A membership person's record now lists their dotted-line managers here. No elsewhere field is answered.
+  - Tests: "names Dana, Lee and Zoe on Pat's record in B, and Max, Kai and Abe in A"; "lists each manager's reports here" (Dana: Lee, Max, Pat in B; Max: Bea in B, Kai and Pat in A); "says nothing about another workspace's line (E6)"; "holds both workspaces' lines after Pat switches into B, never the stale row"; "a viewer who may not read people data reads the same card and no more; a Guest no reports". users/[id]/route.test.ts: the two batch 7 GET tests now hold the new rule ("names nobody of another workspace, and says nothing about a line there"; "reads this workspace's dotted lines", which asserts the card's `where` and no `directReports` in its select).
+- **The dotted lines, GET /api/users/[id]/dotted-lines.**
+  - Before: anchored subjects only (a 404 for Pat in B), every workspace's rows by person, othersDottedLines' filter and a `keptElsewhere` count. After the SQL a line held in both workspaces listed its manager twice, and a line held only in A whose manager has a seat in B was listed in B.
+  - Now: a subject of either kind (personSeatIn), the rows `where: { userId, organizationId }`, each named while its manager holds a kept seat here, and no count. The PUT is unchanged (step 4).
+  - Tests: "answers this workspace's rows, for someone here through a membership too, and counts none of another's"; "after Pat switches into B, B never lists A's line to Kai, who has a seat in B". dotted-lines/route.test.ts: its double now answers rows by workspace and the seat read; "GET reads this workspace's rows only, and counts none of another workspace's" replaces "GET answers the count too".
+- **Who can see this record, GET /api/users/[id]/record-access.**
+  - Before: the walk climbed the account's line and listed every workspace's dotted rows to people with a seat here. In B it named Max (to whom B's engine, viewer.ts reportTree, gives no reach), left out Dana, and listed A's Kai.
+  - Now: the subject's line from personSeatIn, each manager up the line by linesHereOf (their seat here), and this workspace's dotted rows. The groups mirror the engine again.
+  - Tests: "walks the line here and lists this workspace's dotted lines, as the engine reads them" (B: Dana, Lee; A: Max then Ada, Kai); "after Pat switches, each workspace still walks its own line". record-access/seat.test.ts: Pat's B line moved onto her membership in the fixture (her account names Ned, A's).
+- **My team, GET /api/my-team.**
+  - Before: each member's managerId, and so directReportIds, from the account's line, while teamIds came from the walk here. Dana's My team in B filed Pat under Max and listed only Lee as a direct report.
+  - Now: seatsHeldFor gives each member's level and line here in one read; a manager id only while they hold a seat here.
+  - Test: "files Pat and Max under Dana in B, and Pat and Kai under Max in A".
+- **Members** (members-list.server.ts).
+  - Before: the row's manager from the account's manager relation (a membership person's account line, A's), and No manager for a membership person by the account's line.
+  - Now: the line each row's seat here holds (the membership's `managerId` for a membership person), named from one read of the shown managers; No manager reads the same lines.
+  - Tests: "names each row's manager here, and No manager reads the same lines"; "after Pat switches, A names her A line and B her B line". members-list.test.ts: Pat's B line set on her membership in the two cases that meant "her manager here".
+- **The Directory and the Org chart** (directory-list.server.ts).
+  - Before: the row's managerId and manager from the account's line; Reports to by the account's line for both halves; No manager for a membership person by the account's line; report counts from `_count.directReports` (every account line naming them, in any workspace) for people anchored here and reportsHere (account lines) for membership people; the sort by reports in the database by that count; the chart's managerId from the account's line and its dotted ids from every workspace's rows.
+  - Now: DirectorySeat carries the membership's line; each row and the chart name the line its seat here holds; Reports to is the account's line for the anchored half and the membership's for the membership half; reportsHere is reportsHereOf for every row; a sort by reports is always made in memory (orderedInMemory), since no database order can count the reports here; the chart's dotted ids are this workspace's rows. The Org chart's client loop check (org-tree.tsx) walks these lines, so it now walks this workspace's.
+  - Tests: "each row names its manager here and counts its reports here"; "Reports to, No manager and the sort by reports read the lines here"; "the chart draws each person under their manager here, with this workspace's dotted lines"; "after Pat switches, each workspace still draws its own line". directory-seat.test.ts: its dotted rows name B, as every dotted row does since step 1.
+- **The Directory's export, GET /api/users/export.** Before: Reports to from the account's manager relation. Now: the line each row's seat here holds, named with one read per batch. Test: "writes each row's Reports to here".
+- **The people list, GET /api/users.** Before: managerId and manager from the account's line; `_count.directReports` from the relation for people anchored here, account lines for membership people; a sort by managerId read the account's line for membership people. Now: the line each seat here holds, names from one read, every row's reports here (reportsHere), and seatKey reads the membership's line. Test: "answers each person's manager and report count here" (with the sort by manager).
+- **Peer suggestions, GET /api/reviews/[id]/peers.** Before: "Their manager", "Same manager", "Reports to them" and "Same department" from the subject's account line and department, so Pat's B review suggested Bea (Max's report) and never Dana or Lee. Now: the subject's line here (linesHereOf) and placement here (seatPlacementsHere); the pool is still people anchored here by their own lines (review-cycle.server.ts). Test: "suggests the people around Pat's line here".
+- **The Owner snapshot, POST /api/ai.** Before: "Reports: N" from `_count.directReports`, every workspace. Now: reportsHereOf over the snapshot's people. Test: "counts each person's reports here" (the model double hands back its prompt).
+- **My team's table, GET /api/team/members-work.** Before: Reports to by the account's line for both halves (step 6 said so). Now: the anchored half by the account's line, the membership half by the membership's. Test: "the Reports to filter reads each seat's line here".
+
+### The contract test (E16)
+
+Every step 3 entry is flipped with its new reason: ten to (a); users/[id]/route.ts stays (b) for step 4 (PATCH, the clears) and step 5 with "GET ... (step 3, done)"; users/[id]/dotted-lines/route.ts stays (b) step 4 for its PUT, its GET marked done. **MERGED is [2, 3]**; the done gate holds. "Holds the plan's named readers" drops the two step 3 reads it pinned (members-list's account line, the dotted-lines GET by person) and pins the PUT's keep list for step 4 instead. A new test, "holds step 3's surfaces at the line here", pins each replacing read in the code (reportsHereOf, the membership's line, the dotted rows by workspace, linesHereOf up the line, seatsHeldFor, reportsHere for every row, the in-memory Reports to, the export's and the list's lines, the peers' and the snapshot's reads, the members-work filter) and that the reads they replaced are gone (`directReports` selects, recordLinesOfOthers, the elsewhere fields, `next = m.managerId`, the account line on memberships).
+
+Other source pins brought to the new code: kept-seats.test.ts (my-team now `seats: 1`, through seatsHeldFor; manager-lines.ts `live: 4`, recordLinesOfOthers gone). manager-lines.test.ts drops its two recordLinesOfOthers assertions (the function is deleted; managerLineIsOthers keeps its own, step 4's). named-here.test.ts holds the seat filter and that nothing about another workspace's line is answered; dottedElsewhereWords stays for the PUT's count until step 4.
+
+No `it.fails` test is made to pass by this step: the four in handover.server.test.ts are step 4's and still fail as marked.
+
+### Decisions made here (worst case first)
+
+- **A record of someone here through a membership lists their dotted lines here.** Worst case of leaving them out: B's record shows no dotted manager while B's engine gives Lee reach over Pat. The card is every Member's, as for someone anchored here.
+- **The Directory's sort by reports is always made in memory.** Worst case of the database order: Dana, with three reports here through memberships, sorts below someone with one account line in another workspace. Cost: every matching person's key and one reportsHereOf over their ids, as the other in-memory orders read.
+- **A dotted line to an Agent here is listed on the record** (it is this workspace's own row now). Before, batch 7 left out such a line when another workspace relied on it, because the PUT kept it. Until step 4 retires the PUT's keep list, Edit details could offer to take off such a B row and the PUT keep it; step 4 ships in the same merge (pairing 10).
+- **recordLinesOfOthers is deleted now, not in step 4**: its only caller was the record GET.
+
+### Left for later steps
+
+- **Step 4.** The dotted-lines PUT's keep list (othersDottedLines) and its `keptElsewhere`; dottedElsewhereWords (named-here.ts) and the client words fed by them: person-record.tsx's "Reports to someone in another workspace" and "N lines kept" branches (the GET no longer sends either field, so they never show) and edit-details-dialog.tsx's managerElsewhere and dottedKept; managerLineIsOthers and PATCH's 409.
+- **Step 5.** A membership person's record still sends no weekly hours, working week or profile fields (E8), and access.dottedLines is false for them.
+- **For the final sweep.** No manager for someone anchored here still filters `managerId: null` (Members, the Directory), so an anchored account whose line names someone with no seat here shows Nobody but is not listed; E11 (ii) clears such lines on the deploy. The peer pool is people anchored here, so a manager here through a membership is never suggested as "Their manager".
+
+### Files
+
+Changed sources (13): src/app/api/ai/route.ts, src/app/api/my-team/route.ts, src/app/api/reviews/[id]/peers/route.ts, src/app/api/team/members-work/route.ts, src/app/api/users/[id]/dotted-lines/route.ts, src/app/api/users/[id]/record-access/route.ts, src/app/api/users/[id]/route.ts, src/app/api/users/export/route.ts, src/app/api/users/route.ts, src/lib/access/manager-lines.ts, src/lib/access/members-list.server.ts, src/lib/people/directory-list.server.ts, src/lib/people/named-here.ts.
+Test double: src/lib/access/seat-test-db.ts (a review's `subject`).
+New test: src/lib/people/workspace-lines-surfaces.test.ts.
+Tests changed (10, no assertion weakened: fixtures that meant "their manager here" now hold the line on the membership, with the account naming another workspace's manager, so a read of the account fails them; the batch 7 tests hold E6's rule): users/[id]/route.test.ts, users/[id]/seat.test.ts, users/[id]/dotted-lines/route.test.ts, users/[id]/record-access/seat.test.ts, kept-seats.test.ts, manager-lines.test.ts, members-list.test.ts, workspace-lines.contract.test.ts, directory-seat.test.ts, named-here.test.ts.
+
+### Tests
+
+- New: workspace-lines-surfaces.test.ts 21, and the contract test's "holds step 3's surfaces" 1. **Against 5a7e9c57's sources** (the 13 changed sources put back in place, this step's tests and test double kept, then restored and checked identical): **all 21 of workspace-lines-surfaces fail**, each on an assertion (Max named for Pat in B, Dana's reports Lee only, the 404 for a membership subject, the A row listed in B, Bea suggested as a peer, Reports: 1). Of the changed test files, **12 tests fail** there: named-here 2, record-access seat 1, members-list 2, users/[id] route 2, users/[id] seat 2, kept-seats 1, the contract 1, dotted-lines 1. directory-seat and manager-lines pass on both (a fixture's workspace; deleted assertions). 33 in all.
+- Every test related to a changed source (`vitest related` over the 13 sources and the double): 265 files, 3,344 tests, all pass. The touched folders (src/lib/access, src/lib/people, src/app/api/users, my-team, reviews, team, ai): 151 files, 2,413 tests, all pass. Every test file that names a changed file (the source pins): 75 files, 986 tests, all pass.
+- Type check clean, run twice on the final code (6 GB heap). ESLint on every touched file: no new problem; the 8 errors and 1 warning in src/app/api/ai/route.ts (`any`, an unused `req`) are on 5a7e9c57 too, 8 lines earlier, on no line this step wrote. `node scripts/check-schema-sql.mjs` passes.
+
+### Deploy notes (step 3, in the one merge of steps 1 to 4)
+
+No SQL to apply, no schema change, no environment flag. What customers notice, with steps 1 to 4 together:
+1. **Every screen that shows who someone reports to shows this workspace's line**: the person's record, Members, the Directory and its export, the Org chart, My team and its table, Who can see this record, the people lists behind the pickers, the peer suggestions of a review and the Owner's Ask AI snapshot. Someone who works here through another workspace shows the manager, dotted-line managers and reports they have here, before and after they switch.
+2. **Report counts count the people who report to someone here**, people here through a membership included, and never the people who report to them in another workspace. The Directory's sort by reports follows.
+3. **The record no longer says "Reports to someone in another workspace" or "N lines kept for another workspace"**: no other workspace's line is read there.
+4. **A record of someone here through a membership lists their dotted-line managers here**, and their dotted lines can be read here (Edit details offers them from step 5).
+5. **Who can see this record names the managers this workspace's lines give reach**, the same people the access engine lets in.
+
+## Step 3, review fixes
+
+The review is ~/workwrk-launch-backup/agents/workspace-status-2/step3-review.md: no high and no medium findings. The lows are fixed or noted as the coordinator ruled. Same branch, still not committed. **No SQL.**
+
+### L1: the anchored record's report exclusion is held by a behaviour test
+
+- In workspace-lines-surfaces.test.ts, "lists each manager's reports here" now gives Bea (anchored in B, her account line naming Max, B's) an A membership with line Ada, and Zoe (anchored in B, her account line naming Pat) an A membership with no line there. Max's A record must stay Kai and Pat, and Pat's A record Abe.
+- On 5a7e9c57 those two A assertions fail on their own (the test's B half removed for the check): Max's A record answers Bea, Kai and Pat, and Pat's Abe and Zoe. The old anchored record read the `directReports` relation and named everyone with a seat in A, so a B colleague whose own line names Max was listed as his A report.
+- The comments are corrected: before, Max's reports in B were Bea, Kai and Pat (not "none"); Zoe was left out of Pat's A record only because she held no seat in A.
+
+### L4: /api/users counts KRA assignments where it did before
+
+`_count: { select: { kraAssignments: !directoryCard } }`, as before step 3: never for the directory card. No caller needs it now. (A scope=directory request is answered by directoryList before this select, so it is never left empty.)
+
+### L5: the kept-seat rule on every surface that names a manager or counts reports
+
+- New describe in workspace-lines-surfaces.test.ts, "the kept-seat rule on every surface that names a manager or counts reports". It reads Bea's manager, Pat's manager and Dana's reports in B on the record, Members, the Directory, the export and /api/users.
+  - "names a manager deactivated here, and one on leave, and counts a deactivated report": B deactivates Max through his membership and Dana goes on leave. Max is still named as Bea's manager on all five, Dana as Pat's on all five, and Dana still counts Max among her three reports (the record, the Directory's count, /api/users's count).
+  - "never names or counts a manager this workspace removed": Max's B membership removed. Bea has no manager on any of the five, and Dana counts two.
+- A switch to live seats fails the first test. Each switch was made once in place and taken back (git checkout of the untouched file): managersWithSeatHere reading live seats (profile-here.ts), and reportsHereOf defaulting to "live" (acting-workspace.ts). A switch to active seats fails it on Dana's leave.
+
+### Notes
+
+- **L2, for the final sweep.** "Who can see this record" names a manager deactivated here, to whom the engine gives no reach: record-access/route.ts 57 (the chain) and 67 (the dotted lines) read `inWorkspaceWhere(..., { deactivatedToo: true })`. B deactivated Rita through her membership, and Pat's B line or a B dotted line names her: the panel lists Rita among those who can read Pat's people data, which her B seat cannot (D12; countedDottedManagerIds reads live levels). Nothing leaks, and it predates step 3 (batch 5). Smallest fix: still walk through a deactivated manager to the people above, but leave them out of `chain`, and read the dotted managers at live seats.
+- **L3, under step 9.** The Directory's sort by reports at 5,000 people, now in memory for every query: added to step 9's list above.
+- **The review's "For step 4"** (8 items, with file:line) is copied under step 4 above, after the step 2 pairings. Item 7 lists the client code no source feeds any more (person-record.tsx, edit-details-dialog.tsx, named-here.ts dottedElsewhereWords, `dottedKept`), since the contract test skips client files.
+
+### Files
+
+Changed in this pass: src/app/api/users/route.ts (L4), src/lib/people/workspace-lines-surfaces.test.ts (L1, L5), docs/plans/workspace-status-2.md (step 4's list, step 9's measure, this section).
+
+### Tests
+
+- workspace-lines-surfaces.test.ts: 23 tests (21 before, plus L5's 2), all pass. Against 5a7e9c57's sources (the 13 step 3 sources put back in place, the tests kept, then restored and checked identical): all 23 fail, and L1's A assertions fail on their own as above.
+- Every test related to src/app/api/users/route.ts: 4 files, 64 tests, all pass. The touched folders (src/lib/people, src/lib/access, src/app/api/users): 135 files, 2,206 tests, all pass.
+- Type check clean, run twice with the 6 GB heap. ESLint on this pass's files: no problem.

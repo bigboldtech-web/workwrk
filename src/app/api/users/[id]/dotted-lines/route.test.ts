@@ -15,7 +15,8 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 // The org: boss manages mid, mid manages leaf; side has a dotted line to
 // leaf (so side sits below leaf); stranger is unrelated.
 let managers: Map<string, string | null>;
-let dotted: Array<{ userId: string; managerId: string }>;
+/** Each line's workspace (E2): "org-1", this one, unless it says otherwise. */
+let dotted: Array<{ userId: string; managerId: string; organizationId?: string }>;
 const writes: string[] = [];
 // People who hold the Agent tier when read under the role lock (batch 3:
 // a role change can land between the first check and the write).
@@ -31,8 +32,10 @@ const rawReads: string[] = [];
 
 vi.mock("@/lib/prisma", () => {
   const userDottedLine = {
-    findMany: async (args: { where: { userId?: string } }) =>
-      (args.where.userId ? dotted.filter((d) => d.userId === args.where.userId) : dotted).map((d) => ({ ...d, role: null, manager: { id: d.managerId, firstName: d.managerId, lastName: "", avatar: null } })),
+    findMany: async (args: { where: { userId?: string; organizationId?: string } }) =>
+      (args.where.userId ? dotted.filter((d) => d.userId === args.where.userId) : dotted)
+        .filter((d) => args.where.organizationId === undefined || (d.organizationId ?? "org-1") === args.where.organizationId)
+        .map((d) => ({ ...d, role: null, manager: { id: d.managerId, firstName: d.managerId, lastName: "", avatar: null } })),
     deleteMany: async (args: { where: { managerId: { notIn: string[] } } }) => { writes.push("deleteMany"); kept.push(args.where.managerId.notIn); return { count: 0 }; },
     upsert: async () => { writes.push("upsert"); return {}; },
   };
@@ -60,6 +63,9 @@ vi.mock("@/lib/prisma", () => {
         ...user,
         findFirst: async (args: { where: { id: string } }) =>
           managers.has(args.where.id) ? { id: args.where.id, managerId: managers.get(args.where.id) ?? null, firstName: "A", lastName: "B" } : null,
+        // The GET's seat check (personSeatIn): everyone in `managers` is anchored here.
+        findUnique: async (args: { where: { id: string } }) =>
+          managers.has(args.where.id) ? { organizationId: "org-1", ...legacyLevelRow("EMPLOYEE"), status: "ACTIVE", deletedAt: null, adminScopes: [], managerId: managers.get(args.where.id) ?? null } : null,
       },
       organizationMembership,
       userDottedLine,
@@ -182,10 +188,10 @@ describe("reportTreeOf (the org chart's Dotted lines picker)", () => {
 describe("PUT and GET keep the dotted lines another workspace relies on", () => {
   beforeEach(() => {
     // gil works only in the client workspace; leaf works there too, and has
-    // a dotted line to gil, the client workspace's.
+    // a dotted line to gil, the client workspace's (its row names "client", E2).
     anchoredElsewhere = new Set(["gil"]);
     memberOf = { leaf: { client: "EMPLOYEE" } };
-    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil" }];
+    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil", organizationId: "client" }];
   });
 
   it("saving the lines here never deletes that one", async () => {
@@ -232,7 +238,7 @@ describe("PUT and GET say how many lines are kept for another workspace", () => 
   beforeEach(() => {
     anchoredElsewhere = new Set(["gil"]);
     memberOf = { leaf: { client: "EMPLOYEE" } };
-    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil" }];
+    dotted = [{ userId: "side", managerId: "leaf" }, { userId: "leaf", managerId: "gil", organizationId: "client" }];
   });
 
   it("the PUT answers the kept line as a count, never among the lines it manages", async () => {
@@ -242,11 +248,18 @@ describe("PUT and GET say how many lines are kept for another workspace", () => 
     expect(r.body).toEqual({ managerIds: ["stranger"], keptElsewhere: 1 });
   });
 
-  it("GET answers the count too", async () => {
+  // workspace-status-2 E2, E6, step 3: the GET reads THIS workspace's rows
+  // only, so another workspace's line is neither listed nor counted. Before:
+  // { managers: [], keptElsewhere: 1 }, read from every workspace's rows.
+  it("GET reads this workspace's rows only, and counts none of another workspace's", async () => {
     const res = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) });
-    expect(await res.json()).toMatchObject({ managers: [], keptElsewhere: 1 });
-    memberOf = {};
-    const none = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) });
-    expect(await none.json()).toMatchObject({ keptElsewhere: 0 });
+    const body = await res.json();
+    expect(body.managers).toEqual([]);
+    expect(body).not.toHaveProperty("keptElsewhere");
+    // The same line as this workspace's own row is this workspace's to list.
+    memberOf = { gil: { "org-1": "MANAGER" }, leaf: { client: "EMPLOYEE" } };
+    dotted = [{ userId: "leaf", managerId: "gil" }];
+    const own = await (await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "leaf" }) })).json();
+    expect(own.managers.map((m: { id: string }) => m.id)).toEqual(["gil"]);
   });
 });

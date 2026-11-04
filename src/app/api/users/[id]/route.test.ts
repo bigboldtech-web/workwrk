@@ -59,6 +59,8 @@ const st = vi.hoisted(() => ({
   followed: [] as string[][],
   /** Live Owners (batch 8: an Owner's removal or deactivation is refused for an Admin who is none). */
   owners: new Set<string>(),
+  /** The record GET's card read, as the route asked for it (workspace-status-2 step 3). */
+  cardArgs: null as null | { select?: Record<string, unknown> },
 }));
 
 const TARGET = { id: "u-max", organizationId: "org1", ...legacyLevelRow("EMPLOYEE"), roleId: null, managerId: null, deletedAt: null, status: "ACTIVE", firstName: "Max", lastName: "Chen" };
@@ -67,14 +69,16 @@ vi.mock("@/lib/prisma", () => {
   const user = {
     // A manager lookup (managerCandidateIn) names someone in st.people, with
     // its where checked; anything else reads the target.
-    findFirst: async (a: { where?: { id?: string; organizationId?: string; deletedAt?: null } } = {}) => {
+    findFirst: async (a: { where?: { id?: string; organizationId?: string; deletedAt?: null }; select?: Record<string, unknown> } = {}) => {
+      if (a.select && "dottedLineToManagers" in a.select) st.cardArgs = a;
       const p = a.where?.id ? st.people[a.where.id] : undefined;
       if (!p) return { ...st.target };
       if (a.where?.organizationId && p.organizationId !== a.where.organizationId) return null;
       if (a.where && "deletedAt" in a.where && p.deletedAt) return null;
       return { id: a.where?.id, ...p };
     },
-    findMany: async (a: { where: { id: { in: string[] } } }) => a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })),
+    // By id; or who reports to someone here (reportsHereOf's anchored half): nobody, in these tests.
+    findMany: async (a: { where: { id?: { in: string[] }; managerId?: unknown } }) => (a.where.id ? a.where.id.in.filter((id) => st.people[id]).map((id) => ({ id, ...st.people[id] })) : []),
     findUnique: async () => ({ ...st.target }),
     update: async (a: { data: Record<string, unknown> }) => {
       st.updates.push(a.data);
@@ -103,17 +107,20 @@ vi.mock("@/lib/prisma", () => {
       const role = st.memberships[a.where.userId_organizationId.userId];
       return role ? { role } : null;
     },
-    findMany: async (a: { where: { userId: { in: string[] }; organizationId?: string | { not?: string; in?: string[] } } }) => {
+    findMany: async (a: { where: { userId?: { in: string[] }; managerId?: unknown; organizationId?: string | { not?: string; in?: string[] } } }) => {
+      // Who reports to someone here through a membership (reportsHereOf's membership half): nobody, in these tests.
+      if (!a.where.userId) return [];
+      const userIds = a.where.userId;
       const w = a.where.organizationId;
       // Memberships in other workspaces (batch 6), read with { not } or { in }.
       if (w && typeof w === "object") {
-        return a.where.userId.in.flatMap((userId) =>
+        return userIds.in.flatMap((userId) =>
           Object.entries(st.elsewhere[userId] ?? {})
             .filter(([org]) => (w.not === undefined || org !== w.not) && (w.in === undefined || w.in.includes(org)))
             .map(([organizationId, role]) => ({ userId, organizationId, role })),
         );
       }
-      return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
+      return userIds.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, organizationId: "org1", role: st.memberships[userId] }));
     },
     // The account's memberships in other workspaces (shared-identity.ts identityShared, the final review H1).
     count: async (a: { where: { userId: string; organizationId: { not: string } } }) =>
@@ -277,6 +284,7 @@ beforeEach(() => {
   st.mayHandOver = true;
   st.followed = [];
   st.owners = new Set();
+  st.cardArgs = null;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -874,27 +882,36 @@ describe("a line another workspace counts is shown as such, and asked about befo
     _count: { kudosReceived: 0, kpiRecords: 0, reviewsAsSubject: 0 },
   });
 
-  it("the record says Reports to someone in another workspace, never who", async () => {
+  // workspace-status-2 E1, E2, E6, step 3: the record reads THIS
+  // workspace's line, dotted rows and reports, so a line of another
+  // workspace is never there to be named or said about. Before: batch 7's
+  // "Reports to someone in another workspace" (managerElsewhere) and its
+  // count of dotted lines kept for another workspace (dottedElsewhere).
+  it("the record names nobody of another workspace, and says nothing about a line there", async () => {
     st.target = card([]);
     const res = await get();
     expect(res.status).toBe(200);
     const body = await res.json();
-    // Before: manager null and nothing else, so the card said "Nobody".
     expect(body.manager).toBeNull();
-    expect(body.managerElsewhere).toBe(true);
+    expect(body).not.toHaveProperty("managerElsewhere");
+    expect(body).not.toHaveProperty("dottedElsewhere");
     expect(JSON.stringify(body)).not.toContain("Dana");
   });
 
-  it("the record leaves out a dotted line kept for another workspace, and counts it", async () => {
-    // ava is an Agent here and a manager where Max also works.
+  it("the record reads this workspace's dotted lines, and lists each to someone with a seat here, an Agent here too", async () => {
+    // ava is an Agent here (through a membership) and a manager where Max also works.
     st.people.ava = here({ organizationId: "client", firstName: "ava" });
     st.memberships = { ava: "AGENT" };
     st.elsewhere = { "u-max": { client: "EMPLOYEE" } };
     st.target = card(["ava", "sam"]);
     const body = await (await get()).json();
-    // Before: ava listed, and the dialog let her be taken off while the PUT kept her.
-    expect(body.dottedManagers.map((d: { id: string }) => d.id)).toEqual(["sam"]);
-    expect(body.dottedElsewhere).toBe(1);
+    // The card asks for this workspace's rows only (E2): another workspace's copy is never read.
+    expect((st.cardArgs?.select?.dottedLineToManagers as { where?: unknown }).where).toEqual({ organizationId: "org1" });
+    // Before: ["sam"] and dottedElsewhere 1, ava's row here kept out as another workspace's.
+    expect(body.dottedManagers.map((d: { id: string }) => d.id)).toEqual(["ava", "sam"]);
+    expect(body).not.toHaveProperty("dottedElsewhere");
+    // The reports are read here (reportsHereOf), never the cross-workspace relation.
+    expect(st.cardArgs?.select).not.toHaveProperty("directReports");
   });
 
   it("PATCH asks before replacing it: 409 manager_elsewhere, nothing written", async () => {

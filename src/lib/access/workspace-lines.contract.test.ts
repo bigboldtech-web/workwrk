@@ -106,7 +106,7 @@ interface Writer {
 }
 
 /** The steps of this program whose builder has finished: none of their (b) entries or writers may remain. */
-const MERGED: readonly Step[] = [2];
+const MERGED: readonly Step[] = [2, 3];
 /** What the one merge of steps 1 to 4 (with 5, 7 and 8) needs MERGED to hold. */
 const MERGE_NEEDS: readonly Step[] = [2, 3, 4, 5, 7, 8];
 
@@ -118,7 +118,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(dashboard)/settings/structure/page.tsx": { kinds: ["line"], mark: "b", step: 8, why: "counts people anchored here with no manager and by department: both halves with E15's helper" },
   "src/app/(dashboard)/team/alignment/page.tsx": { kinds: ["line"], mark: "a", why: "the Sub-teams pill by this workspace's lines (workspacePeopleLines, reportsHereOf, both halves), the drill's manager read at their seat here; the rows via getTeamAlignment (step 2)" },
   "src/app/(dashboard)/team/rollup/page.tsx": { kinds: ["line", "profile"], mark: "a", why: "the org-wide roots by this workspace's lines (workspacePeopleLines, both halves, step 2); a sub-team manager's job title shown only when it is this workspace's" },
-  "src/app/api/ai/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "the Owner snapshot counts directReports across workspaces" },
+  "src/app/api/ai/route.ts": { kinds: ["line", "profile"], mark: "a", why: "the Owner snapshot's people anchored here, each with their reports HERE (reportsHereOf, both halves), never the cross-workspace directReports count (step 3)" },
   "src/app/api/announcements/[id]/acknowledge/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the acknowledgements list by department, anchored only" },
   "src/app/api/announcements/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the audience by the account's department and office" },
   "src/app/api/announcements/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the audience by the account's department and office" },
@@ -143,7 +143,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/me/alignment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "the viewer's own alignment, their manager and placement: a membership person's people data here is a known limit" },
   "src/app/api/me/export/route.ts": { kinds: ["profile"], mark: "c", why: "the person's own data export, account-wide" },
   "src/app/api/me/route.ts": { kinds: ["line", "profile"], mark: "c", why: "the person's own place card, their manager included, by design (phase 1)" },
-  "src/app/api/my-team/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "My team's manager and reports from the account line (step 3 names it)" },
+  "src/app/api/my-team/route.ts": { kinds: ["line", "profile"], mark: "a", why: "each member's managerId and so directReportIds from the line their seat here holds (seatsHeldFor), the lines the walk climbed, named only with a seat here (step 3)" },
   "src/app/api/offices/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "an office's member counts, anchored only (Office.members)" },
   "src/app/api/okrs/my-okrs/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title" },
   "src/app/api/okrs/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title" },
@@ -159,7 +159,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/reviews/[id]/calibration/route.ts": { kinds: ["profile"], mark: "a", why: "shows title and department only when they belong here" },
   "src/app/api/reviews/[id]/launch/route.ts": { kinds: ["line", "profile"], mark: "b", step: 8, why: "the reviewer via effectiveManagersOf reads the line here (step 2, done); the cycle's department audience, anchored only (step 8)" },
   "src/app/api/reviews/[id]/manager-review/route.ts": { kinds: ["profile"], mark: "a", why: "the writer via reviewerFacts, which reads the line here (step 2: the subject's unused account line is no longer read); title and department shown only when they belong here" },
-  "src/app/api/reviews/[id]/peers/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "peer suggestions (\"Their manager\", \"Reports to them\", \"Same manager\", \"Same department\") from the account's line and department: not in the map, found by this search" },
+  "src/app/api/reviews/[id]/peers/route.ts": { kinds: ["line", "profile"], mark: "a", why: "peer suggestions (\"Their manager\", \"Reports to them\", \"Same manager\", \"Same department\") from the line and the placement the subject's seat here holds (linesHereOf, seatPlacementsHere), the pool's people anchored here by their own line (step 3)" },
   "src/app/api/reviews/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "the writer via reviewerFacts, which reads the line here (step 2: the subject's account line is no longer read or sent); title and department shown only when they belong here" },
   "src/app/api/role-boundaries/request/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holders, anchored only" },
   "src/app/api/roles/[id]/alignment/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holder count, anchored only (Role.users)" },
@@ -176,16 +176,16 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/spaces/[id]/workload/route.ts": { kinds: ["profile"], mark: "a", why: "capacity at the seat here (capacityHereOf, step 6)" },
   "src/app/api/talent-assessment/people/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a membership person's talent data here is a known limit; anchored people's own line and placement" },
   "src/app/api/talent-assessment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a membership person's talent data here is a known limit; anchored people's own line and placement" },
-  "src/app/api/team/members-work/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "the Reports to filter by the account line" },
+  "src/app/api/team/members-work/route.ts": { kinds: ["line", "profile"], mark: "a", why: "the Reports to filter by the line each seat here holds: the account's for the anchored half, the membership's own for the membership half (step 3)" },
   "src/app/api/team/workload/route.ts": { kinds: ["profile"], mark: "b", step: 5, why: "capacity at the seat here (step 6); canEditCapacity for membership people (E7)" },
   "src/app/api/users/[id]/agent-reports/route.ts": { kinds: ["line"], mark: "b", step: 4, why: "via moveAgentReports (the moved lines' audit)" },
-  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "GET by organizationId (step 3), PUT through writeDottedHere, the keep-elsewhere list retired (step 4)" },
+  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "GET reads this workspace's rows, for a subject of either kind, with no count of another workspace's (step 3, done); PUT through writeDottedHere, the keep-elsewhere list retired (step 4)" },
   "src/app/api/users/[id]/handover/route.ts": { kinds: ["line"], mark: "b", step: 4, why: "the summary's reports by the account line: every report here through reportsHereOf" },
-  "src/app/api/users/[id]/record-access/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 3, why: "the walk up the account line and every workspace's dotted lines" },
-  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 3, why: "GET's manager, dotted managers and reports (step 3); PATCH, the clears on a restore and a reactivation (step 4); a membership person's profile and lines (step 5)" },
+  "src/app/api/users/[id]/record-access/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "the walk up the line each seat here holds (personSeatIn for the subject, linesHereOf up the line) and this workspace's dotted rows, as viewer.ts walks them (step 3)" },
+  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 4, why: "GET names the line the seat here holds, this workspace's dotted rows and the reports here (reportsHereOf) for both kinds (step 3, done); PATCH, the clears on a restore and a reactivation (step 4); a membership person's profile and lines (step 5)" },
   "src/app/api/users/[id]/seed-alignment/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's KRAs here are a known limit; seeds from the job title of someone anchored here" },
-  "src/app/api/users/export/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "the manager column from the account line, named only with a seat here (step 3 names it); the placement read at the seat (D18)" },
-  "src/app/api/users/route.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "POST makes an account here with its line (right); GET's manager columns and report counts (directReports across workspaces)" },
+  "src/app/api/users/export/route.ts": { kinds: ["line", "profile"], mark: "a", why: "Reports to from the line each row's seat here holds (the membership's for a membership person), named only with a seat here (step 3); the placement read at the seat (D18)" },
+  "src/app/api/users/route.ts": { kinds: ["line", "profile"], mark: "a", why: "POST makes an account here with its line (right); GET's manager columns from the line each seat here holds and every row's reports here (reportsHere), a sort by managerId at the seat too (step 3)" },
   "src/app/api/v1/openapi.json/route.ts": { kinds: ["profile"], mark: "a", why: "the public API's documentation text" },
   "src/app/api/v1/people/route.ts": { kinds: ["line", "profile"], mark: "a", why: "anchored rows, each with this workspace's own placement and line (phase 1's decision for the public API)" },
   "src/app/api/weekly-reviews/[id]/manager-review/route.ts": { kinds: ["line"], mark: "a", why: "via isInReportTree and effectiveManagerOf, which read the lines here (step 2); WeeklyReview.managerId is a stamp" },
@@ -199,7 +199,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/access/legacy-resolve.ts": { kinds: ["line"], mark: "c", why: "WeeklyReview.managerId, a stamp written once from the line of the moment" },
   "src/lib/access/manager-candidate.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "lineAbove walks the line each seat here holds and \"inactive\" is the seat's (step 2, done); staleLinesOf still reads the account's line and every workspace's dotted rows (step 4)" },
   "src/lib/access/manager-lines.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "factsHere, the walks and effectiveManagersOf read the line each seat here holds, reportsHereOf who reports here, the dotted reads this workspace's rows (step 2, done); the relied-line helpers retire (step 4)" },
-  "src/lib/access/members-list.server.ts": { kinds: ["line", "profile"], mark: "b", step: 3, why: "the row's manager and No manager from the account line (step 3 names it)" },
+  "src/lib/access/members-list.server.ts": { kinds: ["line", "profile"], mark: "a", why: "the row's manager and No manager from the line each seat here holds: the account's where anchored here, the membership's own otherwise (step 3)" },
   "src/lib/access/membership.ts": { kinds: ["line", "dotted"], mark: "a", why: "rule 6 (reportCountOf) counts the reports here (reportsHereOf) and this workspace's dotted lines; unattendedRecipient walks the line each seat here holds (step 2)" },
   "src/lib/access/node-access.ts": { kinds: ["line"], mark: "a", why: "reads the line with the session's row so personSeatIn answers the seat in one read; decides nothing by it" },
   "src/lib/access/object-share/goal.ts": { kinds: ["profile"], mark: "c", why: "behind ACCESS_V2_TABLES (off): the object share module reads people anchored here throughout and moves as one when the flag is turned on" },
@@ -223,11 +223,11 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/kpi-record.ts": { kinds: ["line"], mark: "a", why: "via getEffectiveReportTree, which walks the lines here (step 2)" },
   "src/lib/kpi-review.server.ts": { kinds: ["line"], mark: "a", why: "via effectiveManagerOf and countedDottedManagerIds, which read the line and the dotted rows here (step 2)" },
   "src/lib/people/culture-gate.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the boot's Candor and survey facts by the viewer's department and office" },
-  "src/lib/people/directory-list.server.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 3, why: "rows, the Reports to filter, No manager, report counts and their sort, and the chart's lines from the account line (step 3 names them)" },
+  "src/lib/people/directory-list.server.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "rows, the Reports to filter, No manager and the chart's managerId from the line each seat here holds, every report count and its sort from the reports here (reportsHere, in memory), the chart's dotted ids from this workspace's rows (step 3)" },
   "src/lib/people/directory-query.ts": { kinds: ["line"], mark: "a", why: "parses the Directory's filters; directory-list.server.ts applies them" },
   "src/lib/people/escalation-report.ts": { kinds: ["line"], mark: "a", why: "a pure count over the rows its caller reads" },
   "src/lib/people/handover.server.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "writeReportMoves through moveLinesHere, every report here counted, the relied-line machinery retired (E4 to E6)" },
-  "src/lib/people/named-here.ts": { kinds: ["line"], mark: "b", step: 3, why: "loses the elsewhere fields (E6)" },
+  "src/lib/people/named-here.ts": { kinds: ["line"], mark: "a", why: "a pure seat filter over the lines here its caller reads; the elsewhere fields are gone (E6, step 3)" },
   "src/lib/people/person-access.server.ts": { kinds: ["line"], mark: "a", why: "the chain via getTeamUserIds and the report tree, which walk the lines here; managerMapFor reads the lines here (workspacePeopleLines), the graph lineAbove walks too (step 2)" },
   "src/lib/people/person-fields.ts": { kinds: ["line", "profile"], mark: "b", step: 5, why: "PROFILE_ELSEWHERE goes and SEAT_FIELDS widens (E7)" },
   "src/lib/people/reporting-lines.ts": { kinds: ["line"], mark: "a", why: "pure: the callers pass this workspace's lines" },
@@ -553,8 +553,8 @@ describe("every reader and writer of a person's line and profile is listed (E16)
   it("holds the plan's named readers at their marks, by the account-line reads they still make", () => {
     const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
     const stillReads: Array<[string, RegExp]> = [
-      ["src/lib/access/members-list.server.ts", /user: \{ select: \{ managerId: true, createdAt: true \} \}/],
-      ["src/app/api/users/[id]/dotted-lines/route.ts", /prisma\.userDottedLine\.findMany\(\{\s+where: \{ userId: id[^}]*\}/],
+      // Step 4: the PUT's keep list, every workspace's rows by person (E6).
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /othersDottedLines\(ctx\.organizationId, id\)/],
     ];
     for (const [file, read] of stillReads) {
       expect(ENTRIES[file], file).toMatchObject({ mark: "b" });
@@ -584,5 +584,48 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     // Step 6 (live): the membership's placement and capacity, read at the seat.
     expect(ENTRIES["src/lib/access/seated-here.ts"]).toMatchObject({ kinds: ["profile"], mark: "a" });
     expect(code("src/lib/access/seated-here.ts")).toMatch(/MEMBERSHIP_SELECT = \{[^}]*departmentId: true, roleId: true, officeId: true, joinDate: true/);
+  });
+
+  // Step 3 (merged): every surface that shows a line shows THIS workspace's,
+  // held in the code. Each pattern is the read that replaced the account's
+  // line, the cross-workspace directReports relation or every workspace's
+  // dotted rows, and the old read is gone.
+  it("holds step 3's surfaces at the line here, by the reads that replaced the account's", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const readsHere: Array<[string, RegExp]> = [
+      ["src/app/api/users/[id]/route.ts", /reportsHereOf\(organizationId, \[managerId\]\)/],
+      ["src/app/api/users/[id]/route.ts", /seat\.managerId \? prisma\.user\.findUnique\(\{ where: \{ id: seat\.managerId \}/],
+      ["src/app/api/users/[id]/route.ts", /prisma\.userDottedLine\.findMany\(\{ where: \{ userId: id, organizationId: ctx\.organizationId \}/],
+      ["src/app/api/users/[id]/route.ts", /dottedLineToManagers: \{\s+where: \{ organizationId: ctx\.organizationId \}/],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /where: \{ userId: id, organizationId: ctx\.organizationId \}/],
+      ["src/app/api/users/[id]/record-access/route.ts", /let next = seat\.managerId;/],
+      ["src/app/api/users/[id]/record-access/route.ts", /next = \(await linesHereOf\(ctx\.organizationId, \[m\.id\]\)\)\.get\(m\.id\) \?\? null;/],
+      ["src/app/api/users/[id]/record-access/route.ts", /where: \{ organizationId: ctx\.organizationId, userId: subject\.id,/],
+      ["src/app/api/my-team/route.ts", /seatsHeldFor\(orgId, teamMembers\)/],
+      ["src/lib/access/members-list.server.ts", /managerId: r\.managerId \?\? null,/],
+      ["src/lib/people/directory-list.server.ts", /reportsHereOf\(organizationId, managerIds\)/],
+      ["src/lib/people/directory-list.server.ts", /seats = seats\.filter\(\(m\) => m\.seat\.managerId === w\.managerId\)/],
+      ["src/lib/people/directory-list.server.ts", /dottedLineToManagers: \{ where: \{ organizationId: ctx\.organizationId \}, select: \{ managerId: true \} \}/],
+      ["src/app/api/users/export/route.ts", /seatOfRow\(u\)\?\.managerId \?\? null/],
+      ["src/app/api/users/route.ts", /seatOf\.get\(u\.id\)!\.managerId \?\? null : u\.managerId/],
+      ["src/app/api/users/route.ts", /reportsHere\(orgId, users\.map\(\(u\) => u\.id\)\)/],
+      ["src/app/api/reviews/[id]/peers/route.ts", /linesHereOf\(organizationId, \[id\]\), seatPlacementsHere\(organizationId, \[row\]\)/],
+      ["src/app/api/ai/route.ts", /reportsHereOf\(orgId, users\.map\(\(u\) => u\.id\)\)/],
+      ["src/app/api/team/members-work/route.ts", /\.\.\.placement, \.\.\.line \}/],
+    ];
+    for (const [file, read] of readsHere) {
+      expect(ENTRIES[file], file).toBeDefined();
+      expect(code(file), file).toMatch(read);
+    }
+    // The reads they replaced are gone.
+    expect(code("src/app/api/users/[id]/route.ts")).not.toMatch(/directReports: \{|recordLinesOfOthers|managerElsewhere|dottedElsewhere/);
+    expect(code("src/app/api/users/[id]/dotted-lines/route.ts")).not.toMatch(/keptElsewhere: others\.size/);
+    expect(code("src/app/api/users/[id]/record-access/route.ts")).not.toMatch(/next = m\.managerId;|select: \{ \.\.\.PERSON, managerId: true \}/);
+    expect(code("src/lib/access/members-list.server.ts")).not.toMatch(/user: \{ select: \{ managerId: true/);
+    expect(code("src/lib/people/directory-list.server.ts")).not.toMatch(/directReports: \{|_count\.directReports|r\.user\?\.managerId|and\.push\(\{ managerId: w\.managerId \}\)/);
+    for (const file of ["src/app/api/users/route.ts", "src/app/api/ai/route.ts"]) expect(code(file), file).not.toMatch(/directReports: (true|\{)/);
+    expect(code("src/app/api/reviews/[id]/peers/route.ts")).not.toMatch(/subject: \{ select: \{ id: true, managerId: true/);
+    expect(code("src/lib/people/named-here.ts")).not.toMatch(/managerElsewhere|dottedElsewhere:|dottedKept/);
+    expect(code("src/lib/access/manager-lines.ts")).not.toMatch(/export async function recordLinesOfOthers/);
   });
 });

@@ -172,9 +172,10 @@ describe("every caller of the level helpers says which seats it means", () => {
     // who the record names, for someone anchored here and (the final review,
     // product M3) for a membership person's manager and reports here
     "src/app/api/users/[id]/route.ts": { kept: 2 },
-    // My team's level here for each member (the final review, security L3):
-    // a deactivated report stays listed, as the walk keeps them
-    "src/app/api/my-team/route.ts": { kept: 1 },
+    // My team's level here for each member (the final review, security L3)
+    // and, since workspace-status-2 step 3, the line their seat here holds
+    // (E1): kept seats, so a deactivated report stays listed, as the walk keeps them
+    "src/app/api/my-team/route.ts": { seats: 1 },
     "src/app/api/users/[id]/dotted-lines/route.ts": { kept: 1 }, // the dotted lines listed (PUT deletes what is left out)
     "src/lib/access/profile-here.ts": { kept: 1 }, // a manager is named only while they hold a seat here (D18; Members, the Directory, the chart, the exports, v1 and /api/users)
     // reportCountOf; unattendedRecipient (who takes work: step 4 walks past a
@@ -197,12 +198,13 @@ describe("every caller of the level helpers says which seats it means", () => {
     // a member's digest manager: their line here, the membership's (workspace-status-2 E1)
     "src/lib/access/digest-recipients.ts": { seats: 1 },
     "src/lib/people/handover.server.ts": { kept: 1 }, // who another workspace's record names
-    // managesNobody, countedDottedManagerIds (reach), othersDottedLines,
-    // managerLineIsOthers and recordLinesOfOthers (whose a line is) live;
+    // managesNobody, countedDottedManagerIds (reach), othersDottedLines and
+    // managerLineIsOthers (whose a line is) live (recordLinesOfOthers retired
+    // with workspace-status-2 step 3, E6);
     // liveHereAmong kept; factsHere, effectiveManagersOf and
     // managersPastAgents at the seat (the line each seat here holds,
     // workspace-status-2 E1; a membership counted only while live, as before).
-    "src/lib/access/manager-lines.ts": { live: 5, kept: 1, seats: 3 },
+    "src/lib/access/manager-lines.ts": { live: 4, kept: 1, seats: 3 },
   };
 
   function sources(dir: string, out: string[] = []): string[] {

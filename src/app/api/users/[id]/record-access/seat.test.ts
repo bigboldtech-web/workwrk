@@ -26,9 +26,11 @@ beforeEach(() => {
   for (const id of ["a", "b"]) db.seed("organization", { id, name: `Org ${id}`, status: "ACTIVE" });
   db.seed("user", { id: "olga", email: "olga@x.test", firstName: "Olga", lastName: "Ng", avatar: null, organizationId: "b", ...legacyLevelRow("SUPER_ADMIN"), managerId: null });
   db.seed("user", { id: "mo", email: "mo@x.test", firstName: "Mo", lastName: "Ray", avatar: null, organizationId: "b", ...legacyLevelRow("MANAGER"), managerId: null });
-  // Pat: anchored in A, here through a membership, reporting to Mo.
-  db.seed("user", { id: "pat", email: "pat@x.test", firstName: "Pat", lastName: "Lee", avatar: null, organizationId: "a", ...legacyLevelRow("EMPLOYEE"), managerId: "mo" });
-  db.seed("organizationMembership", { id: "m-pat-b", userId: "pat", organizationId: "b", role: "EMPLOYEE" });
+  // Pat: anchored in A, here through a membership, reporting to Mo HERE:
+  // the line is on her membership (workspace-status-2 E1); her account's
+  // line is A's, to Ned.
+  db.seed("user", { id: "pat", email: "pat@x.test", firstName: "Pat", lastName: "Lee", avatar: null, organizationId: "a", ...legacyLevelRow("EMPLOYEE"), managerId: "ned" });
+  db.seed("organizationMembership", { id: "m-pat-b", userId: "pat", organizationId: "b", role: "EMPLOYEE", managerId: "mo" });
   db.seed("user", { id: "ned", email: "ned@x.test", firstName: "Ned", lastName: "Fox", avatar: null, organizationId: "a", ...legacyLevelRow("EMPLOYEE"), managerId: null });
 });
 

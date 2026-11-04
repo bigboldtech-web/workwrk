@@ -73,9 +73,11 @@ describe("Members lists everyone who belongs here (D11)", () => {
     expect(pat).toMatchObject({ department: null, jobTitle: null, office: null, manager: null, weeklyCapacityHours: null });
     expect(pat).not.toHaveProperty("mfaEnabled");
     expect(JSON.stringify(pat)).not.toMatch(/Finance|Amy/);
-    // A manager who holds a seat here is named.
+    // A manager who holds a seat here is named: the one Pat's line HERE
+    // names, on her membership (workspace-status-2 E1); her account still
+    // names Amy, A's.
     person("max", "b", "MANAGER");
-    db.row("user", "pat").managerId = "max";
+    db.row("organizationMembership", "m-pat-b").managerId = "max";
     expect((await listMembers("b", ORG, {})).rows.find((r) => r.id === "pat")?.manager).toEqual({ id: "max", name: "Max Lee" });
     // Their joining date here is their membership's.
     expect(pat.joinedAt).toBe((db.tables.organizationMembership.find((m) => m.userId === "pat" && m.organizationId === "b")!.createdAt as Date).toISOString());
@@ -88,12 +90,13 @@ describe("Members lists everyone who belongs here (D11)", () => {
     expect(names(await listMembers("b", ORG, { role: "ADMIN" }))).toEqual(["ida"]);
     expect(names(await listMembers("b", ORG, { role: "MEMBER" })).sort()).toEqual(["bea", "dan", "pat", "rex"]);
     expect(names(await listMembers("b", ORG, { role: "OWNER" }))).toEqual(["olga"]);
-    // Pat's account reports to Amy, who has no seat here: her row says Nobody,
-    // and No manager lists her (the step 3 review L3; before, the account's
-    // line left her out, which told B she had a manager in A).
+    // Pat's account reports to Amy, who has no seat here, and her line here
+    // (her membership's, workspace-status-2 E1) names nobody: her row says
+    // Nobody, and No manager lists her (the step 3 review L3; before, the
+    // account's line left her out, which told B she had a manager in A).
     expect(names(await listMembers("b", ORG, { noManager: true })).sort()).toEqual(["bea", "ida", "olga", "pat"]);
     person("max", "b", "MANAGER");
-    db.row("user", "pat").managerId = "max";
+    db.row("organizationMembership", "m-pat-b").managerId = "max";
     expect(names(await listMembers("b", ORG, { noManager: true })).sort()).toEqual(["bea", "ida", "max", "olga"]);
     // This workspace's own department matches only its own people.
     expect(names(await listMembers("b", ORG, { departmentId: "dep-b" }))).toEqual(["bea"]);

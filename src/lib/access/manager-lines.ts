@@ -451,9 +451,10 @@ export type OthersManagerLine = "unnamed" | "agent";
 
 /**
  * Is the person's stored Reports to another workspace's line (batch 7)?
- * User.managerId is one column, so a write here changes it there too. The
- * person record says "Reports to someone in another workspace" for an
- * unnamed one, and PATCH Reports to asks before it replaces either.
+ * User.managerId is one column, so a write here changes it there too.
+ * PATCH Reports to asks before it replaces either (the person record no
+ * longer says it since workspace-status-2 step 3; this ask retires in step
+ * 4, E6).
  * Batch 8: an Agent here who manages the person in another workspace counts
  * too. Before, only a manager with no level here did, so an Admin moving a
  * report off an Agent here (the Members drawer tells them to) rewrote that
@@ -469,31 +470,8 @@ export async function managerLineIsOthers(organizationId: string, userId: string
   return managerLineStanding(held.get(managerId), there.get(lineKey({ personId: userId, managerId })));
 }
 
-/**
- * The lines on a person's record that are another workspace's (batch 7), in
- * one pass: whether the stored manager is (managerLineIsOthers's rule, an
- * Agent here included since batch 8), and which dotted lines are
- * (othersDottedLines's rule). GET /api/users/[id] leaves those out of the
- * names it shows and says how many there are instead; a manager it names
- * (an Agent here) stays named (named-here.ts).
- */
-export async function recordLinesOfOthers(
-  organizationId: string,
-  userId: string,
-  managerId: string | null,
-  dottedManagerIds: readonly string[],
-  db: Db = prisma,
-): Promise<{ managerElsewhere: boolean; dottedKept: Set<string> }> {
-  const dotted = [...new Set(dottedManagerIds)];
-  const ids = [...new Set([...(managerId ? [managerId] : []), ...dotted])];
-  if (ids.length === 0) return { managerElsewhere: false, dottedKept: new Set() };
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, ids, db),
-    linesElsewhere(organizationId, ids.map((m) => ({ personId: userId, managerId: m })), db),
-  ]);
-  const standing = (m: string) => there.get(lineKey({ personId: userId, managerId: m }));
-  return {
-    managerElsewhere: !!managerId && managerLineStanding(held.get(managerId), standing(managerId)) !== null,
-    dottedKept: new Set(dotted.filter((m) => dottedIsOthers(held.get(m), standing(m)))),
-  };
-}
+// recordLinesOfOthers (the record's "Reports to someone in another
+// workspace" and its count of dotted lines kept for another workspace)
+// retired with workspace-status-2 step 3 (E6): the record reads the line,
+// the dotted lines and the reports THIS workspace holds, so none of
+// another workspace's is ever there to be said about.

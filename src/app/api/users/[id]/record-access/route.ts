@@ -20,7 +20,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleCtx } from "@/lib/people/person-access.server";
 import { agentIdsIn } from "@/lib/access/manager-candidate";
-import { inWorkspaceWhere, personSeatIn } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, linesHereOf, personSeatIn } from "@/lib/access/acting-workspace";
 
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
 
@@ -34,30 +34,37 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!ctx) return err(401, "Unauthorized");
   if (ctx.orgRole === "GUEST") return err(404, "Not found");
   const { id } = await params;
-  // A seat here, of either kind (see the header).
-  if (!(await personSeatIn(ctx.organizationId, id))) return err(404, "Not found");
-  const subject = await prisma.user.findUnique({ where: { id }, select: { ...PERSON, managerId: true } });
+  // A seat here, of either kind (see the header), with the line it holds here.
+  const seat = await personSeatIn(ctx.organizationId, id);
+  if (!seat) return err(404, "Not found");
+  const subject = await prisma.user.findUnique({ where: { id }, select: PERSON });
   if (!subject) return err(404, "Not found");
 
-  // Managers up the solid line (the legacy walker has no depth cap; the
-  // loop guard stops a reporting cycle).
+  // Managers up the solid line HERE (workspace-status-2.md E1, step 3): the
+  // line each seat here holds (the account's for someone anchored here, the
+  // membership's otherwise), as viewer.ts and the trees walk it. Before, the
+  // walk climbed the account's line, so Pat's B record named her A manager,
+  // to whom B's engine gives no reach, and left out Dana, who has it. (The
+  // legacy walker has no depth cap; the loop guard stops a reporting cycle.)
   const chain: P[] = [];
   const seen = new Set<string>([subject.id]);
-  let next = subject.managerId;
+  let next = seat.managerId;
   while (next && !seen.has(next) && chain.length < 200) {
     seen.add(next);
     // Anyone on the line who works here, anchored here or through a
     // membership here (docs-found fixes batch 5), as the trees walk it.
     // inWorkspaceWhere is safe here (batch 6): the read is by id first.
-    const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }, select: { ...PERSON, managerId: true, deletedAt: true } });
+    const m = await prisma.user.findFirst({ where: { id: next, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) }, select: { ...PERSON, deletedAt: true } });
     if (!m || m.deletedAt) break;
     chain.push({ id: m.id, firstName: m.firstName, lastName: m.lastName, avatar: m.avatar });
-    next = m.managerId;
+    // Their own line here, read at their seat (acting-workspace.ts linesHereOf).
+    next = (await linesHereOf(ctx.organizationId, [m.id])).get(m.id) ?? null;
   }
-  // Narrowed by "UserDottedLine_userId_idx" first, so inWorkspaceWhere
+  // This workspace's dotted lines only (E2). Narrowed by
+  // "UserDottedLine_organizationId_userId_idx" first, so inWorkspaceWhere
   // only filters this person's few dotted lines (batch 6).
   const dottedRows = await prisma.userDottedLine.findMany({
-    where: { userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) } },
+    where: { organizationId: ctx.organizationId, userId: subject.id, manager: { deletedAt: null, ...inWorkspaceWhere(ctx.organizationId, { deactivatedToo: true }) } },
     select: { manager: { select: PERSON } },
   });
   // An Agent is nobody's manager (AGENT_TIER_BLURB): an Agent on the solid

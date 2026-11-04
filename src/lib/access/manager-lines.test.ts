@@ -128,7 +128,6 @@ import {
   liveHereAmong,
   managerLineIsOthers,
   managesNobody,
-  recordLinesOfOthers,
   reportsThroughAgents,
 } from "./manager-lines";
 import { agentIdsIn } from "./manager-candidate";
@@ -395,7 +394,8 @@ describe("a Reports to another workspace relies on", () => {
   it("is the other workspace's when the manager holds the Agent tier here, as a dotted line is", async () => {
     // Before: false, since sam holds a level here.
     expect(await managerLineIsOthers(ORG, "ida", "sam")).toBe("agent");
-    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(true);
+    // The record's "Reports to someone in another workspace" (recordLinesOfOthers)
+    // retired with workspace-status-2 step 3 (E6): the record reads the line here.
   });
 
   it("is unnamed for a manager with no level here, and nobody's for a Manager here or an Agent there too", async () => {
@@ -405,7 +405,6 @@ describe("a Reports to another workspace relies on", () => {
     expect(await managerLineIsOthers(ORG, "ida", "mona")).toBeNull();
     st.memberships = st.memberships.map((m) => (m.userId === "sam" ? { ...m, role: "AGENT" } : m));
     expect(await managerLineIsOthers(ORG, "ida", "sam")).toBeNull();
-    expect((await recordLinesOfOthers(ORG, "ida", "sam", [])).managerElsewhere).toBe(false);
     expect(await managerLineIsOthers(ORG, "ida", null)).toBeNull();
   });
 });

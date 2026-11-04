@@ -88,18 +88,29 @@
 //
 // The legacy Task table (dead since Phase 2) and the check-ins no writer
 // ever fed are no longer read here.
+//
+// THE RECORD'S LINES ARE THIS WORKSPACE'S (docs/plans/workspace-status-2.md
+// E1, E2, E6, step 3). GET names the manager the person's seat here holds
+// (the account's line for someone anchored here, the membership's for
+// someone here through one), the dotted lines whose workspace is this one,
+// and the people who report to them here (reportsHereOf, both halves),
+// each only while that person holds a seat here (named-here.ts). Never the
+// cross-workspace `directReports` relation, another workspace's dotted rows,
+// or the account's line read for a membership person. So the batch 7
+// answers about another workspace's line (`managerElsewhere`,
+// `dottedElsewhere`) are gone: no such line is read here any more.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { levelsHeldIn, personSeatIn, type PersonSeat } from "@/lib/access/acting-workspace";
+import { levelsHeldIn, personSeatIn, reportsHereOf, type PersonSeat } from "@/lib/access/acting-workspace";
 import { MEMBERSHIP_PROFILE_SELECT, ownHere, placementsHere, seatPlacementsHere } from "@/lib/access/profile-here";
 import { ratingHere } from "@/lib/people/skill-ratings";
 import { SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, endSeat, endSeatWould, restoreSeat, type EndSeatResult, type RestoreSeatResult } from "@/lib/access/workspace-status";
 import { lockPerson } from "@/lib/access/workspace-anchor";
 import { identityShared, SHARED_IDENTITY_REFUSAL, SHARED_PERSON_FIELDS } from "@/lib/access/shared-identity";
-import { managerLineIsOthers, recordLinesOfOthers } from "@/lib/access/manager-lines";
+import { managerLineIsOthers } from "@/lib/access/manager-lines";
 import { namedHere, namedIds } from "@/lib/people/named-here";
 import { logActivity } from "@/lib/activity";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
@@ -366,6 +377,23 @@ function accessFor(
 const REPORT_SELECT = { id: true, firstName: true, lastName: true, avatar: true, organizationId: true, roleId: true, departmentId: true } as const;
 type ReportRow = Prisma.UserGetPayload<{ select: typeof REPORT_SELECT }>;
 
+/** A manager or a dotted-line manager as a record names them. */
+const NAMED_SELECT = { id: true, firstName: true, lastName: true, avatar: true } as const;
+
+/**
+ * The people who report to this person HERE (workspace-status-2.md E1, step
+ * 3): those anchored here whose account line names them and those here
+ * through a membership whose membership line names them (reportsHereOf,
+ * kept seats: a deactivated report is still listed, a removed one is not),
+ * in name order. Never the cross-workspace `directReports` relation, which
+ * also names the accounts whose line names them in another workspace.
+ */
+async function reportRowsHere(organizationId: string, managerId: string): Promise<ReportRow[]> {
+  const ids = (await reportsHereOf(organizationId, [managerId])).map((r) => r.id);
+  if (ids.length === 0) return [];
+  return prisma.user.findMany({ where: { id: { in: ids } }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }, { id: "asc" }], select: REPORT_SELECT });
+}
+
 /**
  * Each report's job title and department as THIS workspace holds them (the
  * final review, security M1; D18): the account's own for someone anchored
@@ -432,38 +460,39 @@ async function kudosHere(ctx: PeopleCtx, id: string, opts: { count?: boolean } =
  * the job title, department and office their membership here holds
  * (resolved to this workspace's own rows; never the account's, which are
  * the workspace it is anchored to), their join date here (the membership's,
- * else when they joined here), the manager they report to when that
- * manager holds a seat here, their reports here, the kudos given here, and
- * what this viewer may do. No people data (phone, birthday, KPIs, reviews,
+ * else when they joined here), the manager their membership's line names
+ * (workspace-status-2.md E1, step 3; never the account's, which is the
+ * workspace it is anchored to) and their dotted lines and reports HERE, each
+ * named while that person holds a seat here, the kudos given here, and what
+ * this viewer may do. No people data (phone, birthday, KPIs, reviews,
  * skills): this workspace holds none of theirs yet. `profileHere: false`,
  * so the page says once why the rest is read-only.
  */
 async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: string, seat: PersonSeat) {
-  const [who, joined] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id },
-      select: {
-        id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true,
-        manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
-        directReports: { where: { deletedAt: null }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }], select: REPORT_SELECT },
-      },
-    }),
+  const [who, joined, lineManager, dottedRows, reportRows] = await Promise.all([
+    prisma.user.findUnique({ where: { id }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true, createdAt: true } }),
     prisma.organizationMembership.findUnique({ where: { userId_organizationId: { userId: id, organizationId: ctx.organizationId } }, select: { ...JOIN_ROW_SELECT, ...MEMBERSHIP_PROFILE_SELECT } }),
+    // Their manager here: the line their membership holds (personSeatIn), never the account's.
+    seat.managerId ? prisma.user.findUnique({ where: { id: seat.managerId }, select: NAMED_SELECT }) : Promise.resolve(null),
+    // This workspace's dotted lines only (E2).
+    prisma.userDottedLine.findMany({ where: { userId: id, organizationId: ctx.organizationId }, select: { manager: { select: { ...NAMED_SELECT, deletedAt: true } } } }),
+    reportRowsHere(ctx.organizationId, id),
   ]);
   if (!who) return err(404, "User not found");
   const access = accessFor(ctx, relation, { id, deletedAt: seat.removedAt, accessLevel: seat.level }, false, false);
   const isGuest = ctx.orgRole === "GUEST";
+  const related = { manager: lineManager, dottedManagers: dottedRows.map((d) => d.manager), directReports: reportRows };
   const [placed, here, kudos] = await Promise.all([
     placementsHere(ctx.organizationId, joined ? [joined] : []),
     // Kept seats, as the anchored record names them (step 1 review M2).
-    levelsHeldIn(ctx.organizationId, [...(who.manager ? [who.manager.id] : []), ...who.directReports.map((r) => r.id)], prisma, { keptSeats: true }),
+    levelsHeldIn(ctx.organizationId, namedIds(related), prisma, { keptSeats: true }),
     kudosHere(ctx, id, { count: true }),
   ]);
+  const named = namedHere(related, here);
   const role = joined?.roleId ? placed.role.get(joined.roleId) ?? null : null;
-  const reports = isGuest ? [] : await reportsShownHere(ctx.organizationId, who.directReports.filter((r) => here.has(r.id)));
-  const { createdAt: _made, manager, directReports: _all, ...identity } = who;
+  const reports = isGuest ? [] : await reportsShownHere(ctx.organizationId, named.directReports);
+  const { createdAt: _made, ...identity } = who;
   void _made;
-  void _all;
   return NextResponse.json(
     {
       ...identity,
@@ -477,10 +506,8 @@ async function membershipRecord(ctx: PeopleCtx, relation: PersonRelation, id: st
       role: role ? { id: role.id, title: role.title, description: role.description, seniority: role.level } : null,
       department: joined?.departmentId ? placed.department.get(joined.departmentId) ?? null : null,
       office: joined?.officeId ? placed.office.get(joined.officeId) ?? null : null,
-      manager: manager && here.has(manager.id) ? manager : null,
-      managerElsewhere: false,
-      dottedManagers: [],
-      dottedElsewhere: 0,
+      manager: named.manager,
+      dottedManagers: named.dottedManagers,
       directReports: reports,
       presenceStatus: null,
       presenceUntil: null,
@@ -523,20 +550,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       accessLevel: true,
       joinDate: true,
       deletedAt: true,
-      managerId: true,
       // With their workspace, so only this workspace's own are shown (D18).
       role: { select: { id: true, title: true, description: true, level: true, organizationId: true } },
       department: { select: { id: true, name: true, color: true, organizationId: true } },
       office: { select: { id: true, name: true, city: true, country: true, isHeadquarters: true, organizationId: true } },
-      manager: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+      // Anchored here: the account's line is this workspace's (E1).
+      manager: { select: NAMED_SELECT },
+      // This workspace's dotted lines only (E2): never another workspace's copy.
       dottedLineToManagers: {
-        select: { manager: { select: { id: true, firstName: true, lastName: true, avatar: true, deletedAt: true } } },
-      },
-      directReports: {
-        where: { deletedAt: null },
-        orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
-        // Their placement as this workspace holds it (reportsShownHere, security M1).
-        select: REPORT_SELECT,
+        where: { organizationId: ctx.organizationId },
+        select: { manager: { select: { ...NAMED_SELECT, deletedAt: true } } },
       },
       // The manager rating this workspace gave (managerRatings, security M2).
       skills: { orderBy: { name: "asc" }, select: { id: true, name: true, selfRating: true, managerRatings: true } },
@@ -556,15 +579,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const dobRow = relation === "none" ? null : await prisma.user.findUnique({ where: { id }, select: { dateOfBirth: true } });
   const access = accessFor(ctx, relation, card, !!dobRow?.dateOfBirth);
   const isGuest = ctx.orgRole === "GUEST";
-  // Only people of this workspace are named (batch 6, src/lib/people/named-here.ts),
-  // and a line another workspace counts is said to be there, never named (batch 7).
-  const related = { manager: card.manager, dottedManagers: card.dottedLineToManagers.map((d) => d.manager), directReports: card.directReports };
-  const [here, others] = await Promise.all([
-    // Kept seats: someone deactivated here is still named, as when anchored here (step 1 review M2).
-    levelsHeldIn(ctx.organizationId, namedIds(related), prisma, { keptSeats: true }),
-    recordLinesOfOthers(ctx.organizationId, id, card.managerId, related.dottedManagers.map((d) => d.id)),
-  ]);
-  const named = namedHere(related, here, others);
+  // This workspace's lines (E1, E2): the account's line, this workspace's
+  // dotted rows and the reports here (reportsHereOf, both halves). Only
+  // people with a seat here are named (batch 6, src/lib/people/named-here.ts).
+  const related = { manager: card.manager, dottedManagers: card.dottedLineToManagers.map((d) => d.manager), directReports: await reportRowsHere(ctx.organizationId, id) };
+  // Kept seats: someone deactivated here is still named, as when anchored here (step 1 review M2).
+  const here = await levelsHeldIn(ctx.organizationId, namedIds(related), prisma, { keptSeats: true });
+  const named = namedHere(related, here);
   const reportsHere = isGuest ? [] : await reportsShownHere(ctx.organizationId, named.directReports);
   const ownRole = ownHere(card.role, ctx.organizationId);
   const base = {
@@ -586,11 +607,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     department: ownHere(card.department, ctx.organizationId),
     office: ownHere(card.office, ctx.organizationId),
     manager: named.manager,
-    // "Reports to someone in another workspace" (batch 7): never who.
-    managerElsewhere: named.managerElsewhere,
     dottedManagers: named.dottedManagers,
-    // Dotted lines kept for another workspace: counted, never named.
-    dottedElsewhere: named.dottedElsewhere,
     directReports: reportsHere,
     presenceStatus: presence?.presenceStatus ?? null,
     presenceUntil: presence?.presenceUntil ?? null,

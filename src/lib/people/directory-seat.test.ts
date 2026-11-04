@@ -141,8 +141,10 @@ describe("the Directory's rows of membership people, after the step 4 review", (
     const cy = (await dir()).data.find((r) => r.id === "cy")!;
     // Before: 2, Amy reporting to Cy in A counted here too.
     expect(cy.directReports).toBe(1);
-    db.seed("userDottedLine", { id: "d1", userId: "bea", managerId: "cy" });
-    db.seed("userDottedLine", { id: "d2", userId: "bea", managerId: "amy" });
+    // Both rows are B's (workspace-status-2 E2: each dotted line names its
+    // workspace); Amy holds no seat in B, so B's row to her names nobody here.
+    db.seed("userDottedLine", { id: "d1", userId: "bea", managerId: "cy", organizationId: "b" });
+    db.seed("userDottedLine", { id: "d2", userId: "bea", managerId: "amy", organizationId: "b" });
     const chart = (await (await directoryList(new NextRequest("https://app.test/api/users?fields=chart"))).json()) as { data: Row[] };
     // Before: ["cy", "amy"], Amy being A's alone.
     expect(chart.data.find((r) => r.id === "bea")?.dottedManagerIds).toEqual(["cy"]);

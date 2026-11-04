@@ -577,8 +577,11 @@ describe("the record names what this workspace holds (the final review)", () => 
   it("a report who works here through a membership shows the title and department this workspace holds, never the account's (security M1)", async () => {
     placements();
     person("mo", "b", "MANAGER", { phone: null, dateOfBirth: null });
-    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
-    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b" });
+    // Pat reports to Mo HERE, by her membership's line (workspace-status-2
+    // E1); her account's line is A's, to Ann.
+    person("ann", "a", "MANAGER");
+    Object.assign(user("pat"), { managerId: "ann", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { managerId: "mo", departmentId: "dep-b", roleId: "role-b" });
     const body = await (await get("mo")).json();
     // Before: { role: { title: "A Senior Engineer" }, department: { name: "A Platform" } }, A's, to every Member of B.
     expect(body.directReports).toEqual([{ id: "pat", firstName: "Pat", lastName: "Lee", avatar: null, role: { id: "role-b", title: "B Contractor" }, department: { id: "dep-b", name: "B Delivery" } }]);
@@ -611,8 +614,11 @@ describe("the record names what this workspace holds (the final review)", () => 
     person("mo", "b", "MANAGER");
     person("ria", "b", "EMPLOYEE", { managerId: "pat" });
     person("abe", "a", "EMPLOYEE", { managerId: "pat" });
-    Object.assign(user("pat"), { managerId: "mo", departmentId: "dep-a", roleId: "role-a" });
-    Object.assign(seatOf("pat", "b")!, { departmentId: "dep-b", roleId: "role-b", officeId: "off-b", joinDate: new Date("2026-07-01T00:00:00Z") });
+    // Her line here is her membership's (workspace-status-2 E1), to Mo; her
+    // account's is A's, to Ann.
+    person("ann", "a", "MANAGER");
+    Object.assign(user("pat"), { managerId: "ann", departmentId: "dep-a", roleId: "role-a" });
+    Object.assign(seatOf("pat", "b")!, { managerId: "mo", departmentId: "dep-b", roleId: "role-b", officeId: "off-b", joinDate: new Date("2026-07-01T00:00:00Z") });
     for (const [id, organizationId] of [["ku-a", "a"], ["ku-b", "b"]]) db.seed("kudos", { id, message: `from ${organizationId}`, companyValue: null, giverId: "olga", receiverId: "pat", organizationId, createdAt: new Date() });
     const body = await (await get("pat")).json();
     expect(body).toMatchObject({
@@ -630,7 +636,7 @@ describe("the record names what this workspace holds (the final review)", () => 
     expect(body.access.peopleData).toBe(false);
     expect(JSON.stringify(body)).not.toMatch(/A Platform|A Senior Engineer|from a/);
     // A manager with no seat here is never named.
-    user("pat").managerId = "abe";
+    seatOf("pat", "b")!.managerId = "abe";
     expect((await (await get("pat")).json()).manager).toBeNull();
   });
 });
