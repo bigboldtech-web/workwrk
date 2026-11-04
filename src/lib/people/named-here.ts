@@ -25,16 +25,10 @@ export function namedHere<M extends Named, D extends Named & { deletedAt: Date |
   };
 }
 
-/**
- * The words for dotted lines kept for another workspace (pure; batch 7),
- * after the names shown (`more`) or alone: how many, never whose. Only the
- * dotted-lines PUT still answers such a count (`keptElsewhere`), until its
- * keep list retires in step 4 of workspace-status-2 with these words.
- */
-export function dottedElsewhereWords(n: number, more: boolean): string | null {
-  if (n <= 0) return null;
-  return `${more ? "and " : ""}${n} ${n === 1 ? "line" : "lines"} kept for another workspace`;
-}
+// dottedElsewhereWords ("N lines kept for another workspace", the
+// dotted-lines PUT's `keptElsewhere` count) retired with that count in
+// workspace-status-2 step 4 (E6): the PUT keeps no line for another
+// workspace, so there is nothing to count.
 
 /** The ids levelsHeldIn must be asked about for namedHere. */
 export function namedIds(card: { manager: Named | null; dottedManagers: readonly Named[]; directReports: readonly Named[] }): string[] {

@@ -56,12 +56,12 @@
 // brings none back.
 //
 // The routes that end a seat ask first what the end WILL be (endSeatWould,
-// the same read under the same lock), because the reports whose line another
-// workspace relies on move only when the account itself ends (D4,
-// handover.server.ts moveReliedReportsAtEnd), never when the person moves to
-// their other workspace (D3) or leaves this one only (D5): there they still
-// work, and that workspace's line stays (`leavesOnlyHere` says which before
-// the handover runs).
+// the same read under the same lock), and endSeat writes only that end
+// (`expect`). Since workspace-status-2.md step 4 (E4, E6) no line moves with
+// an end: each workspace's handover moves its own reports first, and a line
+// rides on the row that holds the seat (the swap, E3). `leavesOnlyHere`
+// says, before the handover runs, whether their other workspaces are not
+// affected (the dialogs' D17 note).
 //
 // SEATS THE ONE-TIME SQL STEP ENDED WITH THE ACCOUNT (endedWithAccount,
 // D16; step 1 review M1). Before each workspace had a status of its own,
@@ -249,14 +249,13 @@ function outcomeOf(p: EndPlan): EndSeatResult["outcome"] {
 /**
  * What endSeat WILL do to this seat, read the same way under the same row
  * lock, writing nothing: the routes ask it inside their transaction before
- * they write, because the reports whose line another workspace relies on
- * move only when the account itself ends ("account_ended", D4), never when
- * the person moves to their other workspace (D3) or leaves this one only
- * (D5). The lock is held to the end of the transaction, so endSeat answers
- * the same, unless a workspace elsewhere changes status in between (no
- * person lock is taken for that): the routes pass this answer to endSeat as
- * `expect`, which then refuses (SeatPlanChanged) rather than write another
- * end than the one the lines were moved for.
+ * they write (SCIM's words "in this workspace" follow it; batches 8 and 9
+ * moved the lines another workspace relied on only for "account_ended", a
+ * move workspace-status-2 step 4 retired, E6). The lock is held to the end
+ * of the transaction, so endSeat answers the same, unless a workspace
+ * elsewhere changes status in between (no person lock is taken for that):
+ * the routes pass this answer to endSeat as `expect`, which then refuses
+ * (SeatPlanChanged) rather than write another end than the one planned.
  */
 export async function endSeatWould(tx: Tx, input: SeatEndInput): Promise<EndSeatResult["outcome"]> {
   return outcomeOf(await planEnd(tx, input));
@@ -342,13 +341,12 @@ export async function endSeat(
 /**
  * Whether ending this person's seat here leaves their account working
  * somewhere else: a membership seat here (D5), or the anchored seat of
- * someone who holds a usable seat elsewhere (D3: they move there). Then the
- * handover is a leaver's of THIS workspace only (runHandover's
- * `leavesOnlyHere`): a report whose line to them another workspace relies on
- * stays, since they still manage that report there. False for D4 (the
- * account ends with the seat) and for someone with no seat here. A plain
- * read, before the handover; the end itself reads it again under the lock
- * (endSeatWould).
+ * someone who holds a usable seat elsewhere (D3: they move there). The
+ * dialogs then say their other workspaces are not affected (D17). The
+ * handover is this workspace's whatever it answers (workspace-status-2.md
+ * E6). False for D4 (the account ends with the seat) and for someone with
+ * no seat here. A plain read, before the handover; the end itself reads it
+ * again under the lock (endSeatWould).
  */
 export async function leavesOnlyHere(organizationId: string, userId: string, db: Tx | typeof prisma = prisma): Promise<boolean> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, email: true } });

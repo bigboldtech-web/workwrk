@@ -19,6 +19,12 @@
 //
 // Run on the in-memory database (seat-test-db.ts) with the real endSeat;
 // the handover and the Owner guards are scripted, as before.
+//
+// docs/plans/workspace-status-2.md step 4 (E9 iii, E4, E6): the handover after
+// the end moves THIS workspace's reports only, and no line moves with the end
+// itself (moveReliedReportsAtEnd retired). The pending row's `leavesOnlyHere`
+// is read for the words "in this workspace" only, never passed to the
+// handover.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { legacyLevelOfRow, legacyLevelRow } from "@/lib/access/test-fixtures";
@@ -28,14 +34,8 @@ const st = vi.hoisted(() => ({
   handovers: 0,
   workFails: false,
   handoverInput: null as Record<string, unknown> | null,
-  /** The reports the handover left, as runHandover answers them (batch 6). */
-  staying: [] as Array<{ id: string; name: string | null }>,
-  /** The moved reports who also reported to the leaver elsewhere (batch 7). */
-  alsoElsewhere: [] as Array<{ id: string; name: string | null }>,
-  /** The end's own move of the lines another workspace relies on (batch 8): its calls, and whether the seat was already written. */
-  endCalls: [] as Array<{ input: Record<string, unknown>; seatWritten: boolean }>,
-  endMoved: [] as Array<{ id: string; name: string | null }>,
-  endFollowed: [] as Array<{ ids: string[]; actor: string }>,
+  /** The handover's LINES transaction meets a deadlock Postgres breaks (40P01, step 4). */
+  deadlock: false,
   teammateEnds: [] as Array<[string, string[], string]>,
   lastOwner: false,
   owner: false,
@@ -61,24 +61,17 @@ vi.mock("@/lib/prisma", async () => {
 vi.mock("@/lib/agents/leaver-hooks", () => ({ endTeammateAccessFor: async (org: string, ids: string[], why: string) => { st.teammateEnds.push([org, ids, why]); } }));
 vi.mock("@/lib/people/handover.server", async (orig) => {
   const real = await orig<typeof import("@/lib/people/handover.server")>();
-  const { seatDb } = await import("@/lib/access/seat-test-db");
   return {
     HandoverWorkFailed: real.HandoverWorkFailed,
     isHandoverWorkFailed: real.isHandoverWorkFailed,
-    // Batch 8: inside the end's transaction, before the seat is written.
-    moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
-      const u = seatDb.row("user", "u1");
-      st.endCalls.push({ input, seatWritten: u.status === "INACTIVE" });
-      return { reportsMoved: st.endMoved.length, reportsReassigned: st.endMoved.length, reportsRehomed: [], reportsAlsoElsewhere: [...st.endMoved], reportIds: st.endMoved.map((m) => m.id) };
-    },
-    followAccountEndLines: async (_org: string, done: { reportIds: string[] }, actor: string) => { st.endFollowed.push({ ids: done.reportIds, actor }); },
     runHandover: async (input: Record<string, unknown>) => {
       st.handovers += 1;
       st.handoverInput = input;
       if (st.busy) throw busyError();
+      if (st.deadlock) throw Object.assign(new Error("deadlock detected"), { code: "P2034" });
       // The reports moved (and were logged); the work did not (batch 5).
-      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsStaying: [], reportsAlsoElsewhere: [], reportsMoved: 2 }, new Error("timeout"));
-      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [], reportsStaying: st.staying, reportsAtAccountEnd: [], reportsAlsoElsewhere: st.alsoElsewhere };
+      if (st.workFails) throw new real.HandoverWorkFailed({ reportsReassigned: 2, reportsRehomed: [], reportsMoved: 2 }, new Error("timeout"));
+      return { tasksReassigned: 0, reportsReassigned: 0, containersReassigned: 0, reportsRehomed: [] };
     },
   };
 });
@@ -109,11 +102,7 @@ beforeEach(() => {
   st.handovers = 0;
   st.workFails = false;
   st.handoverInput = null;
-  st.staying = [];
-  st.alsoElsewhere = [];
-  st.endCalls = [];
-  st.endMoved = [];
-  st.endFollowed = [];
+  st.deadlock = false;
   st.teammateEnds = [];
   st.lastOwner = false;
   st.owner = false;
@@ -175,47 +164,42 @@ describe("scimDeprovision when the handover's work fails after the reports moved
     expect(st.handovers).toBe(2);
     expect(db.row("user", "u1").tokenVersion).toBe(1);
   });
+
+  // workspace-status-2 step 4 (the step 1 review L5): the handover's line
+  // moves can cross workspaces, and Postgres ends one with nothing written.
+  it("a deadlock in the handover is the 503 the identity provider retries, never a 500, and the retry finishes it", async () => {
+    st.deadlock = true;
+    expect(await scimDeprovision("org", "u1")).toEqual({ ok: false, status: 503, error: "Someone else is changing roles or reporting lines in this workspace right now. Try again in a moment." });
+    expect(db.row("user", "u1").status).toBe("INACTIVE");
+    expect(logs("membership.handover_pending")).toHaveLength(1);
+    st.deadlock = false;
+    expect(await scimDeprovision("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
+  });
 });
 
-// Docs-found fixes batch 7: when the account ends, the handover moves every
-// report, and the identity provider's row counts the ones who also reported
-// to them in another workspace.
-describe("scimDeprovision names the reports who also reported to them elsewhere", () => {
-  it("moves every report and counts them on the audit row, in plain words", async () => {
-    st.alsoElsewhere = [{ id: "r1", name: "Ida Ray" }];
+// Docs-found fixes batches 7 and 8 counted the reports who also reported to
+// the leaver in another workspace, and moved them with the end itself.
+// workspace-status-2 step 4 (E9 iii, E6): the handover moves this
+// workspace's reports only, the end moves no line, and the row says what
+// moved here and nothing of another workspace.
+describe("scimDeprovision hands over this workspace's reports only, and the end moves no line", () => {
+  it("runs the handover after the end, as this workspace's, and says nothing of another workspace", async () => {
     const out = await scimDeprovision("org", "u1");
-    expect(out).toMatchObject({ ok: true });
-    // The account ends (D4): no report is left.
-    expect(st.handoverInput?.leavesOnlyHere).toBeUndefined();
+    expect(out).toMatchObject({ ok: true, recipientId: "u-dana" });
+    expect(st.handoverInput).toEqual({ organizationId: "org", fromId: "u1", toId: "u-dana", actorId: null, actorType: "scim", actorLabel: "Identity provider" });
     const row = logs("membership.changed")[0];
-    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 of their reports also reported to them in another workspace, whose Audit log records the move.");
-    expect(row?.description).not.toMatch(/stay|--|\u2014/);
-  });
-});
-
-// Docs-found fixes batch 8, from the batch 7 review: the lines another
-// workspace relies on move with the end itself, in its transaction, never in
-// a step after it. Step 4: only when the account ends (D4).
-describe("scimDeprovision moves the lines another workspace relies on with the end of the account", () => {
-  it("moves them inside the end's transaction, before the seat is written, to the recipient, and counts them on the row", async () => {
-    st.endMoved = [{ id: "r1", name: "Ida Ray" }];
-    expect(await scimDeprovision("org", "u1")).toMatchObject({ ok: true, recipientId: "u-dana" });
-    expect(st.endCalls).toEqual([
-      { input: { organizationId: "org", leaverId: "u1", recipientId: "u-dana", actorId: null, actorType: "scim", actorLabel: "Identity provider", ends: "deactivated" }, seatWritten: false },
-    ]);
-    expect(st.endFollowed).toEqual([{ ids: ["r1"], actor: "u-dana" }]);
-    const row = logs("membership.changed")[0];
-    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 1 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 of their reports also reported to them in another workspace, whose Audit log records the move.");
-    expect(row?.metadata).toMatchObject({ reportsReassigned: 1, reportsAlsoElsewhere: 1 });
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee.");
+    expect(row?.description).not.toMatch(/another workspace|stay|--|\u2014/);
+    for (const k of ["reportsStaying", "reportsAtAccountEnd", "reportsAlsoElsewhere"]) expect(row?.metadata, k).not.toHaveProperty(k);
   });
 
-  it("moves nothing for the last Owner, or when the lock is busy", async () => {
+  it("hands over nothing for the last Owner, or when the lock is busy", async () => {
     st.lastOwner = true;
     await scimDeprovision("org", "u1");
     st.lastOwner = false;
     st.busy = true;
     await scimDeprovision("org", "u1");
-    expect(st.endCalls).toEqual([]);
+    expect(st.handovers).toBe(0);
     expect(db.row("user", "u1").status).toBe("ACTIVE");
   });
 });
@@ -229,19 +213,19 @@ describe("scimDeprovision of someone who also works in another workspace (D3)", 
   });
 
   it("moves their account there, keeps the deactivated seat here, and signs them out of nothing", async () => {
-    st.staying = [{ id: "r2", name: "Ola Kim" }];
     expect(await scimDeprovision("org", "u1")).toEqual({ ok: true, alreadyInactive: false, recipientId: "u-dana" });
     // Before: { organizationId: "org", status: "INACTIVE", tokenVersion: 1 }.
     expect(db.row("user", "u1")).toMatchObject({ organizationId: "client", status: "ACTIVE", tokenVersion: 0 });
     expect(legacyLevelOfRow(db.row("user", "u1"))).toBe("MANAGER");
     const left = db.tables.organizationMembership.find((m) => m.userId === "u1" && m.organizationId === "org");
     expect(left).toMatchObject({ status: "INACTIVE", removedAt: null });
-    // They still manage their reports there: no line moves with the end, and the handover is this workspace's only.
-    expect(st.endCalls).toEqual([]);
-    expect(st.handoverInput).toMatchObject({ leavesOnlyHere: true });
+    // Their reports in the client workspace are its own lines (E1): the
+    // handover is this workspace's, as every handover is (step 4), and the
+    // pending row's leavesOnlyHere is for the words only.
+    expect(st.handoverInput).not.toHaveProperty("leavesOnlyHere");
     expect(logs("membership.handover_pending")[0]?.metadata).toEqual({ recipientId: "u-dana", leavesOnlyHere: true });
     const row = logs("membership.changed")[0];
-    expect(row?.description).toBe("Your identity provider deactivated Max Chen in this workspace. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 direct report stays listed under them: another workspace they both work in relies on that line, and their open reviews here went to the same person.");
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen in this workspace. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee.");
   });
 
   it("revokes the API keys they made here and ends their open invitations here, as any end of a seat does", async () => {
@@ -260,7 +244,7 @@ describe("scimDeprovision of someone who also works in another workspace (D3)", 
     expect(await scimDeprovision("org", "u1")).toMatchObject({ ok: false, status: 503 });
     st.workFails = false;
     expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
-    expect(st.handoverInput).toMatchObject({ leavesOnlyHere: true });
+    expect(st.handoverInput).not.toHaveProperty("leavesOnlyHere");
   });
 });
 
@@ -274,19 +258,19 @@ describe("scimDeprovisionMember", () => {
     db.seed("organizationMembership", { id: "m-u1-org", userId: "u1", organizationId: "org", role: "EMPLOYEE" });
   });
 
-  it("deactivates the membership here, never the account, and hands their work here over, keeping lines another workspace relies on", async () => {
-    st.staying = [{ id: "r1", name: "Ida Ray" }];
+  it("deactivates the membership here, never the account, and hands their work here over", async () => {
     const out = await scimDeprovisionMember("org", "u1");
     expect(out).toEqual({ ok: true, alreadyInactive: false, recipientId: "u-dana" });
     // Before: the row deleted, and the account's tokenVersion bumped.
     expect(db.row("organizationMembership", "m-u1-org")).toMatchObject({ status: "INACTIVE", removedAt: null });
     expect(db.row("user", "u1")).toMatchObject({ organizationId: "client", status: "ACTIVE", tokenVersion: 0 });
-    expect(st.handoverInput).toMatchObject({ organizationId: "org", fromId: "u1", toId: "u-dana", actorId: null, actorType: "scim", leavesOnlyHere: true });
+    expect(st.handoverInput).toEqual({ organizationId: "org", fromId: "u1", toId: "u-dana", actorId: null, actorType: "scim", actorLabel: "Identity provider" });
     expect(logs("membership.handover_pending")[0]).toMatchObject({ metadata: { recipientId: "u-dana", leavesOnlyHere: true, member: true } });
     const row = logs("membership.changed")[0];
-    expect(row?.description).toBe("Your identity provider deactivated Max Chen in this workspace. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee. 1 direct report stays listed under them: another workspace they both work in relies on that line, and their open reviews here went to the same person.");
+    expect(row?.description).toBe("Your identity provider deactivated Max Chen in this workspace. 0 open tasks, 0 direct reports and 0 Spaces, Folders and Lists went to Dana Lee.");
     expect(row?.description).not.toMatch(/--|\u2014/);
-    expect(row?.metadata).toMatchObject({ member: true, reportsStaying: 1 });
+    expect(row?.metadata).toMatchObject({ member: true, leavesOnlyHere: true });
+    expect(row?.metadata).not.toHaveProperty("reportsStaying");
     expect(st.teammateEnds).toEqual([["org", ["u1"], "deactivated"]]);
   });
 
@@ -295,7 +279,7 @@ describe("scimDeprovisionMember", () => {
     db.seed("activityLog", { id: "p1", type: "membership.handover_pending", organizationId: "org", targetType: "user", targetId: "u1", actorType: "scim", metadata: { member: true }, createdAt: new Date() });
     expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
     expect(st.handovers).toBe(1);
-    expect(st.handoverInput).toMatchObject({ leavesOnlyHere: true });
+    expect(st.handoverInput).not.toHaveProperty("leavesOnlyHere");
     db.seed("activityLog", { id: "p2", type: "membership.changed", organizationId: "org", targetType: "user", targetId: "u1", actorType: "scim", metadata: { member: true }, createdAt: new Date(Date.now() + 1000) });
     expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: null });
     expect(st.handovers).toBe(1);
@@ -415,7 +399,7 @@ describe("scimDeprovisionMember, once the membership row is gone (old data), and
     db.seed("activityLog", { id: "p2", type: "membership.handover_pending", organizationId: "org", targetType: "user", targetId: "u1", actorType: "scim", metadata: { member: true }, createdAt: new Date(Date.now() + 1000) });
     expect(await scimDeprovisionMember("org", "u1")).toEqual({ ok: true, alreadyInactive: true, recipientId: "u-dana" });
     expect(db.row("checkIn", "c1").organizationId).toBeNull();
-    expect(st.handoverInput).toMatchObject({ leavesOnlyHere: true });
+    expect(st.handoverInput).not.toHaveProperty("leavesOnlyHere");
   });
 
   it("nulls nothing where they are anchored here by the time it looks", async () => {

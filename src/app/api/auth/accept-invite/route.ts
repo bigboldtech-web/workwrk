@@ -17,10 +17,12 @@
 //               second User row for the same mailbox, which made log in
 //               ambiguous); the page shows "Log in and join".
 //   signed in   { token } as the invited address: no password is read or
-//               accepted. The write is a membership for the existing person
-//               plus the invitation's Space grant, and a move into the
-//               workspace just joined through reanchorUser (the workspace
-//               left stays a membership at the level held there). Signed in
+//               accepted. The write is a membership for the existing person,
+//               with the invitation's placement and its Reports to (D18,
+//               workspace-status-2.md E10), plus the invitation's Space
+//               grant, and a move into the workspace just joined through
+//               reanchorUser (the workspace left stays a membership at the
+//               level held there, with its own line, E3). Signed in
 //               as anyone else is a 409 `wrong_account` and writes nothing.
 //
 // A SEAT THIS WORKSPACE ENDED COMES BACK (docs/plans/workspace-status.md D13).
@@ -59,9 +61,12 @@ import { appBaseUrl } from "@/lib/auth/send-verification";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
 import { logAuditEvent } from "@/lib/activity";
 import { lockWorkspaceSeats, personFitsOnAccept } from "@/lib/seats";
-import { lockOrgRoles } from "@/lib/access/membership";
+import { liveOwnerIds, lockOrgRoles } from "@/lib/access/membership";
 import { skillsBackFor } from "@/lib/skills/store";
-import { isLockTimeout, isOrgRolesBusy, LOCK_WAIT_MS, LOCKED_TX, OrgRolesBusy } from "@/lib/access/org-roles-busy";
+import { isDeadlock, isLockTimeout, isOrgRolesBusy, LOCK_WAIT_MS, LOCKED_TX, OrgRolesBusy } from "@/lib/access/org-roles-busy";
+import { clearedLineSentence, staleLinesOf, wouldLoopIn, type StaleLine } from "@/lib/access/manager-candidate";
+import { removeDottedHere, seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
+import { followReportingLine } from "@/lib/performance/review-cycle.server";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +132,10 @@ export async function GET(req: NextRequest) {
   if (orgClosed(inv)) return fail("closed", 410, "That workspace is not open to new members.", { organizationName: orgName });
 
   const [placement, account, inOrg] = await Promise.all([invitePlacement(inv), liveAccountFor(inv.email), alreadyInOrg(inv.email, inv.organizationId)]);
+  // The signed-in join drops a manager who is the person themselves or who
+  // would close a loop here (the step 4 review L3): /join never names one it
+  // will not write. Only an existing account can be either.
+  const joinDropsManager = !!account && !!inv.managerId && (inv.managerId === account.id || (await wouldLoopIn(inv.organizationId, account.id, inv.managerId)));
   const orgRole = inviteOrgRole(inv.accessLevel);
   // A workspace with no free seat says so before the form (src/lib/seats.ts);
   // the invitation keeps working once there is room.
@@ -146,9 +155,12 @@ export async function GET(req: NextRequest) {
       inviterName: sender.inviterName,
       message: sender.message,
       departmentName: placement.departmentName,
-      // Only where the acceptance writes it: someone who already has an
-      // account joins signed in, and that path writes no manager.
-      managerName: account && account.organizationId !== inv.organizationId ? null : placement.managerName,
+      // The manager the acceptance writes (managerOnAccept), on both paths:
+      // someone who already has an account joins signed in, and since
+      // workspace-status-2.md E10 (step 4) that path writes the invitation's
+      // manager onto their membership here too; never one that join drops
+      // (themselves, or a loop here: the step 4 review L3).
+      managerName: joinDropsManager ? null : placement.managerName,
       expiresAt: inv.expiresAt.toISOString(),
       firstName: inv.firstName ?? null,
       lastName: inv.lastName ?? null,
@@ -333,7 +345,7 @@ export async function POST(req: NextRequest) {
         // No password is accepted on this branch: the person already has one.
         return fail("no_password", 400, "You are already logged in. Join without a password.");
       }
-      const meSelect = { id: true, organizationId: true, deletedAt: true, status: true, firstName: true } as const;
+      const meSelect = { id: true, organizationId: true, deletedAt: true, status: true, firstName: true, lastName: true } as const;
       let found = await prisma.user.findUnique({ where: { id: sessionUser.id }, select: meSelect });
       if (found && !accountIsLive(found)) {
         // Ended where they are anchored while signed in: only an old row
@@ -351,8 +363,31 @@ export async function POST(req: NextRequest) {
         return fail("member", 409, `You are already in ${orgName}.`, { organizationName: orgName });
       }
 
+      let joined: { managerId: string | null; stale: { manager: StaleLine | null; dotted: StaleLine[] } | null };
       try {
-        await prisma.$transaction(async (tx) => {
+        joined = await prisma.$transaction(async (tx) => {
+          // A seat here this workspace ended, coming back (D13): its row
+          // still holds its old line here, checked below.
+          const held = await tx.organizationMembership.findUnique({
+            where: { userId_organizationId: { userId: me.id, organizationId: inv.organizationId } },
+            select: { removedAt: true },
+          });
+          // The invitation's Reports to (docs/plans/workspace-status-2.md E10,
+          // step 4), read under the workspace's role lock as the signed-out
+          // join reads it (managerOnAccept: never an Agent, never someone
+          // removed or deactivated here), the role lock first, then the
+          // seats, the order PATCH /api/users/[id] takes them in. And never
+          // a loop here (E4, E5): a person coming back may still have
+          // someone of this workspace listed under them. A manager that
+          // fails is not written, and they join with no manager here, as a
+          // new person does. Before, this path wrote no manager at all, so
+          // Pat, imported into B under Dana, joined with her existing account
+          // and had no manager in B. The role lock is taken too whenever a
+          // seat here comes back (the step 4 review M1): its old lines are
+          // checked under it, as a restore checks them.
+          if (inv.managerId || held) await lockOrgRoles(tx, inv.organizationId);
+          const asked = await managerOnAccept(inv, tx);
+          const managerId = asked && asked !== me.id && !(await wouldLoopIn(inv.organizationId, me.id, asked, tx)) ? asked : null;
           await seatOrThrow(tx, inv.organizationId);
           if (!(await claimInvitation(tx, inv.id))) throw new ClaimLost();
           // The person's row lock before their seat here is written
@@ -362,12 +397,13 @@ export async function POST(req: NextRequest) {
           await lockPerson(tx, me.id);
           // The department, job role and office the invitation names, this
           // workspace's own only (placementOnAccept), are their profile here
-          // (D18): written onto the membership, which the move below hands
-          // to the account, as the signed-out join writes them on the new one.
+          // (D18), and its manager their line here (E10): written onto the
+          // membership, which the move below hands to the account (the swap,
+          // E3), as the signed-out join writes them on the new one.
           const placed = await placementOnAccept(inv, tx);
           await tx.organizationMembership.upsert({
             where: { userId_organizationId: { userId: me.id, organizationId: inv.organizationId } },
-            create: { userId: me.id, organizationId: inv.organizationId, role: inv.accessLevel, isPrimary: false, ...placed },
+            create: { userId: me.id, organizationId: inv.organizationId, role: inv.accessLevel, isPrimary: false, ...placed, managerId },
             // A seat this workspace ended comes back (D13): live, at the
             // invitation's level, and this workspace's own decision now (the
             // copied mark cleared, D16). Admin scopes are a grant of their
@@ -383,18 +419,66 @@ export async function POST(req: NextRequest) {
               ...(placed.departmentId ? { departmentId: placed.departmentId } : {}),
               ...(placed.roleId ? { roleId: placed.roleId } : {}),
               ...(placed.officeId ? { officeId: placed.officeId } : {}),
+              // The manager the invitation names replaces the old line, where
+              // it names one that passed.
+              ...(managerId ? { managerId } : {}),
             },
           });
+          // A seat that comes back keeps only the lines here that still hold
+          // (the step 4 review M1), exactly as a restore or a reactivation
+          // keeps them (manager-candidate.ts staleLinesOf, E4): the line the
+          // seat holds now (the invitation's manager when one passed, else
+          // its old line) and this workspace's dotted rows, cleared on the
+          // membership where they fail, each with its reporting_line_changed
+          // row in this transaction. Before, the old line came back
+          // unchecked: B removed Pat under Dana, then removed Dana, and a
+          // re-invitation with no Reports to brought Pat back under Dana, so
+          // her review went to a removed reviewer and her timesheets waited
+          // for a removed approver.
+          let stale: { manager: StaleLine | null; dotted: StaleLine[] } | null = null;
+          if (held) {
+            stale = await staleLinesOf(inv.organizationId, me.id, tx);
+            if (stale.manager) {
+              const now = await tx.user.findUnique({ where: { id: me.id }, select: { id: true, organizationId: true } });
+              // Under the person's lock since the upsert, so the row holds the seat.
+              if (!now || !(await writeLineHere(tx, seatRefOf(inv.organizationId, now), null))) {
+                throw new OrgRolesBusy("This workspace is busy for a moment, so you haven't joined yet. Try again.");
+              }
+            }
+            await removeDottedHere(tx, inv.organizationId, stale.dotted.map((d) => ({ userId: me.id, managerId: d.managerId })));
+            const verb = held.removedAt ? "Restored" : "Reactivated";
+            const name = `${me.firstName ?? ""} ${me.lastName ?? ""}`.trim() || "Someone";
+            for (const line of [...(stale.manager ? [stale.manager] : []), ...stale.dotted]) {
+              const solid = line === stale.manager;
+              await tx.activityLog.create({
+                data: {
+                  type: "reporting_line_changed",
+                  actorId: me.id,
+                  organizationId: inv.organizationId,
+                  description: clearedLineSentence(verb, name, line, solid),
+                  targetType: "user",
+                  targetId: me.id,
+                  severity: "info",
+                  oldValue: solid ? { managerId: line.managerId } : { dottedManagerId: line.managerId },
+                  newValue: solid ? { managerId: null } : { dottedManagerId: null },
+                  metadata: { onJoin: true, reason: line.why },
+                },
+              });
+            }
+          }
           // Into the workspace just joined, with the level this invitation
           // gives; the one they leave stays a membership at their level there.
           await reanchorUser({ userId: me.id, to: { organizationId: inv.organizationId, role: inv.accessLevel } }, tx);
           await clearCopiedMarksHere(tx, inv, me.id);
           await grantInvitedSpace(tx, inv, me.id);
+          return { managerId, stale };
         }, LOCKED_TX);
       } catch (e) {
         if (e instanceof ClaimLost) return fail("used", 410, "This invitation has already been used.", { organizationName: orgName });
         if (e instanceof NoSeat) return fail("full", 409, e.message, { organizationName: orgName });
         if (isOrgRolesBusy(e)) return busyAnswer(orgName);
+        // Postgres broke a deadlock (40P01): nothing of the join was written.
+        if (isDeadlock(e)) return busyAnswer(orgName);
         throw e;
       }
 
@@ -402,16 +486,31 @@ export async function POST(req: NextRequest) {
       // skills with AI teammates here stop their 30 days
       // (docs/plans/ai-teammates-phase5.md Decision 14); never fails the join.
       await skillsBackFor(inv.organizationId, [me.id]);
+      // Their open reviews here follow a cleared line, as on a restore: to
+      // the first Owner when no manager is left (no person of this workspace
+      // acted; the person joining is never their own reviewer). Never fails
+      // the join.
+      if (joined.stale?.manager) {
+        const owner = (await liveOwnerIds(inv.organizationId).catch(() => []))[0];
+        if (owner) await followReportingLine(inv.organizationId, [me.id], owner).catch((e: unknown) => console.error("followReportingLine failed", e));
+      }
+      // The invitation named a manager the join could not write (the step 4
+      // review L3: an Agent or someone ended here, the person themselves, or
+      // a loop here): said in the answer and the Audit log, never dropped in
+      // silence, so an Admin sets one in Members.
+      const managerDropped = !!inv.managerId && joined.managerId === null;
       logAuditEvent({
         type: "user.joined",
         actorId: me.id,
         organizationId: inv.organizationId,
-        description: "Joined from an invitation with an existing WorkwrK account",
+        description: managerDropped
+          ? "Joined from an invitation with an existing WorkwrK account, with no manager here: the manager the invitation named can't manage them here"
+          : "Joined from an invitation with an existing WorkwrK account",
         targetType: "Invitation",
         targetId: inv.id,
-        metadata: { via: "existing_account", fromOrganizationId: me.organizationId },
+        metadata: { via: "existing_account", fromOrganizationId: me.organizationId, ...(managerDropped ? { managerDropped: inv.managerId } : {}) },
       }).catch(() => {});
-      return NextResponse.json({ ok: true, landing, refreshSession: true }, { status: 201 });
+      return NextResponse.json({ ok: true, landing, refreshSession: true, ...(managerDropped ? { managerDropped: true } : {}) }, { status: 201 });
     }
 
     // ── Signed out: a brand new person (Variant A) ──

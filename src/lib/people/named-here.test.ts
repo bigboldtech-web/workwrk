@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dottedElsewhereWords, namedHere, namedIds } from "./named-here";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { namedHere, namedIds } from "./named-here";
 
 describe("namedHere (batch 6: a person record names only this workspace's people)", () => {
   const card = {
@@ -46,9 +48,14 @@ describe("namedHere (batch 6: a person record names only this workspace's people
     expect(namedHere(card, new Map([["m-elsewhere", "AGENT"]])).manager).toEqual({ id: "m-elsewhere", firstName: "Dana" });
   });
 
-  it("keeps the words for a count of kept lines that only the dotted-lines PUT still answers (until step 4)", () => {
-    expect(dottedElsewhereWords(2, false)).toBe("2 lines kept for another workspace");
-    expect(dottedElsewhereWords(1, true)).toBe("and 1 line kept for another workspace");
-    expect(dottedElsewhereWords(0, false)).toBeNull();
+  // Step 4 (E6): the dotted-lines PUT keeps no line for another workspace,
+  // so its count and these words are gone, and no screen imports them.
+  it("has no words for lines kept for another workspace any more, and no screen asks for them", () => {
+    const root = join(__dirname, "..", "..", "..");
+    expect(readFileSync(join(root, "src/lib/people/named-here.ts"), "utf8")).not.toMatch(/export function dottedElsewhereWords/);
+    for (const f of ["src/components/people/person-record.tsx", "src/components/people/edit-details-dialog.tsx"]) {
+      const src = readFileSync(join(root, f), "utf8");
+      expect(src, f).not.toMatch(/dottedElsewhereWords|dottedElsewhere|managerElsewhere|dottedKept|keptElsewhere|replaceOtherWorkspaceLine|manager_elsewhere/);
+    }
   });
 });

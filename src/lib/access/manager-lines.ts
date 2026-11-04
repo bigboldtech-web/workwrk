@@ -51,7 +51,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, linesElsewhere, reportsHereOf, seatsHeldFor, type ReportHere } from "./acting-workspace";
+import { levelHeldIn, levelsHeldFor, levelsHeldIn, reportsHereOf, seatsHeldFor, type ReportHere } from "./acting-workspace";
 import { agentIdsIn } from "./manager-candidate";
 import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
 
@@ -94,8 +94,13 @@ async function factsHere(organizationId: string, rows: readonly LineRow[], db: D
   const held = await seatsHeldFor(organizationId, rows, db);
   return rows.flatMap((r): Array<[string, LineFacts]> => {
     const seat = held.get(r.id);
-    // The line here is the seat's (E1): the account's only where they are anchored here.
-    return seat ? [[r.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated }]] : [];
+    // The line here is the seat's (E1): the account's only where they are
+    // anchored here. Inactive: the seat deactivated here, or, for someone here
+    // through a membership, an account that has ended where it is anchored
+    // (D12: it cannot sign in anywhere, so it can take no reports here; the
+    // step 4 review L1), as managerCandidateIn's live check reads it.
+    const ended = r.organizationId !== organizationId && r.status === "INACTIVE";
+    return seat ? [[r.id, { managerId: seat.managerId, agent: isAgentOf(seat.level), inactive: seat.deactivated || ended }]] : [];
   });
 }
 
@@ -399,79 +404,11 @@ export async function agentsWithStoredReports(
   return out;
 }
 
-/**
- * Is this stored dotted line another workspace's (pure; batch 6's rule)? The
- * manager holds no level here and the line counts in another workspace the
- * person works in (relied or shared), or holds the Agent tier here, where the
- * line counts for nobody, and another workspace relies on it.
- */
-function dottedIsOthers(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): boolean {
-  return levelHere === undefined ? !!there : isAgentOf(levelHere) && there === "relied";
-}
-
-/**
- * A person's dotted lines that are another workspace's, by manager
- * (acting-workspace.ts linesElsewhere, docs-found fixes batch 6): the
- * manager holds no level here and holds one in another workspace the person
- * works in, or holds the Agent tier here (the line counts for nobody here)
- * and is no Agent in another workspace the person works in, where the line
- * counts. A UserDottedLine is one row every workspace the person belongs to
- * reads, so this workspace never checks, replaces or deletes these
- * (PUT /api/users/[id]/dotted-lines).
- */
-export async function othersDottedLines(organizationId: string, userId: string, db: Db = prisma): Promise<Set<string>> {
-  const rows = await db.userDottedLine.findMany({ where: { userId }, select: { managerId: true } });
-  const managers = [...new Set(rows.map((r) => r.managerId))];
-  if (managers.length === 0) return new Set();
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, managers, db),
-    linesElsewhere(organizationId, managers.map((managerId) => ({ personId: userId, managerId })), db),
-  ]);
-  return new Set(managers.filter((managerId) => dottedIsOthers(held.get(managerId), there.get(lineKey({ personId: userId, managerId })))));
-}
-
-/**
- * Whose a stored Reports to is (pure; batch 7, and batch 8 for the Agent).
- * Another workspace the person works in relies on the line, and here either
- * the manager holds no level ("unnamed": this workspace is never told who)
- * or holds the Agent tier, where the line counts for nobody ("agent": they
- * are a person of this workspace, so they may be named). The dotted lines'
- * rule (dottedIsOthers), for the solid line: only "relied" counts here, since
- * a line the other workspace reads only through an Agent there counts for
- * nobody there either.
- */
-function managerLineStanding(levelHere: AccessLevel | undefined, there: "relied" | "shared" | undefined): OthersManagerLine | null {
-  if (there !== "relied") return null;
-  if (levelHere === undefined) return "unnamed";
-  return isAgentOf(levelHere) ? "agent" : null;
-}
-
-/** A Reports to another workspace relies on: "unnamed" when the manager holds no level here, "agent" when they hold the Agent tier here. */
-export type OthersManagerLine = "unnamed" | "agent";
-
-/**
- * Is the person's stored Reports to another workspace's line (batch 7)?
- * User.managerId is one column, so a write here changes it there too.
- * PATCH Reports to asks before it replaces either (the person record no
- * longer says it since workspace-status-2 step 3; this ask retires in step
- * 4, E6).
- * Batch 8: an Agent here who manages the person in another workspace counts
- * too. Before, only a manager with no level here did, so an Admin moving a
- * report off an Agent here (the Members drawer tells them to) rewrote that
- * workspace's live line with no question, while the Agent move and the
- * dotted lines' rule kept it.
- */
-export async function managerLineIsOthers(organizationId: string, userId: string, managerId: string | null, db: Db = prisma): Promise<OthersManagerLine | null> {
-  if (!managerId) return null;
-  const [held, there] = await Promise.all([
-    levelsHeldIn(organizationId, [managerId], db),
-    linesElsewhere(organizationId, [{ personId: userId, managerId }], db),
-  ]);
-  return managerLineStanding(held.get(managerId), there.get(lineKey({ personId: userId, managerId })));
-}
-
+// The relied-line helpers retired with workspace-status-2.md step 4 (E6):
+// othersDottedLines (the dotted-lines PUT's keep list), managerLineIsOthers
+// (PATCH Reports to's 409 manager_elsewhere) and, in step 3,
 // recordLinesOfOthers (the record's "Reports to someone in another
-// workspace" and its count of dotted lines kept for another workspace)
-// retired with workspace-status-2 step 3 (E6): the record reads the line,
-// the dotted lines and the reports THIS workspace holds, so none of
-// another workspace's is ever there to be said about.
+// workspace" and its count of dotted lines kept for another workspace). Since
+// E1 and E2 every line is one workspace's, on the row that holds the seat
+// there, so a write here never reaches another workspace's line and nothing
+// is kept, asked or said about one.

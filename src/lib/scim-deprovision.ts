@@ -32,14 +32,15 @@
 // of their own company on every device, and the anchored path ended the
 // account in every workspace.
 //
-// A report whose line another workspace relies on moves with the end itself,
-// in its transaction, right before the seat is written (docs-found fixes
-// batch 8, handover.server.ts moveReliedReportsAtEnd), to the same
-// recipient, with that workspace's record of each, only when the ACCOUNT
-// ends (D4): with D3 and D5 the person still manages that report there, so
-// the line stays and the handover is this workspace's only (runHandover
-// `leavesOnlyHere`, endSeatWould says which before anything is written).
-// An Owner's reports stay with them, as their work does.
+// THIS WORKSPACE'S REPORTS ONLY (docs/plans/workspace-status-2.md E9 iii, E4,
+// E6, step 4). The handover after the end moves everyone whose line HERE
+// names the person (runHandover, through seat-writes.ts moveLinesHere), and
+// nobody's line in another workspace: their team there stays with them, or
+// is that workspace's own handover to run. Batches 8 and 9 moved a report
+// "another workspace relies on" inside the end itself
+// (moveReliedReportsAtEnd), and that workspace's line with it; with one line
+// per workspace there is no such report, so that move retired. An Owner's
+// reports stay with them, as their work does.
 //
 // The Owner checks and the end run under the workspace's role lock
 // (lockOrgRoles), so a SCIM call racing an admin's role change can never
@@ -49,8 +50,10 @@
 // a membership.handover_pending row commit TOGETHER, and a retry from the
 // identity provider (it retries on the 500) finds the seat already
 // deactivated with that row still the latest word, and finishes the handover
-// then, this workspace's only when the row says so (`leavesOnlyHere`). The
-// row stays in the Audit log if it never finishes. When the reports moved
+// then. A row's `leavesOnlyHere` (the account still works elsewhere), from
+// before step 4 or since, is read for the words only: every handover moves
+// this workspace's lines and nothing else. The row stays in the Audit log if
+// it never finishes. When the reports moved
 // and the work did not (docs-found fixes batch 5), the moves are already in
 // the Audit log (the handover writes one reporting_line_changed row each
 // with them), and the answer is a 503 that says so, which the identity
@@ -64,18 +67,18 @@
 //
 // SOMEONE WHO WORKS HERE THROUGH A MEMBERSHIP (docs-found fixes batch 7),
 // anchored in another workspace: scimDeprovisionMember, the same steps on
-// their membership seat (D5). Their reports here whose line another
-// workspace relies on stay (they still manage them there), and their open
-// reviews here go to the recipient. Their check-ins written here stay this
+// their membership seat (D5). Their reports here move, as anyone's do; their
+// reports in the workspace they are anchored to are that workspace's lines
+// and stay with them. Their check-ins written here stay this
 // workspace's, as a deactivated person's anchored here do
 // (check-in-access.server.ts THE LEAVING): the seat is kept, and a
 // reactivation brings them back with it.
 
 import { prisma } from "@/lib/prisma";
 import { endTeammateAccessFor } from "@/lib/agents/leaver-hooks";
-import { followAccountEndLines, isHandoverWorkFailed, moveReliedReportsAtEnd, runHandover, type AccountEndLines } from "@/lib/people/handover.server";
+import { isHandoverWorkFailed, runHandover } from "@/lib/people/handover.server";
 import { isLiveOwner, liveAdminsOf, liveOwnerIds, lockOrgRoles, unattendedRecipient, wouldRemoveLastOwner } from "@/lib/access/membership";
-import { isOrgRolesBusy, LOCKED_TX, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
+import { isDeadlock, isOrgRolesBusy, LOCKED_TX, ORG_ROLES_BUSY } from "@/lib/access/org-roles-busy";
 import { personSeatIn } from "@/lib/access/acting-workspace";
 import { endSeat, endSeatWould, SEAT_PLAN_CHANGED_WORDS, SeatPlanChanged, type SeatActor } from "@/lib/access/workspace-status";
 
@@ -92,6 +95,10 @@ type Door = "anchor" | "membership";
 /** The errors a deprovision answers with a 503 the identity provider retries, or null. */
 function retryable(e: unknown, said: string): DeprovisionOutcome | null {
   if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };
+  // Postgres broke a deadlock (40P01): that transaction wrote nothing, and
+  // the retry runs it again (workspace-status-2.md step 4, the step 1 review
+  // L5: two line writes may cross workspaces).
+  if (isDeadlock(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };
   // Their workspaces changed between the plan and the write (endSeat's
   // `expect`): nothing was written, the moved lines rolled back.
   if (e instanceof SeatPlanChanged) return { ok: false, status: 503, error: SEAT_PLAN_CHANGED_WORDS };
@@ -122,7 +129,12 @@ const PENDING = "membership.handover_pending";
 /** The rows that say where an identity provider's deprovisioning of this person stands here. */
 const DEPROVISION_ROWS = [PENDING, "membership.changed", "membership.refused"];
 
-/** What the pending row keeps for a retry: who takes the work, whether this workspace's handover only, and whether they were here through a membership. */
+/**
+ * What the pending row keeps for a retry: who takes the work, whether the
+ * account still works elsewhere (`leavesOnlyHere`: the words "in this
+ * workspace" only, since step 4; the handover is this workspace's whatever
+ * it says), and whether they were here through a membership.
+ */
 type PendingFacts = { recipientId?: string | null; leavesOnlyHere?: boolean; member?: boolean };
 
 /**
@@ -168,24 +180,19 @@ async function deprovisionSeat(organizationId: string, userId: string, asked: Do
     | { kind: "last_owner" }
     | { kind: "no_recipient" }
     | { kind: "owner"; ownersNow: string[]; leavesOnlyHere: boolean }
-    | { kind: "member"; recipientId: string; endLines: AccountEndLines | null; leavesOnlyHere: boolean };
+    | { kind: "member"; recipientId: string; leavesOnlyHere: boolean };
   const gate: Gate = await prisma.$transaction(async (tx): Promise<Gate> => {
     await lockOrgRoles(tx, organizationId);
     if (await wouldRemoveLastOwner(organizationId, userId, tx)) return { kind: "last_owner" };
     const owner = await isLiveOwner(organizationId, userId, tx);
     const recipientId = owner ? null : await unattendedRecipient(organizationId, userId, tx);
     if (!owner && !recipientId) return { kind: "no_recipient" };
-    // What the end will be, under the person's row lock (endSeatWould): the
-    // reports another workspace relies on move only when the account ends.
+    // What the end will be, under the person's row lock (endSeatWould):
+    // whether the account still works elsewhere, for the words.
     const will = await endSeatWould(tx, { userId, organizationId, kind: "deactivated" });
     // Ended a moment ago by someone else: the retry path answers.
     if (will === "already_ended" || will === "not_here") return { kind: "gone" };
     const leavesOnlyHere = will !== "account_ended";
-    // The reports move with the end, never after it in a step that might not
-    // run (batch 8), right before the seat is written. An Owner's stay.
-    const endLines = owner || leavesOnlyHere
-      ? null
-      : await moveReliedReportsAtEnd(tx, { organizationId, leaverId: userId, recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider", ends: "deactivated" });
     // The end planned is the end written (SeatPlanChanged otherwise, retried).
     await endSeat(tx, { userId, organizationId, kind: "deactivated", actor: SCIM_ACTOR, expect: will });
     if (owner) {
@@ -210,7 +217,7 @@ async function deprovisionSeat(organizationId: string, userId: string, asked: Do
         metadata: facts,
       },
     });
-    return { kind: "member", recipientId: recipientId as string, endLines, leavesOnlyHere };
+    return { kind: "member", recipientId: recipientId as string, leavesOnlyHere };
   }, LOCKED_TX);
 
   if (gate.kind === "gone") return resumePendingHandover(organizationId, userId, name);
@@ -261,10 +268,7 @@ async function deprovisionSeat(organizationId: string, userId: string, asked: Do
     return { ok: true, alreadyInactive: false, recipientId: null };
   }
 
-  // Open reviews follow the reports the end moved, whatever the handover
-  // does next.
-  if (gate.endLines) await followAccountEndLines(organizationId, gate.endLines, gate.recipientId);
-  await finishHandover(organizationId, userId, name, gate.recipientId, seat.status, { endLines: gate.endLines ?? undefined, leavesOnlyHere: gate.leavesOnlyHere, member: door === "membership" });
+  await finishHandover(organizationId, userId, name, gate.recipientId, seat.status, { leavesOnlyHere: gate.leavesOnlyHere, member: door === "membership" });
   return { ok: true, alreadyInactive: false, recipientId: gate.recipientId };
 }
 
@@ -286,35 +290,18 @@ async function resumePendingHandover(organizationId: string, userId: string, nam
   const facts = (last.metadata ?? {}) as PendingFacts;
   const recipientId = await unattendedRecipient(organizationId, userId);
   if (!recipientId) return { ok: false, status: 409, error: "Nobody can receive this person's work. Add an Owner in WorkwrK first." };
-  // A row from before this workspace's own end (step 4): a member's was this
-  // workspace's only, an anchored person's every workspace's.
+  // A row from before this workspace's own end (step 4 of workspace-status): a
+  // member's said "in this workspace". Its `leavesOnlyHere`, if any, changes
+  // the words only (workspace-status-2.md step 4).
   const member = facts.member === true;
   await finishHandover(organizationId, userId, name, recipientId, "ACTIVE", { leavesOnlyHere: facts.leavesOnlyHere ?? member, member });
   return { ok: true, alreadyInactive: true, recipientId };
 }
 
 /**
- * The audit row's words for moved reports who also reported to the leaver in
- * another workspace (batch 7): when the account ends, those lines move with
- * it (batch 8), and that workspace's Audit log records it.
- */
-function alsoElsewhereSaid(n: number): string {
-  if (n === 0) return "";
-  return ` ${n} of their reports also reported to them in another workspace, whose Audit log records the move.`;
-}
-
-/** The audit row's words for reports whose line another workspace relies on, which stay (a handover of this workspace only). */
-function stayingSaid(n: number): string {
-  if (n === 0) return "";
-  return ` ${n} direct ${n === 1 ? "report stays" : "reports stay"} listed under them: another workspace they both work in relies on ${n === 1 ? "that line" : "those lines"}, and their open reviews here went to the same person.`;
-}
-
-/**
- * The handover after the end, and its one row. `endLines` is what the end
- * moved itself (batch 8, D4 only), counted in the row with the rest; a
- * resumed handover has none to add (those rows are in the Audit log).
- * `leavesOnlyHere`: the account still works elsewhere (D3, D5), so the lines
- * another workspace relies on stay (runHandover `leavesOnlyHere`).
+ * The handover after the end, and its one row. It moves this workspace's
+ * reports only (E9 iii), whatever `leavesOnlyHere` says: that is the words
+ * "in this workspace" (the account still works elsewhere, D3, D5).
  */
 async function finishHandover(
   organizationId: string,
@@ -322,11 +309,11 @@ async function finishHandover(
   name: string,
   recipientId: string,
   oldStatus: string,
-  o: { endLines?: AccountEndLines; leavesOnlyHere: boolean; member: boolean },
+  o: { leavesOnlyHere: boolean; member: boolean },
 ): Promise<void> {
   let result: Awaited<ReturnType<typeof runHandover>>;
   try {
-    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider", ...(o.leavesOnlyHere ? { leavesOnlyHere: true } : {}) });
+    result = await runHandover({ organizationId, fromId: userId, toId: recipientId, actorId: null, actorType: "scim", actorLabel: "Identity provider" });
   } catch (e) {
     // The pending row stays the latest word, so the identity provider's
     // retry of this call finishes the handover. The error goes back to it.
@@ -334,9 +321,7 @@ async function finishHandover(
     throw e;
   }
   const recipient = await prisma.user.findUnique({ where: { id: recipientId }, select: { firstName: true, lastName: true } });
-  const reports = result.reportsReassigned + (o.endLines?.reportsReassigned ?? 0);
-  const alsoElsewhere = result.reportsAlsoElsewhere.length + (o.endLines?.reportsAlsoElsewhere.length ?? 0);
-  const staying = result.reportsStaying.length;
+  const reports = result.reportsReassigned;
   const to = recipient ? `${recipient.firstName} ${recipient.lastName}`.trim() : "their manager";
   await prisma.activityLog.create({
     data: {
@@ -345,7 +330,7 @@ async function finishHandover(
       actorType: "scim",
       actorLabel: "Identity provider",
       organizationId,
-      description: `Your identity provider deactivated ${name}${o.leavesOnlyHere ? " in this workspace" : ""}. ${result.tasksReassigned} open tasks, ${reports} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${to}.${o.leavesOnlyHere ? stayingSaid(staying) : alsoElsewhereSaid(alsoElsewhere)}`,
+      description: `Your identity provider deactivated ${name}${o.leavesOnlyHere ? " in this workspace" : ""}. ${result.tasksReassigned} open tasks, ${reports} direct reports and ${result.containersReassigned} Spaces, Folders and Lists went to ${to}.`,
       targetType: "user",
       targetId: userId,
       severity: "warning",
@@ -355,10 +340,7 @@ async function finishHandover(
         recipientId,
         ...result,
         reportsReassigned: reports,
-        reportsRehomed: result.reportsRehomed.length + (o.endLines?.reportsRehomed.length ?? 0),
-        reportsStaying: staying,
-        reportsAtAccountEnd: result.reportsAtAccountEnd.length,
-        reportsAlsoElsewhere: alsoElsewhere,
+        reportsRehomed: result.reportsRehomed.length,
         leavesOnlyHere: o.leavesOnlyHere,
         ...(o.member ? { member: true } : {}),
       },

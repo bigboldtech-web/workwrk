@@ -13,12 +13,12 @@
 // nothing is removed; if the removal fails after a handover, the work has
 // moved and the person is still there, and the dialog says exactly that.
 //
-// Docs-found fixes batch 8: a report who also reports to them in another
-// workspace moves with the removal itself (DELETE, with `handoverTo`, the
-// person picked), never with the handover before it, so a refused removal
-// leaves that workspace's line as it was; the dialog says so when it is
-// refused. A person who owns only Spaces, Folders or Lists is handed over
-// first too: the removal waits for every handover now (409 handover_first).
+// Docs-found fixes batch 8: a person who owns only Spaces, Folders or Lists
+// is handed over first too: the removal waits for every handover now (409
+// handover_first). Every report here moves with the handover
+// (workspace-status-2.md E4, E6, step 4): their lines in another workspace
+// are that workspace's own, so the removal moves none itself and nothing is
+// said about them (batch 8's `handoverTo` and its words retired).
 //
 // Batch 9: a refused removal says what the handover really moved, from its
 // answer (it said "Their open work moved to X" when nothing had), and only
@@ -39,7 +39,7 @@ import { SkeletonLines } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api-fetch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PeoplePickerField, type PickPerson } from "./person-bits";
-import { linesAlsoElsewhereNote, refusedRemovalWords, type HandoverMoved } from "@/lib/people/reporting-lines";
+import { refusedRemovalWords, type HandoverMoved } from "@/lib/people/reporting-lines";
 import { leavingNotes } from "@/lib/people/leaving-notes";
 
 interface Bucket<T> { count: number; items: T[] }
@@ -133,9 +133,7 @@ export function RemovePersonDialog({
     // over runs none (batch 9): the removal answers 409 if anything is left.
     const needsHandover = canHandOver && (!summary || summary.openTasks.count > 0 || summary.directReports.count > 0 || (summary.containers?.count ?? 0) > 0 || (summary.goalSources?.count ?? 0) > 0);
     type Person = { name: string | null };
-    type Moved = { reportsRehomed?: Array<Person & { managerName: string | null }>; reportsAlsoElsewhere?: Person[] };
     const rehomed: Array<Person & { managerName: string | null }> = [];
-    const alsoMoved: Person[] = [];
     // What the handover answered it moved (batch 9), for a refused removal's words.
     let moved: HandoverMoved | null = null;
     if (needsHandover) {
@@ -147,31 +145,22 @@ export function RemovePersonDialog({
       }
       moved = h.data?.data ?? h.data ?? {};
       rehomed.push(...(moved.reportsRehomed ?? []));
-      alsoMoved.push(...(moved.reportsAlsoElsewhere ?? []));
     }
-    // The person picked takes the reports the removal moves itself; with no
-    // handover of theirs to follow, nobody is named (they go up the line).
-    const d = await apiFetch<Moved>(canHandOver ? `/api/users/${userId}?handoverTo=${encodeURIComponent(to.id)}` : `/api/users/${userId}`, { method: "DELETE" });
+    // The handover moved every report here (workspace-status-2.md E4, E6):
+    // the removal moves no line itself.
+    const d = await apiFetch(`/api/users/${userId}`, { method: "DELETE" });
     setBusy(false);
     if (!d.ok) {
-      // Said from what really moved (batch 9), and the lines another
-      // workspace relies on that wait for the removal (batch 8).
+      // Said from what really moved (batch 9).
       setError(needsHandover
-        ? refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || "the new owner", moved, error: d.error })
+        ? refusedRemovalWords({ firstName, recipientName: to.firstName || "the new owner", moved, error: d.error })
         : d.error || "Couldn't remove them");
       return;
     }
-    rehomed.push(...(d.data?.reportsRehomed ?? []));
-    alsoMoved.push(...(d.data?.reportsAlsoElsewhere ?? []));
     // Reports that could not go to the new owner (the new owner themselves,
     // or a move that would make a loop) went up a level or to no manager: say
     // exactly where, never silently.
-    let rehomedNote = rehomed.length ? " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + "." : "";
-    // A report who also reported to them in another workspace moved too, and
-    // that workspace's Audit log records it (batch 7; batch 6 said "left as
-    // it is", untrue once this removal landed).
-    const alsoSaid = linesAlsoElsewhereNote(alsoMoved, fullName, "done");
-    if (alsoSaid) rehomedNote += ` ${alsoSaid}`;
+    const rehomedNote = rehomed.length ? " " + rehomed.map((r) => `${r.name ?? "Someone"} now ${r.managerName ? `reports to ${r.managerName}` : "has no manager"}`).join(". ") + "." : "";
     // True for everyone removed (the step 3 review L6): the Directory's
     // Removed view lists both kinds since step 4 (someone anchored here, and
     // someone here through a membership), and only an Owner, Admin or the

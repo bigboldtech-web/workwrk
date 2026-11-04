@@ -20,6 +20,8 @@ import { join } from "node:path";
 
 const root = join(__dirname, "..", "..", "..");
 const read = (p: string) => readFileSync(join(root, p), "utf8");
+/** The code without its comments (block comments, and lines that are a comment). */
+const codeOnly = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const between = (src: string, start: string, end?: string) => {
   const i = src.indexOf(start);
   expect(i, start).toBeGreaterThanOrEqual(0);
@@ -127,11 +129,13 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
     const patch = read("src/app/api/users/[id]/route.ts");
     // Batch 5: a reactivation takes it too, to re-check the person's lines,
     // and so does clearing Reports to (every write of a line, not only a new one).
-    expect(patch).toContain("const lineWrite = data.managerId !== undefined;");
+    // workspace-status-2 step 4: the line is held apart from the account's
+    // columns (lineNext), and read at the seat here (target.seat.managerId).
+    expect(patch).toContain("const lineWrite = lineNext !== undefined;");
     expect(patch).toContain("if (roleNext || deactivating || lineWrite || reactivating) await lockOrgRoles(tx, ctx.organizationId);");
     // Batch 6: the manager they already have is no new manager, so a new one
     // is always checked live, and the loop always walked.
-    expect(patch).toContain("const newManager = typeof data.managerId === \"string\" && data.managerId !== target.managerId ? data.managerId : null;");
+    expect(patch).toContain("const newManager = typeof lineNext === \"string\" && lineNext !== target.seat.managerId ? lineNext : null;");
     expect(patch).toContain("const again = await managerCandidateIn(ctx.organizationId, newManager, { db: tx, live: true });");
     expect(patch).toContain("if (await wouldLoopIn(ctx.organizationId, id, newManager, tx)) {");
     const bulk = read("src/app/api/people/bulk-update/route.ts");
@@ -139,17 +143,27 @@ describe("every write of a reporting line takes the role lock rule 6 counts unde
     const create = read("src/app/api/users/route.ts");
     expect(create).toContain("await lockOrgRoles(tx, getOrgId(session));");
     expect(create).toContain("const again = await managerCandidateIn(getOrgId(session), reportsTo, { db: tx, live: true });");
+    // workspace-status-2 E10 (step 4): both joins read the invitation's
+    // manager under the role lock, the signed-in one too.
+    const accept = read("src/app/api/auth/accept-invite/route.ts");
+    expect(accept.split("if (inv.managerId) await lockOrgRoles(tx, inv.organizationId);").length).toBe(2);
+    // The step 4 review M1: the signed-in join also takes it when a seat here
+    // comes back, to check that seat's old lines under it (staleLinesOf).
+    expect(accept).toContain("if (inv.managerId || held) await lockOrgRoles(tx, inv.organizationId);");
+    expect(accept).toContain("stale = await staleLinesOf(inv.organizationId, me.id, tx);");
+    expect(accept).toContain("const asked = await managerOnAccept(inv, tx);");
   });
 
   it("dotted lines, the handover, an Agent's move and a restore", () => {
     const dotted = read("src/app/api/users/[id]/dotted-lines/route.ts");
-    // Batch 6: only this workspace's lines are checked and replaced.
-    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };");
+    // Batch 6: only this workspace's lines are checked and replaced (since
+    // workspace-status-2 step 4 every named line, through writeDottedHere).
+    expect(dotted).toContain("await lockOrgRoles(tx, ctx.organizationId);\n    if (ids.length && (await agentIdsIn(ctx.organizationId, ids, tx)).size > 0) return { refused: \"agent\" as const };");
     const handover = read("src/lib/people/handover.server.ts");
-    // Batch 8: the leaver's state is read under the lock, then the plan, which keeps a relied line while the account is live.
+    // The plan and its moves under the lock; since workspace-status-2 step 4
+    // every report here moves (no line kept for another workspace, E6).
     const lines = between(handover, "export async function runHandover(", "export async function previewReportHandover(");
-    expect(lines).toContain("await lockOrgRoles(tx, orgId);\n    // Whether the leaver's account has ended (batch 8)");
-    expect(lines).toContain("const plan = await reportPlanFor(orgId, id, reassignToId, tx, { keepRelied: input.leavesOnlyHere === true || !ended });");
+    expect(lines).toContain("await lockOrgRoles(tx, orgId);\n    const plan = await reportPlanFor(orgId, id, reassignToId, tx);\n    const done = await writeReportMoves(tx, input, plan, reassignToId);");
     expect(between(handover, "export async function moveAgentReports(")).toContain("await lockOrgRoles(tx, orgId);\n    const found = await agentPlanFor(orgId, agentId, tx);");
     const restore = between(read("src/app/api/users/[id]/route.ts"), "  if (restore) {", "// Removing someone who holds Admin");
     // Batch 5: the seat wait after the role lock is bounded.
@@ -274,7 +288,9 @@ describe("batch 4: a stamp naming an Agent grants that Agent nothing", () => {
     expect(read("src/app/api/purchase-orders/[id]/route.ts")).toContain("(po.approverId === userId && !isAgentOf(session.user?.accessLevel))");
     expect(read("src/app/api/purchase-orders/route.ts")).toContain("...(agentStamps.length ? [{ approverId: { in: agentStamps } }] : [])");
     expect(read("src/app/api/time-entries/punch/route.ts")).toContain("!(await managesNobody(sheet.approverId, orgId))");
-    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("managerName: account && account.organizationId !== inv.organizationId ? null : placement.managerName,");
+    // workspace-status-2 E10 (step 4): the signed-in join writes the manager too, so /join names it to an existing account as well.
+    // And never one that join drops (themselves, or a loop: the step 4 review L3).
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("      managerName: joinDropsManager ? null : placement.managerName,");
   });
 
   it("a handover never goes to a deactivated person, and a new manager is live", () => {
@@ -305,6 +321,12 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
     expect(read("src/app/api/auth/accept-invite/route.ts").split("if (isOrgRolesBusy(e)) return busyAnswer(orgName);").length).toBe(3);
     expect(read("src/lib/scim-deprovision.ts")).toContain("if (isOrgRolesBusy(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };");
     expect(read("src/app/api/settings/members/bulk/route.ts")).toContain("const busy = rolesBusyAnswer(e);");
+    // workspace-status-2 step 4 (the step 1 review L5): a deadlock Postgres
+    // broke is the same busy answer, at every one of those routes, and at
+    // SCIM's and the join's own answers.
+    expect(read("src/lib/access/org-roles-busy.ts")).toContain("if (!isOrgRolesBusy(e)) return isDeadlock(e) ? { status: 503, error: ORG_ROLES_BUSY, code: \"roles_busy\", retryAfterSeconds: 2 } : null;");
+    expect(read("src/lib/scim-deprovision.ts")).toContain("if (isDeadlock(e)) return { ok: false, status: 503, error: ORG_ROLES_BUSY };");
+    expect(read("src/app/api/auth/accept-invite/route.ts")).toContain("if (isDeadlock(e)) return busyAnswer(orgName);");
   });
 
   it("every transaction that takes the role lock is one of those, and nothing else takes it", () => {
@@ -413,37 +435,34 @@ describe("batch 6: the invitation acceptance", () => {
   });
 });
 
-// Docs-found fixes batch 8, from the batch 7 review: the lines another
-// workspace relies on move inside the step that ends the account, after its
-// lock and every refusal, right before status or deletedAt is written.
-describe("batch 8: the step that ends an account moves the relied lines, in its own locked transaction", () => {
-  it("PATCH's deactivation, DELETE and SCIM call it under the lock, right before the write that ends the account", () => {
+// Docs-found fixes batch 8 moved the lines another workspace relied on inside
+// the step that ended the account. workspace-status-2 step 4 (E4, E6): there
+// is no such line, so no end moves one: the gate counts every report here
+// under the lock, and the end writes the seat only.
+describe("no end of a seat moves a line itself (workspace-status-2 E6)", () => {
+  it("PATCH's deactivation, DELETE and SCIM end the seat after the gate, under the lock, with no line moved", () => {
     const route = read("src/app/api/users/[id]/route.ts");
     const patch = between(route, "export async function PATCH(", "export async function DELETE(");
     const tx = between(patch, "const outcome: Outcome | NextResponse = await prisma.$transaction(", "}, LOCKED_TX)");
     expect(tx.indexOf("await lockOrgRoles(tx, ctx.organizationId);")).toBeGreaterThan(-1);
-    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf("const r = await applyRoleChange(tx, {"));
-    // Step 3 (workspace-status): the write that ends the seat is endSeat, and
-    // the lines move only when it will end the account (endSeatWould, D4).
-    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(tx.indexOf('(await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "deactivated" })) === "account_ended"'));
-    expect(tx.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(tx.indexOf("ended = await endSeat(tx, {"));
+    expect(tx.indexOf("holdsWork(await pendingHandover(ctx.organizationId, id, tx))")).toBeGreaterThan(tx.indexOf("await lockOrgRoles(tx, ctx.organizationId);"));
+    expect(tx.indexOf("ended = await endSeat(tx, {")).toBeGreaterThan(tx.indexOf('const will = await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "deactivated" });'));
     const del = between(route, "// Removing someone who holds Admin changes who runs the workspace");
-    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf("if (await wouldRemoveLastOwner(ctx.organizationId, id, tx)) {"));
-    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeGreaterThan(del.indexOf('const will = await endSeatWould(tx, { userId: id, organizationId: ctx.organizationId, kind: "removed" });'));
-    expect(del.indexOf("moveReliedReportsAtEnd(tx,")).toBeLessThan(del.indexOf("const ended = await endSeat(tx, {"));
-    // Step 4 (D14): SCIM ends the seat through endSeat too, one function for
-    // both doors, and moves the lines only when the end is the account's (D4).
+    expect(del.indexOf("const ended = await endSeat(tx, {")).toBeGreaterThan(del.indexOf("if (holdsWork(await pendingHandover(ctx.organizationId, id, tx))) {"));
     const scim = between(read("src/lib/scim-deprovision.ts"), "async function deprovisionSeat(", "async function resumePendingHandover(");
-    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
-    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeGreaterThan(scim.indexOf('const leavesOnlyHere = will !== "account_ended";'));
-    expect(scim.indexOf("await moveReliedReportsAtEnd(tx,")).toBeLessThan(scim.indexOf('await endSeat(tx, { userId, organizationId, kind: "deactivated", actor: SCIM_ACTOR, expect: will });'));
+    expect(scim.indexOf('await endSeat(tx, { userId, organizationId, kind: "deactivated", actor: SCIM_ACTOR, expect: will });')).toBeGreaterThan(scim.indexOf("await lockOrgRoles(tx, organizationId);"));
+    for (const [f, src] of [["users/[id]", route], ["scim", scim]] as const) {
+      expect(codeOnly(src), f).not.toMatch(/moveReliedReportsAtEnd|followAccountEndLines|endLines/);
+    }
   });
 
-  it("the dialogs send the person picked with the step, and WORK's container locks never block a foreign-key check", () => {
+  it("the dialogs send no one with the step, and WORK's container locks never block a foreign-key check", () => {
     const shared = read("src/app/(dashboard)/settings/members/members-shared.tsx");
-    expect(shared).toContain("?handoverTo=${encodeURIComponent(recipient)}");
-    expect(shared).toContain('json: { status: "INACTIVE", handoverTo: recipient }');
-    expect(read("src/components/people/remove-person-dialog.tsx")).toContain("?handoverTo=${encodeURIComponent(to.id)}");
+    // Before (batch 8): ?handoverTo= on the removal and { handoverTo } on the deactivation.
+    expect(codeOnly(shared)).not.toContain("handoverTo");
+    expect(shared).toContain("await apiFetch(`/api/users/${member.id}`, { method: \"DELETE\" })");
+    expect(shared).toContain('json: { status: "INACTIVE" }');
+    expect(codeOnly(read("src/components/people/remove-person-dialog.tsx"))).not.toContain("handoverTo");
     const work = read("src/lib/people/handover.server.ts");
     expect(work.match(/ORDER BY id FOR NO KEY UPDATE`/g)?.length).toBe(3);
     expect(work).not.toMatch(/"ownerId" = \$\{id\} ORDER BY id FOR UPDATE`/);
@@ -462,8 +481,10 @@ describe("batch 9: the handover goes by the chain, and the dialogs say what move
     expect(handover).not.toContain("mayRemovePersonHere");
     expect(gate).not.toContain("relationTo(");
     const route = read("src/app/api/users/[id]/route.ts");
-    expect(route).toContain("const handoverTo = canHandOver ? handoverAsked : null;");
-    expect(route).toContain('const handoverTo = canHandOver ? new URL(req.url).searchParams.get("handoverTo") || null : null;');
+    // For the handover_first refusal's words (step 4: no `handoverTo` is read any more, E6).
+    expect(route).toContain("const canHandOver = mayHandOverPerson(ctx, id, target);");
+    expect(route).toContain("const canHandOver = mayHandOverPerson(ctx, id, user);");
+    expect(route).not.toMatch(/const handoverTo =/);
     expect(route).toContain("handover: !subject.deletedAt && mayHandOverPerson(ctx, subject.id, subject),");
     // The whole gate under the lock, in PATCH and DELETE.
     expect(route.match(/holdsWork\(await pendingHandover\(ctx\.organizationId, id, tx\)\)/g)?.length).toBe(2);
@@ -471,7 +492,7 @@ describe("batch 9: the handover goes by the chain, and the dialogs say what move
 
   it("the Remove dialog builds a refused removal's words from what the handover answered, and asks nothing it may not", () => {
     const dialog = read("src/components/people/remove-person-dialog.tsx");
-    expect(dialog).toContain("refusedRemovalWords({ firstName, fullName, recipientName: to.firstName || \"the new owner\", moved, error: d.error })");
+    expect(dialog).toContain("refusedRemovalWords({ firstName, recipientName: to.firstName || \"the new owner\", moved, error: d.error })");
     // Before: "Their open work moved to X" whenever a handover had run.
     expect(dialog).not.toContain("`Their open work${");
     // A viewer who may not hand the work over never reads the summary; since
@@ -483,9 +504,12 @@ describe("batch 9: the handover goes by the chain, and the dialogs say what move
     expect(read("src/components/people/person-record.tsx")).toContain("canHandOver={person.access.handover === true}");
   });
 
-  it("the transfer dialog says a line moves with the handover for an account already ended", () => {
-    const shared = read("src/app/(dashboard)/settings/members/members-shared.tsx");
-    expect(shared).toContain('linesAlsoElsewhereNote(planNow.alsoElsewhere ?? [], member.name, planNow.accountEnded ? "ended" : ends)');
-    expect(shared).toContain('linesAlsoElsewhereNote(alsoMoved, member.name, "done"), linesAlsoElsewhereNote(waiting, member.name, ends)');
+  // Batch 9 said when a line another workspace relied on moved; since
+  // workspace-status-2 step 4 (E6) no such line exists, and the dialogs say
+  // nothing of another workspace's lines.
+  it("the transfer and Remove dialogs say nothing of another workspace's lines", () => {
+    for (const f of ["src/app/(dashboard)/settings/members/members-shared.tsx", "src/components/people/remove-person-dialog.tsx", "src/app/(dashboard)/settings/members/member-drawer.tsx"]) {
+      expect(codeOnly(read(f)), f).not.toMatch(/linesAlsoElsewhereNote|linesStayNote|reportsAlsoElsewhere|reportsAtAccountEnd|accountEnded/);
+    }
   });
 });

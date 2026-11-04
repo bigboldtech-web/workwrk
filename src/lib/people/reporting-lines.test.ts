@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, linesAlsoElsewhereNote, linesStayNote, liveManagerFrom, pathTo, planReportHandover, refusedRemovalWords, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
+import * as reportingLines from "./reporting-lines";
+import { agentReportsNote, buildOrgForest, effectiveManagerFrom, filterForest, liveManagerFrom, pathTo, planReportHandover, refusedRemovalWords, reportHandoverNote, wouldCreateCycle, type LineFacts } from "./reporting-lines";
 
 const map = (pairs: Array<[string, string | null]>) => new Map(pairs);
 
@@ -189,67 +190,21 @@ describe("planReportHandover to a deactivated recipient", () => {
   });
 });
 
-// Docs-found fixes batch 6: a report whose line another workspace relies on
-// stays where it is, and the dialogs say who and why.
-describe("planReportHandover leaves the reports another workspace relies on", () => {
-  it("answers them apart, and in none of the moves", () => {
+// Docs-found fixes batches 6 to 9 kept a report whose line another workspace
+// relied on (planReportHandover's `stays`) and said so (linesStayNote,
+// linesAlsoElsewhereNote). Since workspace-status-2.md E1 and E2 the lines a
+// plan reads are this workspace's only, so every report listed under the
+// leaver moves, and step 4 retired those words (E6).
+describe("planReportHandover moves every report listed under the leaver (workspace-status-2 E6)", () => {
+  it("leaves nobody apart, and its words about another workspace's lines are gone", () => {
     const managers = new Map<string, string | null>([["boss", null], ["leo", "boss"], ["ida", "leo"], ["kim", "leo"]]);
-    const plan = planReportHandover({ leaverId: "leo", recipientId: "rae", recipientIsAgent: false, managers, agentIds: new Set(), stays: new Set(["ida"]) });
-    expect(plan.stays).toEqual(["ida"]);
-    expect(plan.reportIds).toEqual(["kim"]);
-    expect(plan.toRecipient).toEqual(["kim"]);
-    const up = planReportHandover({ leaverId: "leo", recipientId: "sam", recipientIsAgent: true, managers, agentIds: new Set(), stays: new Set(["ida"]) });
-    expect([...up.rehome.values()].flat()).toEqual(["kim"]);
-  });
-});
-
-describe("linesStayNote", () => {
-  it("names who stays and why, never the other workspace, in plain words", () => {
-    expect(linesStayNote([], "Leo Leaver")).toBeNull();
-    const one = linesStayNote([{ name: "Ida Ray" }], "Leo Leaver");
-    expect(one).toBe("Ida Ray stays listed under Leo Leaver. They also work with Leo Leaver in another workspace, where that line still counts, so it's left as it is.");
-    expect(linesStayNote([{ name: "Ida Ray" }, { name: "Kim Lo", kind: "dotted" }], "Gil Agent")).toBe(
-      "Ida Ray stays listed under Gil Agent, and Kim Lo keeps a dotted line to Gil Agent. They also work with Gil Agent in another workspace, where those lines still count, so they're left as they are.",
-    );
-    expect(linesStayNote([{ name: "A" }, { name: "B" }, { name: "C" }, { name: null }], "Leo")).toMatch(/^A, B and 2 others stay listed under Leo\./);
-    for (const s of [one]) expect(s).not.toMatch(/--|\u2014/);
-  });
-});
-
-// Docs-found fixes batch 7: a handover's leaver is deactivated or removed
-// next, in every workspace, so every report moves. Batch 6's words, "stays
-// listed under them ... left as it is", were untrue once that landed.
-// Batch 8: those lines move with the deactivation or the removal, never with
-// the handover before it, so the words say when ("moves with the rest" was
-// untrue for a removal that was then refused).
-describe("linesAlsoElsewhereNote", () => {
-  it("says before that the line moves once they are deactivated or removed, and after that it moved, never naming that workspace", () => {
-    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }], "Leo Leaver", "deactivated")).toBe(
-      "Ida Ray also reports to Leo Leaver in another workspace. That line moves only once Leo Leaver is deactivated, since that ends their account there too, and that workspace's Audit log records it.",
-    );
-    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: "Kim Lo" }], "Leo Leaver", "removed")).toBe(
-      "Ida Ray and Kim Lo also report to Leo Leaver in another workspace. Those lines move only once Leo Leaver is removed, since that ends their account there too, and that workspace's Audit log records it.",
-    );
-    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: null }], "Leo Leaver", "done")).toBe(
-      "Ida Ray and Someone also reported to Leo Leaver in another workspace. Those lines moved too, and that workspace's Audit log records it.",
-    );
-    for (const ends of ["deactivated", "removed", "done"] as const) {
-      const said = linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: "Kim Lo" }], "Leo Leaver", ends) ?? "";
-      expect(said).not.toMatch(/stay|left as|with the rest|--|\u2014/);
-    }
-    expect(linesAlsoElsewhereNote([], "Leo Leaver", "done")).toBeNull();
-  });
-
-  // Batch 9: for someone already deactivated (an Owner the identity provider
-  // deactivated keeps their reports), the handover moves the line at once.
-  it("says the line moves with the handover for an account that has already ended, never only once removed", () => {
-    const said = linesAlsoElsewhereNote([{ name: "Ida Ray" }], "Leo Leaver", "ended");
-    // Before: "That line moves only once Leo Leaver is ended, ...".
-    expect(said).toBe(
-      "Ida Ray also reports to Leo Leaver in another workspace. Leo Leaver's account has already ended there too, so that line moves with the handover, and that workspace's Audit log records it.",
-    );
-    expect(linesAlsoElsewhereNote([{ name: "Ida Ray" }, { name: "Kim Lo" }], "Leo Leaver", "ended")).toContain("so those lines move with the handover");
-    expect(said).not.toMatch(/only once|stay|left as|--|\u2014/);
+    const plan = planReportHandover({ leaverId: "leo", recipientId: "rae", recipientIsAgent: false, managers, agentIds: new Set() });
+    expect(plan.reportIds).toEqual(["ida", "kim"]);
+    expect(plan.toRecipient).toEqual(["ida", "kim"]);
+    expect(plan).not.toHaveProperty("stays");
+    const up = planReportHandover({ leaverId: "leo", recipientId: "sam", recipientIsAgent: true, managers, agentIds: new Set() });
+    expect([...up.rehome.values()].flat()).toEqual(["ida", "kim"]);
+    for (const name of ["linesStayNote", "linesAlsoElsewhereNote"]) expect(reportingLines, name).not.toHaveProperty(name);
   });
 });
 
@@ -257,16 +212,15 @@ describe("linesAlsoElsewhereNote", () => {
 // Remove dialog said "Their open work moved to Rae, but Leo is still here",
 // though the handover had moved nothing (Leo's only report's line another
 // workspace relies on, which waits for the removal), or had sent the reports
-// up the line rather than to Rae.
+// up the line rather than to Rae. Workspace-status-2 step 4 (E6): nothing
+// about another workspace's lines is said, since none moves or waits here.
 describe("refusedRemovalWords", () => {
-  const base = { firstName: "Leo", fullName: "Leo Leaver", recipientName: "Rae", error: "Only an Owner can remove an Owner." };
+  const base = { firstName: "Leo", recipientName: "Rae", error: "Only an Owner can remove an Owner." };
 
-  it("when nothing moved, says only that they are still here, the reason, and the line still waiting", () => {
-    const said = refusedRemovalWords({ ...base, moved: { tasksReassigned: 0, containersReassigned: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportsAtAccountEnd: [{ name: "Ida Ray" }] } });
-    expect(said).toBe(
-      "Leo is still here: Only an Owner can remove an Owner. Ida Ray also reports to Leo Leaver in another workspace. That line moves only once Leo Leaver is removed, since that ends their account there too, and that workspace's Audit log records it.",
-    );
-    expect(said).not.toMatch(/moved to|--|\u2014/);
+  it("when nothing moved, says only that they are still here and the reason", () => {
+    const said = refusedRemovalWords({ ...base, moved: { tasksReassigned: 0, containersReassigned: 0, reportsReassigned: 0, reportsRehomed: [] } });
+    expect(said).toBe("Leo is still here: Only an Owner can remove an Owner.");
+    expect(said).not.toMatch(/moved to|another workspace|--|\u2014/);
     // No handover ran, or it answered nothing.
     expect(refusedRemovalWords({ ...base, moved: null })).toBe("Leo is still here: Only an Owner can remove an Owner.");
     expect(refusedRemovalWords({ ...base, moved: {}, error: null })).toBe("Leo is still here: try Remove again.");
@@ -282,13 +236,6 @@ describe("refusedRemovalWords", () => {
     // Reports that went up the line only: never "moved to Rae".
     expect(refusedRemovalWords({ ...base, moved: { reportsRehomed: [{ name: "Kim Lo", managerName: null }] } })).toBe(
       "Their direct report moved, but Leo is still here: Only an Owner can remove an Owner. Kim Lo now has no manager.",
-    );
-  });
-
-  it("says a line another workspace relied on moved with the handover, for an account already ended", () => {
-    const said = refusedRemovalWords({ ...base, moved: { reportsReassigned: 1, reportsAlsoElsewhere: [{ name: "Ida Ray" }] } });
-    expect(said).toBe(
-      "1 direct report moved to Rae, but Leo is still here: Only an Owner can remove an Owner. Ida Ray also reported to Leo Leaver in another workspace. That line moved too, and that workspace's Audit log records it.",
     );
   });
 });

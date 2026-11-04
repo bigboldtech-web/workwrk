@@ -106,7 +106,7 @@ interface Writer {
 }
 
 /** The steps of this program whose builder has finished: none of their (b) entries or writers may remain. */
-const MERGED: readonly Step[] = [2, 3];
+const MERGED: readonly Step[] = [2, 3, 4];
 /** What the one merge of steps 1 to 4 (with 5, 7 and 8) needs MERGED to hold. */
 const MERGE_NEEDS: readonly Step[] = [2, 3, 4, 5, 7, 8];
 
@@ -124,7 +124,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/announcements/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the audience by the account's department and office" },
   "src/app/api/assets/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "shows the holder's department only when it belongs here" },
   "src/app/api/assets/route.ts": { kinds: ["profile"], mark: "a", why: "shows the holder's department only when it belongs here" },
-  "src/app/api/auth/accept-invite/route.ts": { kinds: ["line", "profile"], mark: "b", step: 4, why: "the signed-out join makes the account here with its line (right); the signed-in join must write the invitation's manager onto the membership (E10)" },
+  "src/app/api/auth/accept-invite/route.ts": { kinds: ["line", "profile"], mark: "a", why: "the signed-out join makes the account here with its line; the signed-in join writes the invitation's manager onto the membership under the role lock (managerOnAccept, no loop here), which the swap hands to the account (E10, step 4)" },
   "src/app/api/calendar/events/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "the Team pill: the solid reports by the line here (reportsHereOf, both halves), the dotted ones this workspace's rows (step 2)" },
   "src/app/api/candor/[id]/respond/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the Candor audience by the account's department" },
   "src/app/api/conversations/[id]/route.ts": { kinds: ["profile"], mark: "a", why: "shows a member's job title and department only when they belong here" },
@@ -149,7 +149,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/okrs/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "goal visibility by the viewer's department and job title" },
   "src/app/api/people/[id]/alignment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a person's alignment, their manager and placement: a membership person's people data here is a known limit" },
   "src/app/api/people/bulk-import/route.ts": { kinds: ["line"], mark: "a", why: "makes invitations, each with its manager and placement (E10: unchanged)" },
-  "src/app/api/people/bulk-update/route.ts": { kinds: ["line", "profile"], mark: "b", step: 4, why: "change_manager through writeLineHere (step 4); department and office for membership people (step 5)" },
+  "src/app/api/people/bulk-update/route.ts": { kinds: ["line", "profile"], mark: "b", step: 5, why: "change_manager through writeLineHere, each person under their row lock on the row that holds their seat (step 4, done); department, office and the line for membership people (step 5)" },
   "src/app/api/policies/[id]/assignments/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the audience by the account's department" },
   "src/app/api/policies/[id]/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the assignees' department (unscoped) and the counts" },
   "src/app/api/pulse-surveys/[id]/respond/route.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the survey audience by the account's office and department" },
@@ -178,11 +178,11 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/talent-assessment/route.ts": { kinds: ["line", "profile"], mark: "c", why: "a membership person's talent data here is a known limit; anchored people's own line and placement" },
   "src/app/api/team/members-work/route.ts": { kinds: ["line", "profile"], mark: "a", why: "the Reports to filter by the line each seat here holds: the account's for the anchored half, the membership's own for the membership half (step 3)" },
   "src/app/api/team/workload/route.ts": { kinds: ["profile"], mark: "b", step: 5, why: "capacity at the seat here (step 6); canEditCapacity for membership people (E7)" },
-  "src/app/api/users/[id]/agent-reports/route.ts": { kinds: ["line"], mark: "b", step: 4, why: "via moveAgentReports (the moved lines' audit)" },
-  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "GET reads this workspace's rows, for a subject of either kind, with no count of another workspace's (step 3, done); PUT through writeDottedHere, the keep-elsewhere list retired (step 4)" },
-  "src/app/api/users/[id]/handover/route.ts": { kinds: ["line"], mark: "b", step: 4, why: "the summary's reports by the account line: every report here through reportsHereOf" },
+  "src/app/api/users/[id]/agent-reports/route.ts": { kinds: ["line"], mark: "a", why: "via moveAgentReports and previewAgentReports, which read and move this workspace's lines only (reportsHereOf, moveLinesHere, removeDottedHere, step 4)" },
+  "src/app/api/users/[id]/dotted-lines/route.ts": { kinds: ["line", "dotted"], mark: "b", step: 5, why: "GET reads this workspace's rows (step 3, done); PUT replaces this workspace's rows through writeDottedHere, the keep-elsewhere list retired, a new line live here (step 4, done); PUT for a subject here through a membership, its solid-line filter by the seat's line (step 5)" },
+  "src/app/api/users/[id]/handover/route.ts": { kinds: ["line"], mark: "a", why: "the summary's reports through reportsHereOf, the preview and the run the same plan over this workspace's lines (step 4)" },
   "src/app/api/users/[id]/record-access/route.ts": { kinds: ["line", "dotted"], mark: "a", why: "the walk up the line each seat here holds (personSeatIn for the subject, linesHereOf up the line) and this workspace's dotted rows, as viewer.ts walks them (step 3)" },
-  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 4, why: "GET names the line the seat here holds, this workspace's dotted rows and the reports here (reportsHereOf) for both kinds (step 3, done); PATCH, the clears on a restore and a reactivation (step 4); a membership person's profile and lines (step 5)" },
+  "src/app/api/users/[id]/route.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 5, why: "GET names the line the seat here holds, this workspace's dotted rows and the reports here (step 3, done); PATCH's Reports to through writeLineHere with no 409, and the clears on a restore and a reactivation through writeLineHere and removeDottedHere on the seat's row (step 4, done); a membership person's profile and lines (step 5)" },
   "src/app/api/users/[id]/seed-alignment/route.ts": { kinds: ["profile"], mark: "c", why: "a membership person's KRAs here are a known limit; seeds from the job title of someone anchored here" },
   "src/app/api/users/export/route.ts": { kinds: ["line", "profile"], mark: "a", why: "Reports to from the line each row's seat here holds (the membership's for a membership person), named only with a seat here (step 3); the placement read at the seat (D18)" },
   "src/app/api/users/route.ts": { kinds: ["line", "profile"], mark: "a", why: "POST makes an account here with its line (right); GET's manager columns from the line each seat here holds and every row's reports here (reportsHere), a sort by managerId at the seat too (step 3)" },
@@ -190,15 +190,15 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/v1/people/route.ts": { kinds: ["line", "profile"], mark: "a", why: "anchored rows, each with this workspace's own placement and line (phase 1's decision for the public API)" },
   "src/app/api/weekly-reviews/[id]/manager-review/route.ts": { kinds: ["line"], mark: "a", why: "via isInReportTree and effectiveManagerOf, which read the lines here (step 2); WeeklyReview.managerId is a stamp" },
   "src/app/api/weekly-reviews/reminders/route.ts": { kinds: ["line"], mark: "a", why: "via effectiveManagersOf, which reads the lines here (step 2)" },
-  "src/lib/access/acting-workspace.ts": { kinds: ["line", "dotted", "profile"], mark: "b", step: 4, why: "reads the seat's line (step 1: seatsHeldFor, personSeatIn, reportsHereOf, the two workspace reads); lineStandingsElsewhere and linesElsewhere retire (E6)" },
+  "src/lib/access/acting-workspace.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "reads the seat's line (seatsHeldFor, personSeatIn, reportsHereOf, linesHereOf, the two workspace reads); lineStandingsElsewhere and linesElsewhere retired (E6, step 4)" },
   "src/lib/access/app-floor-impact.server.ts": { kinds: ["line"], mark: "a", why: "the preview's managers from this workspace's lines: the account's of people anchored here, a membership's of people here through one, and workspaceDottedLines (step 2)" },
   "src/lib/access/backfill-plan.ts": { kinds: ["line"], mark: "c", why: "the access backfill's plan (scripts/access-backfill.ts): anchored rows, a one-off migration behind ACCESS_V2_TABLES" },
   "src/lib/access/digest-recipients.ts": { kinds: ["line"], mark: "a", why: "the digest manager by the line here: effectiveManagersOf, and memberManagersOf from the membership's line (seatsHeldFor) walked by managersPastAgents (step 2)" },
   "src/lib/access/guards.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "a pure field map (managerId, dottedLines and the placement fields in their groups) and a pure rule; the caller passes the line" },
   "src/lib/access/job-title-holders.ts": { kinds: ["profile"], mark: "b", step: 8, why: "a job title's holders, anchored only" },
   "src/lib/access/legacy-resolve.ts": { kinds: ["line"], mark: "c", why: "WeeklyReview.managerId, a stamp written once from the line of the moment" },
-  "src/lib/access/manager-candidate.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "lineAbove walks the line each seat here holds and \"inactive\" is the seat's (step 2, done); staleLinesOf still reads the account's line and every workspace's dotted rows (step 4)" },
-  "src/lib/access/manager-lines.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "factsHere, the walks and effectiveManagersOf read the line each seat here holds, reportsHereOf who reports here, the dotted reads this workspace's rows (step 2, done); the relied-line helpers retire (step 4)" },
+  "src/lib/access/manager-candidate.ts": { kinds: ["line", "dotted"], mark: "a", why: "lineAbove walks the line each seat here holds and \"inactive\" is the seat's (step 2); staleLinesOf reads the line the seat here holds and this workspace's dotted rows, each manager at their seat here (step 4)" },
+  "src/lib/access/manager-lines.ts": { kinds: ["line", "dotted"], mark: "a", why: "factsHere, the walks and effectiveManagersOf read the line each seat here holds, reportsHereOf who reports here, the dotted reads this workspace's rows (step 2); othersDottedLines and managerLineIsOthers retired (E6, step 4)" },
   "src/lib/access/members-list.server.ts": { kinds: ["line", "profile"], mark: "a", why: "the row's manager and No manager from the line each seat here holds: the account's where anchored here, the membership's own otherwise (step 3)" },
   "src/lib/access/membership.ts": { kinds: ["line", "dotted"], mark: "a", why: "rule 6 (reportCountOf) counts the reports here (reportsHereOf) and this workspace's dotted lines; unattendedRecipient walks the line each seat here holds (step 2)" },
   "src/lib/access/node-access.ts": { kinds: ["line"], mark: "a", why: "reads the line with the session's row so personSeatIn answers the seat in one read; decides nothing by it" },
@@ -209,8 +209,8 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/access/viewer.ts": { kinds: ["profile"], mark: "a", why: "the viewer's placement read at the seat here (phase 1's final review, L5)" },
   "src/lib/access/workspace-anchor.ts": { kinds: ["line", "profile"], mark: "a", why: "the swap (E3, D18): a move writes the line and the profile of the workspace left and the one arrived in" },
   "src/lib/agents/connector-tools.ts": { kinds: ["profile"], mark: "b", step: 5, why: "a teammate's working days from the account's working week: the seat's (capacityHereOf, E13), missed by step 6's search" },
-  "src/lib/agents/previews.ts": { kinds: ["line"], mark: "b", step: 4, why: "an AI invitation's manager must be anchored here: managerCandidateIn at the seat (E10)" },
-  "src/lib/agents/tools.ts": { kinds: ["line"], mark: "b", step: 4, why: "the invite tool's manager (E10, via previews.ts); team alignment via getTeamAlignment reads the lines here (step 2, done); searchEmployeeRows reads the seat (step 6)" },
+  "src/lib/agents/previews.ts": { kinds: ["line"], mark: "a", why: "an AI invitation's manager at the seat here (managerCandidateIn, live), stored for an existing account too, since its signed-in join writes it (E10, step 4)" },
+  "src/lib/agents/tools.ts": { kinds: ["line"], mark: "a", why: "the invite tool's manager via previews.ts and sendInvitation, both at the seat here (E10, step 4); team alignment via getTeamAlignment reads the lines here (step 2); searchEmployeeRows reads the seat (step 6)" },
   "src/lib/alignment-assign.ts": { kinds: ["profile"], mark: "b", step: 8, why: "KRA seeding to a job title's holders, anchored only" },
   "src/lib/alignment-scope.ts": { kinds: ["line"], mark: "a", why: "a live direct report here, both halves (reportsHereOf, step 2)" },
   "src/lib/analytics.ts": { kinds: ["profile"], mark: "c", why: "a membership person's people data here is a known limit (analytics by department, anchored only)" },
@@ -226,7 +226,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/people/directory-list.server.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "rows, the Reports to filter, No manager and the chart's managerId from the line each seat here holds, every report count and its sort from the reports here (reportsHere, in memory), the chart's dotted ids from this workspace's rows (step 3)" },
   "src/lib/people/directory-query.ts": { kinds: ["line"], mark: "a", why: "parses the Directory's filters; directory-list.server.ts applies them" },
   "src/lib/people/escalation-report.ts": { kinds: ["line"], mark: "a", why: "a pure count over the rows its caller reads" },
-  "src/lib/people/handover.server.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "writeReportMoves through moveLinesHere, every report here counted, the relied-line machinery retired (E4 to E6)" },
+  "src/lib/people/handover.server.ts": { kinds: ["line", "dotted"], mark: "a", why: "every report here (reportsHereOf, lineFactsAround) counted and moved through moveLinesHere, an Agent's dotted rows here through removeDottedHere, the relied-line machinery retired (E4 to E6, step 4)" },
   "src/lib/people/named-here.ts": { kinds: ["line"], mark: "a", why: "a pure seat filter over the lines here its caller reads; the elsewhere fields are gone (E6, step 3)" },
   "src/lib/people/person-access.server.ts": { kinds: ["line"], mark: "a", why: "the chain via getTeamUserIds and the report tree, which walk the lines here; managerMapFor reads the lines here (workspacePeopleLines), the graph lineAbove walks too (step 2)" },
   "src/lib/people/person-fields.ts": { kinds: ["line", "profile"], mark: "b", step: 5, why: "PROFILE_ELSEWHERE goes and SEAT_FIELDS widens (E7)" },
@@ -244,7 +244,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/lib/policy-compliance.ts": { kinds: ["profile"], mark: "b", step: 8, why: "compliance rows by department, anchored only" },
   "src/lib/policy-ledger.ts": { kinds: ["profile"], mark: "b", step: 8, why: "the ledger's department (unscoped), anchored only" },
   "src/lib/reporting-line.ts": { kinds: ["line", "dotted"], mark: "a", why: "the solid walk joins each step to the two halves of the lines here (a LATERAL subquery), dottedRowsHere reads this workspace's rows; getReportingChain, which named no workspace and had no caller, is gone (step 2)" },
-  "src/lib/scim-reactivate.ts": { kinds: ["line", "dotted"], mark: "b", step: 4, why: "the stale-line clears write the account and every workspace's dotted rows: writeLineHere and removeDottedHere" },
+  "src/lib/scim-reactivate.ts": { kinds: ["line"], mark: "a", why: "the stale-line clears through writeLineHere on the row that holds the seat now and removeDottedHere for this workspace's rows (step 4)" },
   "src/lib/sop-compliance.ts": { kinds: ["profile"], mark: "b", step: 8, why: "compliance by the account's department" },
   "src/lib/team-alignment.ts": { kinds: ["line", "dotted", "profile"], mark: "a", why: "the tree via getEffectiveReportTree and the dotted marks by this workspace's rows (step 2); the rows are people anchored here, by their own line and job title" },
   "src/lib/team-rollup.ts": { kinds: ["line", "dotted"], mark: "a", why: "the directs via getAllDirectReports and effectiveReportsOfMany (the lines here), the dotted marks by this workspace's rows (step 2)" },
@@ -270,14 +270,13 @@ const ENTRIES: Record<string, Entry> = {
 
 /** Every file that writes a line or a profile column, by its top-level functions (see the header). */
 const WRITERS: Record<string, Writer> = {
-  "src/app/api/auth/accept-invite/route.ts": { writes: "made", functions: ["POST"], why: "the signed-out join makes the account here with its line and placement; the signed-in join makes or revives the membership with its placement before the move (D18), and step 4 adds the invitation's manager there (E10)" },
+  "src/app/api/auth/accept-invite/route.ts": { writes: "made", functions: ["POST"], why: "the signed-out join makes the account here with its line and placement; the signed-in join makes or revives the membership with its placement and the invitation's manager before the move (D18, E10)" },
   "src/app/api/departments/[id]/route.ts": { writes: "key", functions: ["DELETE"], why: "a deleted department cleared from removed accounts anchored here (the account's key); a membership's copy has no key" },
-  "src/app/api/people/bulk-update/route.ts": { writes: "step 4", functions: ["POST"], why: "change_manager through writeLineHere (step 4); department and office through writeProfileHere (step 5)" },
+  "src/app/api/people/bulk-update/route.ts": { writes: "step 5", functions: ["POST"], why: "change_manager goes through writeLineHere (step 4, done); department and office through writeProfileHere (step 5)" },
   "src/app/api/scim/v2/Groups/[id]/route.ts": { writes: "step 5", functions: ["PATCH", "PUT"], why: "a Group's members' department, the account's only: writeProfileHere (E9 ii)" },
   "src/app/api/scim/v2/Groups/route.ts": { writes: "step 5", functions: ["POST"], why: "a new Group's members' department, the account's only: writeProfileHere (E9 ii)" },
   "src/app/api/scim/v2/Users/[id]/route.ts": { writes: "none", functions: ["writeScimUser"], why: "its data holds the name, the address and the status only; step 7 adds the manager through writeLineHere" },
-  "src/app/api/users/[id]/dotted-lines/route.ts": { writes: "step 4", functions: ["PUT"], why: "the dotted set through writeDottedHere, the keep-elsewhere list retired" },
-  "src/app/api/users/[id]/route.ts": { writes: "step 4", functions: ["DELETE", "PATCH"], why: "Reports to and the clears on a restore and a reactivation through writeLineHere and removeDottedHere (step 4); the profile and a membership person's lines through writeProfileHere and writeLineHere (step 5); its data object is built field by field (data.managerId = next)" },
+    "src/app/api/users/[id]/route.ts": { writes: "step 5", functions: ["PATCH"], why: "Reports to and the clears on a restore and a reactivation go through writeLineHere and removeDottedHere (step 4, done); the profile through writeProfileHere, for a membership person too (step 5): its data object is built field by field and written with update({ data: write })" },
   "src/app/api/users/route.ts": { writes: "made", functions: ["POST"], why: "makes an account here, with its line and placement" },
   "src/lib/access/membership.ts": { writes: "none", functions: ["applyRoleChangeIn", "transferOwnership"], why: "its data holds the level, the org role, the Admin scopes and the token version only" },
   "src/lib/access/seat-writes.ts": { writes: "seat", functions: ["moveLinesHere", "removeDottedHere", "writeDottedHere", "writeLineHere", "writeProfileHere"], why: "the one place a line or a profile is written for a seat (E16)" },
@@ -286,8 +285,7 @@ const WRITERS: Record<string, Writer> = {
   "src/lib/agents/previews.ts": { writes: "none", functions: ["prepareOne"], why: "sets an invitation's manager (the Invitation row, applied at acceptance), never a person's line" },
   "src/lib/people/directory-list.server.ts": { writes: "none", functions: ["prismaWhere"], why: "builds the Directory's Reports to filter, a where, never a write" },
   "src/lib/people/directory-query.ts": { writes: "none", functions: ["directoryWhere"], why: "builds the Directory's filters, a where, never a write" },
-  "src/lib/people/handover.server.ts": { writes: "step 4", functions: ["moveAgentReports", "writeReportMoves"], why: "the handover's and the Agent move's lines through moveLinesHere and removeDottedHere (E4 to E6)" },
-  "src/lib/scim-reactivate.ts": { writes: "step 4", functions: ["scimReactivateSeat"], why: "the stale-line clears through writeLineHere and removeDottedHere; its other data holds the status only" },
+    "src/lib/scim-reactivate.ts": { writes: "none", functions: ["scimReactivateSeat"], why: "its own write holds the push's names and address only; the stale-line clears go through writeLineHere and removeDottedHere (step 4)" },
   "scripts/live-proof-ai-teammates-phase2.ts": { writes: "proof", functions: ["makeWorkspace"], why: "a local-only proof: makes accounts in its own workspace" },
   "scripts/live-proof-ai-teammates-phase3.ts": { writes: "proof", functions: ["makeWorkspace"], why: "a local-only proof: makes accounts in its own workspace" },
   "scripts/live-proof-ai-teammates-phase4.ts": { writes: "proof", functions: ["makeWorkspaces"], why: "a local-only proof: makes accounts in its own workspaces" },
@@ -553,8 +551,12 @@ describe("every reader and writer of a person's line and profile is listed (E16)
   it("holds the plan's named readers at their marks, by the account-line reads they still make", () => {
     const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
     const stillReads: Array<[string, RegExp]> = [
-      // Step 4: the PUT's keep list, every workspace's rows by person (E6).
-      ["src/app/api/users/[id]/dotted-lines/route.ts", /othersDottedLines\(ctx\.organizationId, id\)/],
+      // Step 5: the PUT's subject is anchored here only, and its solid-line
+      // filter reads the account's line (the step 2 review, pairing 10).
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /where: \{ id, organizationId: ctx\.organizationId, deletedAt: null \}/],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /\.filter\(\(m\) => m !== subject\.managerId\)/],
+      // Step 5: a membership person's profile and Reports to are refused here (PROFILE_ELSEWHERE).
+      ["src/app/api/users/[id]/route.ts", /return err\(403, PROFILE_ELSEWHERE, \{ code: "profile_elsewhere", fields: profile \}\);/],
     ];
     for (const [file, read] of stillReads) {
       expect(ENTRIES[file], file).toMatchObject({ mark: "b" });
@@ -566,7 +568,7 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/lib/team.ts", /CROSS JOIN LATERAL \(\s+SELECT u\.id FROM "User" u\s+WHERE u\."managerId" = t\.id AND u\."organizationId" = \$\{organizationId\}/],
       ["src/lib/reporting-line.ts", /CROSS JOIN LATERAL \(\s+SELECT u\."id" FROM "User" u\s+WHERE u\."managerId" = t\."id" AND u\."organizationId" = \$\{organizationId\}/],
       ["src/lib/access/membership.ts", /reportsHereOf\(organizationId, \[managerId\], db\)/],
-      ["src/lib/access/manager-lines.ts", /\{ managerId: seat\.managerId, agent: isAgentOf\(seat\.level\), inactive: seat\.deactivated \}/],
+      ["src/lib/access/manager-lines.ts", /\{ managerId: seat\.managerId, agent: isAgentOf\(seat\.level\), inactive: seat\.deactivated \|\| ended \}/],
       ["src/lib/people/teams-counts.ts", /reportsHereOf\(organizationId, \[userId\]\)/],
       ["src/app/api/calendar/events/route.ts", /reportsHereOf\(orgId, \[viewerId\]\)/],
       ["src/lib/access/app-floor-impact.server.ts", /workspaceDottedLines\(organizationId\)/],
@@ -627,5 +629,57 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     expect(code("src/app/api/reviews/[id]/peers/route.ts")).not.toMatch(/subject: \{ select: \{ id: true, managerId: true/);
     expect(code("src/lib/people/named-here.ts")).not.toMatch(/managerElsewhere|dottedElsewhere:|dottedKept/);
     expect(code("src/lib/access/manager-lines.ts")).not.toMatch(/export async function recordLinesOfOthers/);
+  });
+
+  // Step 4 (merged): every write of a line writes THIS workspace's, through
+  // seat-writes.ts, and the relied-line machinery is gone (E4 to E6, E10).
+  it("holds step 4's writers on seat-writes.ts, and no relied-line machinery is left anywhere", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const writesHere: Array<[string, RegExp, number]> = [
+      ["src/lib/people/handover.server.ts", /moveLinesHere\(tx, \{ organizationId: input\.organizationId, fromId: id, moves \}\)/, 1],
+      ["src/lib/people/handover.server.ts", /moveLinesHere\(tx, \{ organizationId: orgId, fromId: agentId, moves:/, 1],
+      ["src/lib/people/handover.server.ts", /removeDottedHere\(tx, orgId, found\.dottedIds\.map/, 1],
+      ["src/lib/people/handover.server.ts", /return \(await reportsHereOf\(organizationId, \[id\], db\)\)\.filter\(\(r\) => r\.id !== id\)\.length;/, 1],
+      ["src/lib/people/handover.server.ts", /where: \{ organizationId, managerId: agentId, userId: \{ not: agentId \}/, 1],
+      ["src/app/api/users/[id]/handover/route.ts", /reportsHereOf\(orgId, \[id\]\)/, 1],
+      ["src/app/api/users/[id]/route.ts", /writeLineHere\(tx, seatRefOf\(ctx\.organizationId, target\), lineNext\)/, 1],
+      ["src/app/api/users/[id]/route.ts", /writeLineHere\(tx, await seatNowRef\(tx, ctx\.organizationId, id\), null\)/, 2],
+      ["src/app/api/users/[id]/route.ts", /removeDottedHere\(tx, ctx\.organizationId, stale\.dotted\.map/, 2],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /writeDottedHere\(tx, seatRefOf\(ctx\.organizationId, \{ id, organizationId: ctx\.organizationId \}\)/, 1],
+      ["src/app/api/people/bulk-update/route.ts", /writeLineHere\(tx, seatRefOf\(orgId, \{ id, organizationId: orgId \}\), managerId\)/, 1],
+      ["src/lib/scim-reactivate.ts", /removeDottedHere\(tx, organizationId, stale\.dotted\.map/, 1],
+      ["src/lib/scim-reactivate.ts", /writeLineHere\(tx, seatRefOf\(organizationId, now\), null\)/, 1],
+      ["src/lib/access/manager-candidate.ts", /personSeatIn\(organizationId, userId, db\)/, 1],
+      ["src/lib/access/manager-candidate.ts", /db\.userDottedLine\.findMany\(\{ where: \{ userId, organizationId \}/, 1],
+      ["src/app/api/auth/accept-invite/route.ts", /const asked = await managerOnAccept\(inv, tx\);/, 1],
+      ["src/app/api/auth/accept-invite/route.ts", /isPrimary: false, \.\.\.placed, managerId \}/, 1],
+      ["src/lib/agents/previews.ts", /managerCandidateIn\(org, managerId, \{ live: true \}\)/, 1],
+      // The step 4 review fixes: a seat that comes back by invitation keeps
+      // only the lines that hold (M1); a recipient with no seat here takes no
+      // reports (L1); a held dotted line's manager is read again under the lock (L4).
+      ["src/app/api/auth/accept-invite/route.ts", /writeLineHere\(tx, seatRefOf\(inv\.organizationId, now\), null\)/, 1],
+      ["src/app/api/auth/accept-invite/route.ts", /removeDottedHere\(tx, inv\.organizationId, stale\.dotted\.map/, 1],
+      ["src/lib/people/handover.server.ts", /const recipientInactive = !people\.has\(toId\) \|\| people\.get\(toId\)!\.inactive \|\| accountEnded;/, 1],
+      ["src/app/api/users/[id]/dotted-lines/route.ts", /const seated = await liveHereAmong\(ctx\.organizationId, ids, tx\);/, 1],
+    ];
+    for (const [file, re, n] of writesHere) {
+      expect(ENTRIES[file], file).toBeDefined();
+      expect(count(file, re), `${file} ${re}`).toBe(n);
+    }
+    // The writes they replaced are gone: no account write of a line in the
+    // handover or the bulk change, no unscoped dotted delete.
+    expect(code("src/lib/people/handover.server.ts")).not.toMatch(/tx\.user\.updateMany|userDottedLine\.deleteMany/);
+    expect(code("src/app/api/people/bulk-update/route.ts")).not.toMatch(/data: \{ managerId \}/);
+    for (const f of ["src/app/api/users/[id]/route.ts", "src/lib/scim-reactivate.ts", "src/app/api/users/[id]/dotted-lines/route.ts"]) {
+      expect(code(f), f).not.toMatch(/userDottedLine\.deleteMany|data: \{ managerId: null \}/);
+    }
+    // E6: the relied-line machinery, its words and its fields, nowhere in
+    // the code (server and client files alike), comments aside.
+    const retired = /\b(lineStandingsElsewhere|linesElsewhere|othersDottedLines|managerLineIsOthers|moveReliedReportsAtEnd|followAccountEndLines|otherWorkspaceRows|reportsStayingWith|keepRelied|dottedIsOthers|dottedElsewhereWords|linesAlsoElsewhereNote|linesStayNote|alsoElsewhereLogWords|reportsAtAccountEnd|reportsAlsoElsewhere|reportsStaying|keptElsewhere|managerElsewhere|dottedElsewhere|dottedKept|AccountEndLines|LineThere)\b|"manager_elsewhere"/;
+    const all: string[] = [];
+    for (const dir of ["src", "scripts"]) all.push(...sources(path.join(ROOT, dir)));
+    const hits = all.filter((f) => retired.test(codeOf(readFileSync(f, "utf8")))).map((f) => path.relative(ROOT, f));
+    expect(hits).toEqual([]);
   });
 });

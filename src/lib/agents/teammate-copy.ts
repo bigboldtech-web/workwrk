@@ -2535,8 +2535,8 @@ export const INVITE_CARD = {
   roleListedOnly: (title: string) => `Role: ${title}. Only the KRAs and SOPs below are assigned, not the role's own.`,
   /** Only SOPs listed: the role's KRAs, with the listed SOPs instead of its own. */
   roleKrasListedSops: (title: string) => `Role: ${title}. Its KRAs are assigned when they accept, and the SOPs below replace its own.`,
-  /** The address already has an account: accepting signed in sets only the level. */
-  existingAccount: "They already use WorkwrK, so their role, manager, department, office, KRAs and SOPs aren't set when they join. Set them in Members afterwards.",
+  /** The address already has an account: accepting signed in sets the level and, since workspace-status-2 step 4 (E10), the manager named. */
+  existingAccount: "They already use WorkwrK, so their role, department, office, KRAs and SOPs aren't set when they join. Set them in Members afterwards.",
   manager: (name: string) => `Reports to ${name}.`,
   department: (name: string) => `Department: ${name}.`,
   office: (name: string) => `Office: ${name}.`,

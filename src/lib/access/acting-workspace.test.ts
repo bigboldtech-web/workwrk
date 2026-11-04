@@ -39,7 +39,8 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { Prisma } from "@/generated/prisma";
-import { actingWorkspace, inWorkspaceWhere, levelHeldIn, levelsHeldFor, levelsHeldIn, lineStandingsElsewhere, linesElsewhere, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
+import * as actingModule from "./acting-workspace";
+import { actingWorkspace, inWorkspaceWhere, levelHeldIn, levelsHeldFor, levelsHeldIn, workspaceDottedLines, workspacePeopleLines } from "./acting-workspace";
 import { nodeCtxFromSession } from "./node-access";
 
 beforeEach(() => {
@@ -143,92 +144,14 @@ describe("nodeCtxFromSession", () => {
   });
 });
 
-// Docs-found fixes batch 6: a workspace writes only the reporting lines it
-// owns, and reads a whole workspace's people by its indexes.
-describe("linesElsewhere: the other workspaces a line counts in", () => {
-  const user = (id: string, organizationId: string, accessLevel = "EMPLOYEE") => users.set(id, { organizationId, accessLevel, status: "ACTIVE", deletedAt: null });
-  beforeEach(() => {
-    // pia works in orgA (anchored) and orgB (a membership).
-    user("pia", "orgA");
-    memberships.set("pia:orgB", { role: "EMPLOYEE" });
-  });
-
-  it("says a line is relied on where its manager holds a level that is no Agent, anchored there or through a membership", async () => {
-    user("gil", "orgB", "MANAGER");
-    user("max", "orgA", "MANAGER");
-    memberships.set("max:orgB", { role: "MANAGER" });
-    const out = await linesElsewhere("orgA", [{ personId: "pia", managerId: "gil" }, { personId: "pia", managerId: "max" }]);
-    expect(out.get("pia\ngil")).toBe("relied");
-    expect(out.get("pia\nmax")).toBe("relied");
-  });
-
-  it("says only shared where the manager is an Agent there, and nothing where they hold no level there", async () => {
-    user("ava", "orgA", "MANAGER");
-    memberships.set("ava:orgB", { role: "AGENT" });
-    user("zed", "orgC", "MANAGER"); // a workspace pia is not in
-    const out = await linesElsewhere("orgA", [{ personId: "pia", managerId: "ava" }, { personId: "pia", managerId: "zed" }]);
-    expect(out.get("pia\nava")).toBe("shared");
-    expect(out.has("pia\nzed")).toBe(false);
-  });
-
-  it("answers nothing for someone who works in this workspace only", async () => {
-    user("solo", "orgA");
-    user("gil", "orgB", "MANAGER");
-    expect((await linesElsewhere("orgA", [{ personId: "solo", managerId: "gil" }])).size).toBe(0);
-  });
-
-  it("reads from the other side too: a person anchored elsewhere, asked about here", async () => {
-    // From orgB, pia's anchored workspace orgA is the other one.
-    user("max", "orgA", "MANAGER");
-    expect((await linesElsewhere("orgB", [{ personId: "pia", managerId: "max" }])).get("pia\nmax")).toBe("relied");
-  });
-});
-
-// Docs-found fixes batch 7, from the batch 6 review: a Guest, deactivated
-// or removed manager in the other workspace counted as "relied", so the Agent
-// move, the dotted-lines PUT and a restore kept a line no workspace treats as
-// a manager's, and the dialogs said "that line still counts".
-describe("linesElsewhere answers nothing for a manager no workspace treats as one", () => {
-  const user = (id: string, organizationId: string, accessLevel = "EMPLOYEE", extra: { status?: string; deletedAt?: Date | null; orgRole?: string } = {}) =>
-    users.set(id, { organizationId, accessLevel, status: extra.status ?? "ACTIVE", deletedAt: extra.deletedAt ?? null, ...(extra.orgRole ? { orgRole: extra.orgRole } : {}) });
-  beforeEach(() => {
-    // pia works in orgA (anchored) and orgB (a membership).
-    user("pia", "orgA");
-    memberships.set("pia:orgB", { role: "EMPLOYEE" });
-  });
-
-  it("a deactivated or removed account, and a Guest there", async () => {
-    user("off", "orgB", "MANAGER", { status: "INACTIVE" });
-    user("gone", "orgB", "MANAGER", { deletedAt: new Date("2026-09-01") });
-    user("guest", "orgB", "EMPLOYEE", { orgRole: "GUEST" });
-    const out = await linesElsewhere("orgA", ["off", "gone", "guest"].map((managerId) => ({ personId: "pia", managerId })));
-    // Before: "relied" for all three.
-    expect(out.size).toBe(0);
-  });
-
-  it("a Guest anchored in one workspace who manages through a membership in another is answered by that one", async () => {
-    memberships.set("pia:orgC", { role: "EMPLOYEE" });
-    user("gil", "orgB", "EMPLOYEE", { orgRole: "GUEST" });
-    memberships.set("gil:orgC", { role: "MANAGER" });
-    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "gil" }])).get("pia\ngil")).toEqual({ standing: "relied", reliedIn: ["orgC"] });
-  });
-
-  it("names the workspaces that rely on a line, and for a leaver being deactivated now, still those", async () => {
-    memberships.set("pia:orgC", { role: "EMPLOYEE" });
-    user("leo", "orgB", "MANAGER", { status: "INACTIVE" });
-    memberships.set("leo:orgC", { role: "AGENT" });
-    // SCIM deactivates the leaver before the handover runs: the record of
-    // the line the other workspace relied on until now is still written there.
-    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }], undefined, { leaving: true })).get("pia\nleo")).toEqual({ standing: "relied", reliedIn: ["orgB"] });
-    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }])).size).toBe(0);
-  });
-
-  // Batch 8, from the batch 7 review: a handover run after a removal wrote the
-  // other workspace no record, since a removed leaver was left out even then.
-  it("for a leaver removed already, still those, and never without `leaving`", async () => {
-    user("leo", "orgB", "MANAGER", { status: "INACTIVE", deletedAt: new Date("2026-10-01") });
-    expect((await lineStandingsElsewhere("orgA", [{ personId: "pia", managerId: "leo" }], undefined, { leaving: true })).get("pia\nleo")).toEqual({ standing: "relied", reliedIn: ["orgB"] });
-    expect((await linesElsewhere("orgA", [{ personId: "pia", managerId: "leo" }])).size).toBe(0);
+// Docs-found fixes batches 6 to 9 asked how a stored line stood in the other
+// workspaces its person works in (linesElsewhere, lineStandingsElsewhere:
+// "relied" or "shared"), because User.managerId and UserDottedLine were one
+// row each, read by every workspace. Since workspace-status-2.md E1 and E2 a
+// line is one workspace's row, so step 4 retired the question (E6).
+describe("the relied-line question is gone (workspace-status-2 E6, step 4)", () => {
+  it("no longer answers how a line stands in another workspace", () => {
+    for (const name of ["linesElsewhere", "lineStandingsElsewhere", "lineKey"]) expect(actingModule, name).not.toHaveProperty(name);
   });
 });
 

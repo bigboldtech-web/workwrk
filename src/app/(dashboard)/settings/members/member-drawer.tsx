@@ -42,7 +42,7 @@ import { ConfirmDialog, NativeSelect, NumberInput, btn } from "@/components/sett
 import { PeoplePickerField, type PickPerson } from "@/components/people/person-bits";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { AGENT_TIER_BLURB } from "@/lib/access/labels";
-import { agentReportsNote, linesStayNote } from "@/lib/people/reporting-lines";
+import { agentReportsNote } from "@/lib/people/reporting-lines";
 import { PROFILE_ELSEWHERE } from "@/lib/people/person-fields";
 import { ROLE_WORD, STATUS_WORD, TIER_OPTIONS, type Lookup, type MemberRole, type MemberRow } from "./members-shared";
 
@@ -103,13 +103,12 @@ export function profileEditable(member: Pick<MemberRow, "profileHere">, canEditP
 
 /**
  * What a refused save keeps for its Retry, and what the row says (pure;
- * tested). A Reports to another workspace counts (409 manager_elsewhere,
- * docs-found fixes batch 7) is asked about, not refused: the row says so, and
- * its Retry is the confirmation, resending the change with
- * replaceOtherWorkspaceLine.
+ * tested): the same change, and the server's sentence. Batch 7's 409
+ * manager_elsewhere, whose Retry confirmed with replaceOtherWorkspaceLine,
+ * retired with workspace-status-2 step 4 (E6): a Reports to here never
+ * reaches another workspace's line, so nothing is asked first.
  */
 export function refusedSave(body: Record<string, unknown>, r: { error: string; code?: string }): { body: Record<string, unknown>; message: string } {
-  if (r.code === "manager_elsewhere") return { body: { ...body, replaceOtherWorkspaceLine: true }, message: `${r.error} Retry to change it anyway.` };
   return { body, message: r.error };
 }
 
@@ -458,7 +457,6 @@ type AgentReportsPlan = {
   solid: number;
   dotted: number;
   rehomed: { to: string | null; count: number }[];
-  stays?: { id: string; name: string | null; kind: "solid" | "dotted" }[];
 };
 
 /**
@@ -466,9 +464,9 @@ type AgentReportsPlan = {
  * their reports sends them (GET /api/users/[id]/agent-reports, the
  * handover's own routing), and the button. The button waits for that
  * answer, so it never runs a move the notice has not described; a failed
- * read says so and offers Retry. People whose line to the Agent another
- * workspace relies on stay as they are, named (docs-found fixes batch 6);
- * with nobody else to move, there is no button.
+ * read says so and offers Retry. Only this workspace's lines are counted and
+ * moved (workspace-status-2.md E1, E2, E6): a line to them in another
+ * workspace is that workspace's own.
  */
 export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: string; name: string; onMoved: (message: string) => void }) {
   const [plan, setPlan] = useState<{ for: string; plan: AgentReportsPlan | null } | null>(null);
@@ -484,14 +482,13 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
   }, [memberId, attempt]);
   const now = plan && plan.for === `${memberId}:${attempt}` ? plan : null;
   const note = now?.plan ? agentReportsNote(now.plan, name) : null;
-  const staysNote = now?.plan ? linesStayNote(now.plan.stays ?? [], name) : null;
-  if (now?.plan && !note && !staysNote) return null;
+  if (now?.plan && !note) return null;
   const move = async () => {
     setBusy(true);
     setError(null);
     // The plan shown goes with the move: the server moves nothing if the
     // lines changed since, and the notice reads the new plan.
-    const r = await apiFetch<{ moved: number; dottedRemoved: number; stays?: { name: string | null; kind: "solid" | "dotted" }[] }>(`/api/users/${memberId}/agent-reports`, {
+    const r = await apiFetch<{ moved: number; dottedRemoved: number }>(`/api/users/${memberId}/agent-reports`, {
       method: "POST",
       json: { expect: now?.plan ?? null },
     });
@@ -501,13 +498,11 @@ export function AgentReportsNotice({ memberId, name, onMoved }: { memberId: stri
       if (r.code === "plan_changed") setAttempt((n) => n + 1);
       return;
     }
-    const stayed = linesStayNote(r.data?.stays ?? [], name);
-    onMoved(stayed ? `Moved the reports listed under ${name}. ${stayed}` : `Moved the reports listed under ${name}`);
+    onMoved(`Moved the reports listed under ${name}`);
   };
   return (
     <div className="mt-3 rounded-md border border-line p-3 text-sm text-ink-2" role="status">
       {note ? <p>{note}</p> : now?.plan ? null : now ? <p>Couldn&apos;t check where their reports would go.</p> : <p>Checking where their reports would go.</p>}
-      {staysNote ? <p className={note ? "mt-2" : undefined}>{staysNote}</p> : null}
       {error ? <p role="alert" className="mt-2 text-danger-text">{error}</p> : null}
       {now?.plan && !note ? null : (
         <div className="mt-2 flex gap-2">

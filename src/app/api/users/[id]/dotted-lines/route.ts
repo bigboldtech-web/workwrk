@@ -11,25 +11,22 @@
 // the manager's phone, skill ratings, KPI history and reviews. The solid
 // line's manager_cycle check (PATCH /api/users/[id]) never saw dotted lines.
 //
-// A workspace writes only the dotted lines it owns (docs-found fixes batch
-// 6). A UserDottedLine is one row, read by every workspace the person
-// belongs to. GET answers the lines to people who hold a level here, and PUT
-// replaces only those: a line to someone who holds no level here is another
-// workspace's (they work with the person there) and is kept as it is,
-// whether or not the body names it. Before, PUT deleted every line the body
-// left out, so saving one dotted line here deleted the person's dotted lines
-// in their other workspace, and a body that named one was refused as "isn't
-// in this workspace". A line no workspace reads (its manager works in none
-// of the person's workspaces) is this workspace's to take off.
-//
-// The PUT answers how many lines it kept for another workspace
-// (`keptElsewhere`, batch 7), never whose. Before, a dotted manager who is
-// an Agent here and a manager in the person's other workspace was listed on
-// the record, the dialog let it be removed, the PUT answered 200 and kept
-// it: the line came back on the next load. Since workspace-status-2 step 3
-// the GET and the record read THIS workspace's rows only (E2), so neither
-// lists nor counts another workspace's; the PUT's keep list retires in step
-// 4 (E6).
+// EACH WORKSPACE'S OWN DOTTED LINES (docs/plans/workspace-status-2.md E2, E4,
+// E5, E6). Every UserDottedLine names its workspace. GET answers this
+// workspace's rows (step 3). PUT replaces this workspace's rows with the
+// body, and only them (seat-writes.ts writeDottedHere, step 4): another
+// workspace's rows of the same person are never read, checked or deleted,
+// so a save in B never takes off A's line, and a B row can always be taken
+// off in B. A new line here needs a manager who holds a live seat here, is
+// no Agent here, and is not below the person over this workspace's lines
+// (peopleBelow); a line already held here is kept as it is, its manager
+// deactivated here or not, as a deactivation keeps dotted lines. Batches 6
+// and 7 kept a line "another workspace relies on" whatever the body said
+// and answered how many (`keptElsewhere`): since E2 there is none, so the
+// keep list and its count retired (E6). Before, B's Admin took Rita
+// (deactivated in B through her membership, live in another workspace the
+// person works in) off the person's B lines, the PUT answered 200 and kept
+// the row, and Rita was back on the next load.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { accessV2Resolver } from "@/lib/access/flags";
@@ -38,10 +35,11 @@ import { logActivity } from "@/lib/activity";
 import { agentIdsAmong, managerMapFor, peopleCtx, relationTo, type PeopleCtx } from "@/lib/people/person-access.server";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { canWritePersonGroup } from "@/lib/people/person-fields";
-import { agentIdsIn } from "@/lib/access/manager-candidate";
+import { agentIdsIn, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { levelsHeldIn, personSeatIn, workspaceDottedLines } from "@/lib/access/acting-workspace";
-import { othersDottedLines } from "@/lib/access/manager-lines";
+import { seatRefOf, writeDottedHere } from "@/lib/access/seat-writes";
+import { liveHereAmong } from "@/lib/access/manager-lines";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 
 const err = (status: number, error: string, extra: Record<string, unknown> = {}) => NextResponse.json({ error, ...extra }, { status });
@@ -148,50 +146,54 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
   const ids = [...new Set(body.managerIds as string[])].filter((m) => m !== subject.managerId);
   if (ids.length > 20) return err(400, "Up to 20 dotted-line managers");
-  // The lines kept as they are (batch 6): to someone who holds no level here
-  // but works with the person in another workspace. Named in the body or
-  // not, they are that workspace's, never checked or deleted here.
-  const elsewhere = await othersDottedLines(ctx.organizationId, id);
-  const checked = ids.filter((m) => !elsewhere.has(m));
-  if (checked.length) {
-    const { found, agents } = await agentIdsAmong(ctx.organizationId, checked);
-    if (found !== checked.length) return err(400, "Someone in that list isn't in this workspace");
+  // Every line the body names is this workspace's (E2): checked here, never
+  // kept for another workspace.
+  if (ids.length) {
+    const { found, agents } = await agentIdsAmong(ctx.organizationId, ids);
+    if (found !== ids.length) return err(400, "Someone in that list isn't in this workspace");
     if (agents.length) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
     const below = await peopleBelow(ctx.organizationId, id);
     // `managerIds` names the refused people, so a line saved before this
     // check existed can be found and taken off (removing it always passes).
-    const looped = checked.filter((m) => below.has(m));
+    const looped = ids.filter((m) => below.has(m));
     if (looped.length) {
       return err(409, "That would make a reporting loop: this person already manages them, directly or further down.", { code: "dotted_line_cycle", field: "dottedLines", managerIds: looped });
     }
   }
   // The set is written under the workspace's role lock, and its managers
-  // checked again there (rule 6's race, docs-found fixes batch 3): a role
+  // ids again there (rule 6's race, docs-found fixes batch 3): a role
   // change making one of them an Agent counts their dotted reports under the
   // same lock, so it waits for this write and sees the line, or lands first
-  // and this sees an Agent.
+  // and this sees an Agent. A NEW line also needs its manager's seat here
+  // live (E4): a line to someone deactivated here is kept when it is held
+  // already, never made.
   const written = await prisma.$transaction(async (tx) => {
     await lockOrgRoles(tx, ctx.organizationId);
-    if (checked.length && (await agentIdsIn(ctx.organizationId, checked, tx)).size > 0) return { agent: true as const };
-    // Only this workspace's lines are replaced: the others' stay (batch 6).
-    // Each row names its workspace now (workspace-status-2.md E2, step 1):
-    // the delete and the upsert touch this workspace's rows only. Step 4
-    // moves this write into seat-writes.ts writeDottedHere and retires the
-    // cross-workspace keep list.
-    const others = await othersDottedLines(ctx.organizationId, id, tx);
-    const keep = [...ids, ...others];
-    await tx.userDottedLine.deleteMany({ where: { userId: id, organizationId: ctx.organizationId, managerId: { notIn: keep } } });
-    for (const managerId of checked) {
-      await tx.userDottedLine.upsert({
-        where: { userId_managerId_organizationId: { userId: id, managerId, organizationId: ctx.organizationId } },
-        create: { userId: id, managerId, organizationId: ctx.organizationId },
-        update: {},
-      });
+    if (ids.length && (await agentIdsIn(ctx.organizationId, ids, tx)).size > 0) return { refused: "agent" as const };
+    // Every named manager still holds a seat here (kept seats, as the GET
+    // lists them), read again under the lock (the step 4 review L4): one
+    // removed here between the first check and this lock is refused, never
+    // kept on a row nobody here walks.
+    const seated = await liveHereAmong(ctx.organizationId, ids, tx);
+    if (ids.some((m) => !seated.has(m))) return { refused: "not_found" as const };
+    const held = new Set((await tx.userDottedLine.findMany({ where: { userId: id, organizationId: ctx.organizationId }, select: { managerId: true } })).map((r) => r.managerId));
+    for (const managerId of ids.filter((m) => !held.has(m))) {
+      const c = await managerCandidateIn(ctx.organizationId, managerId, { db: tx, live: true });
+      if (c === "inactive") return { refused: "inactive" as const };
+      if (c !== "ok") return { refused: "not_found" as const };
     }
-    return { agent: false as const, kept: others.size };
+    // This workspace's rows only, replaced with the body (E2, step 4): on
+    // the seat as read (anchored here); null when that seat no longer stands.
+    const done = await writeDottedHere(tx, seatRefOf(ctx.organizationId, { id, organizationId: ctx.organizationId }), ids.map((managerId) => ({ managerId })));
+    return done ? { refused: null } : { refused: "seat_changed" as const };
   }).catch(rolesBusyOrThrow);
   if (written instanceof NextResponse) return written;
-  if (written.agent) return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
+  if (written.refused === "agent") return err(400, "An Agent can't be anyone's manager", { code: "agent_cannot_manage" });
+  if (written.refused === "inactive") {
+    return err(400, "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else.", { code: "manager_inactive", field: "dottedLines" });
+  }
+  if (written.refused === "not_found") return err(400, "Someone in that list isn't in this workspace");
+  if (written.refused === "seat_changed") return err(409, "Their status here changed a moment ago, so nothing was saved. Reload and try again.", { code: "seat_changed", field: "dottedLines" });
   void logActivity({
     type: "reporting_line_changed",
     actorId: ctx.userId,
@@ -201,8 +203,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     targetType: "user",
     metadata: { dottedManagerIds: ids },
   });
-  // The lines this workspace manages now, and how many are kept for another
-  // workspace (batch 7), so the dialog says so instead of a save that seems
-  // to take one off.
-  return NextResponse.json({ managerIds: checked, keptElsewhere: written.kept });
+  // The lines this workspace holds now, every one of them.
+  return NextResponse.json({ managerIds: ids });
 }

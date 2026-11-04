@@ -47,9 +47,18 @@ export function isOrgRolesBusy(e: unknown): e is OrgRolesBusy {
   return name === "OrgRolesBusy" || name === "SeatsBusy";
 }
 
-/** A route's answer when a workspace lock was busy (OrgRolesBusy or SeatsBusy), or null for any other error. */
+/**
+ * A route's answer when a workspace lock was busy (OrgRolesBusy or
+ * SeatsBusy), or when Postgres ended the transaction to break a deadlock
+ * (40P01, isDeadlock), or null for any other error. A deadlock wrote
+ * nothing (the whole transaction is rolled back), so it is the same "try
+ * again" (docs/plans/workspace-status-2.md step 4, the step 1 review L5):
+ * with lines per workspace two line writes can cross workspaces (Pat's end
+ * in A takes Pat then Dana while Dana's in B takes Dana then Pat, under two
+ * different role locks), and that is never a 500.
+ */
 export function rolesBusyAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
-  if (!isOrgRolesBusy(e)) return null;
+  if (!isOrgRolesBusy(e)) return isDeadlock(e) ? { status: 503, error: ORG_ROLES_BUSY, code: "roles_busy", retryAfterSeconds: 2 } : null;
   const seats = (e as { name?: unknown }).name === "SeatsBusy";
   return { status: 503, error: seats ? SEATS_BUSY : ORG_ROLES_BUSY, code: "roles_busy", retryAfterSeconds: 2 };
 }

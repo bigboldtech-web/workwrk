@@ -21,7 +21,6 @@ const st = vi.hoisted(() => ({
   teammateEnds: [] as unknown[][],
   skillsBack: [] as unknown[][],
   logs: [] as Array<{ type: string; description: string; metadata?: Record<string, unknown>; newValue?: unknown }>,
-  relied: [] as Array<Record<string, unknown>>,
   seatChecks: 0,
   seatsFull: false,
   /** The score reads the record made, with their arguments. */
@@ -55,13 +54,11 @@ vi.mock("@/lib/seats", () => ({
   },
 }));
 // The handover's own reads are handover.server.test.ts's: here nothing is left to hand over.
+// Since workspace-status-2 step 4 (E6) no end moves a line itself: the
+// handover moved this workspace's reports first, and nothing is left for
+// the end (moveReliedReportsAtEnd retired).
 vi.mock("@/lib/people/handover.server", () => ({
   pendingHandover: async () => ({ openTasks: 0, directReports: 0, containers: 0 }),
-  moveReliedReportsAtEnd: async (_tx: unknown, input: Record<string, unknown>) => {
-    st.relied.push(input);
-    return { reportsMoved: 0, reportsReassigned: 0, reportsRehomed: [], reportsAlsoElsewhere: [], reportIds: [] };
-  },
-  followAccountEndLines: async () => undefined,
 }));
 // A restore's line check is manager-candidate.ts's (tested there): no line is stale here.
 vi.mock("@/lib/access/manager-candidate", async (orig) => ({
@@ -128,7 +125,6 @@ beforeEach(() => {
   st.teammateEnds = [];
   st.skillsBack = [];
   st.logs = [];
-  st.relied = [];
   st.seatChecks = 0;
   st.seatsFull = false;
   st.scoreReads = [];
@@ -152,9 +148,8 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(res.status).toBe(200);
     expect(seatOf("pat", "b")).toMatchObject({ status: "INACTIVE", removedAt: null });
     expect(user("pat")).toMatchObject({ organizationId: "a", status: "ACTIVE", deletedAt: null, tokenVersion: 0, ...legacyLevelRow("COMPANY_ADMIN") });
-    // This workspace's teammate access ends; the reports another workspace relies on never move (they still work there).
+    // This workspace's teammate access ends.
     expect(st.teammateEnds).toEqual([["b", ["pat"], "deactivated", "u-admin"]]);
-    expect(st.relied).toEqual([]);
     // The API keys they made HERE stop working (D15), with an audit row here; A's stays.
     expect(db.row("apiKey", "k-b").revokedAt).toBeInstanceOf(Date);
     expect(db.row("apiKey", "k-a").revokedAt).toBeNull();
@@ -225,7 +220,6 @@ describe("someone who works here through a membership (D5, D11)", () => {
     expect(seatOf("pat", "b")).toMatchObject({ status: "INACTIVE", removedAt: expect.any(Date) });
     expect(user("pat")).toMatchObject({ organizationId: "a", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     expect(st.teammateEnds).toEqual([["b", ["pat"], "left", "u-admin"]]);
-    expect(st.relied).toEqual([]);
     expect(st.logs.find((l) => l.type === "user_removed")).toMatchObject({ metadata: { seat: "membership", outcome: "membership_ended", accountMoved: false } });
     // A reactivation of a removed seat is refused: a restore brings it back.
     const reactivate = await patch("pat", { status: "ACTIVE" });
@@ -365,8 +359,7 @@ describe("someone anchored here (D3, D4)", () => {
     // Before: User.status INACTIVE and tokenVersion bumped, so Max lost C too.
     expect(user("max")).toMatchObject({ organizationId: "c", status: "ACTIVE", ...legacyLevelRow("EMPLOYEE"), tokenVersion: 0 });
     expect(seatOf("max", "b")).toMatchObject({ status: "INACTIVE", removedAt: null, role: "MANAGER" });
-    // C relies on his lines there: they are not moved (only an account that ends moves them).
-    expect(st.relied).toEqual([]);
+    // His lines in C are C's own rows (workspace-status-2 E1): untouched.
     expect(db.row("apiKey", "k-b").revokedAt).toBeInstanceOf(Date);
     // The answer is the seat here, not the account in C.
     expect(await res.json()).toMatchObject({ status: "INACTIVE", profileHere: false });
@@ -379,12 +372,13 @@ describe("someone anchored here (D3, D4)", () => {
     expect(user("max")).toMatchObject({ organizationId: "c", tokenVersion: 0 });
   });
 
-  it("with nowhere else, a deactivation ends the account as before, moving the relied lines and signing them out", async () => {
+  it("with nowhere else, a deactivation ends the account as before and signs them out, moving no line itself", async () => {
     person("solo", "b");
+    // A tab from before workspace-status-2 step 4 still sends handoverTo: ignored.
     const res = await patch("solo", { status: "INACTIVE", handoverTo: "olga" });
     expect(res.status).toBe(200);
     expect(user("solo")).toMatchObject({ organizationId: "b", status: "INACTIVE", deletedAt: null, tokenVersion: 1 });
-    expect(st.relied).toEqual([expect.objectContaining({ leaverId: "solo", recipientId: "olga", ends: "deactivated" })]);
+    expect(await res.json()).not.toHaveProperty("reportsAlsoElsewhere");
     expect(st.logs.find((l) => l.type === "membership.changed")).toMatchObject({ metadata: { seat: "anchor", outcome: "account_ended", accountMoved: false } });
     // And a reactivation brings it back, signed out still (no new bump), under the seat check.
     expect((await patch("solo", { status: "ACTIVE" })).status).toBe(200);
@@ -397,7 +391,6 @@ describe("someone anchored here (D3, D4)", () => {
     expect((await remove("max")).status).toBe(200);
     expect(user("max")).toMatchObject({ organizationId: "c", status: "ACTIVE", deletedAt: null, tokenVersion: 0 });
     expect(seatOf("max", "b")).toMatchObject({ status: "INACTIVE", removedAt: expect.any(Date) });
-    expect(st.relied).toEqual([]);
     expect(st.logs.find((l) => l.type === "user_removed")).toMatchObject({ metadata: { outcome: "moved", accountMoved: true } });
     expect(st.logs.find((l) => l.type === "user_removed")?.metadata).not.toHaveProperty("movedTo");
     // Now he works in B through the membership the move left: B restores it.
@@ -408,9 +401,10 @@ describe("someone anchored here (D3, D4)", () => {
 
   it("a removal with nowhere else ends the account as before; the restore brings it back", async () => {
     person("solo", "b");
-    expect((await remove("solo")).status).toBe(200);
+    const gone = await remove("solo");
+    expect(gone.status).toBe(200);
     expect(user("solo")).toMatchObject({ status: "INACTIVE", deletedAt: expect.any(Date), tokenVersion: 1 });
-    expect(st.relied).toEqual([expect.objectContaining({ leaverId: "solo", ends: "removed" })]);
+    expect(await gone.json()).toEqual({ message: "Solo Lee has been removed" });
     expect((await restore("solo")).status).toBe(200);
     expect(user("solo")).toMatchObject({ status: "ACTIVE", deletedAt: null });
   });

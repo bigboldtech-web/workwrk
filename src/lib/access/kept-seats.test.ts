@@ -184,10 +184,12 @@ describe("every caller of the level helpers says which seats it means", () => {
     // check-in-access.server.ts no longer asks a level: reading someone's
     // check-ins asks for their seat here in any state (personSeatIn), as the
     // list reads every row written here (step 4).
-    // staleLinesOf live; agentIdsIn kept; managerCandidateIn and lineAbove at
-    // the seat (workspace-status-2 E4, E5: "inactive" is the seat's, and the
-    // loop walk climbs the line each seat here holds)
-    "src/lib/access/manager-candidate.ts": { live: 1, kept: 1, seats: 2 },
+    // agentIdsIn kept; managerCandidateIn and lineAbove at the seat
+    // (workspace-status-2 E4, E5: "inactive" is the seat's, and the loop walk
+    // climbs the line each seat here holds); staleLinesOf reads each manager's
+    // seat here in any state itself (step 4: a removed seat is "removed", a
+    // deactivated one "inactive"), so it asks no level helper.
+    "src/lib/access/manager-candidate.ts": { kept: 1, seats: 2 },
     "src/lib/oauth/eligibility.ts": { live: 2 }, // an AI app's access
     "src/lib/access/viewer.ts": { live: 1 }, // the viewer's own level
     "src/lib/access/self-facts.ts": { live: 1 },
@@ -197,14 +199,15 @@ describe("every caller of the level helpers says which seats it means", () => {
     "src/lib/people/person-access.server.ts": { live: 1 }, // the viewer's own level
     // a member's digest manager: their line here, the membership's (workspace-status-2 E1)
     "src/lib/access/digest-recipients.ts": { seats: 1 },
-    "src/lib/people/handover.server.ts": { kept: 1 }, // who another workspace's record names
-    // managesNobody, countedDottedManagerIds (reach), othersDottedLines and
-    // managerLineIsOthers (whose a line is) live (recordLinesOfOthers retired
-    // with workspace-status-2 step 3, E6);
+    // handover.server.ts asks none now: who another workspace's record named
+    // (otherWorkspaceRows) retired with workspace-status-2 step 4 (E6).
+    // managesNobody and countedDottedManagerIds (reach) live (othersDottedLines,
+    // managerLineIsOthers and recordLinesOfOthers retired with
+    // workspace-status-2 steps 3 and 4, E6);
     // liveHereAmong kept; factsHere, effectiveManagersOf and
     // managersPastAgents at the seat (the line each seat here holds,
     // workspace-status-2 E1; a membership counted only while live, as before).
-    "src/lib/access/manager-lines.ts": { live: 4, kept: 1, seats: 3 },
+    "src/lib/access/manager-lines.ts": { live: 2, kept: 1, seats: 3 },
   };
 
   function sources(dir: string, out: string[] = []): string[] {

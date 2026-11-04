@@ -89,11 +89,13 @@ describe("record write queue", () => {
 
 // Docs-found fixes batch 8, from the batch 7 review: bodies for one person
 // merge while a request is in flight, so a job title and a Reports to can ride
-// one PATCH, and the Reports to question (409 manager_elsewhere) refused the
-// job title too, which Edit details then dropped under the Reports to sentence.
+// one PATCH, and a Reports to refusal refused the job title too, which Edit
+// details then dropped under the Reports to sentence. (Batch 7's 409
+// manager_elsewhere retired with workspace-status-2 step 4; a loop, 409
+// manager_cycle, is the Reports to refusal these cases use now.)
 describe("refusalIsAbout", () => {
   it("tells a refusal about another field apart, so that field's waiter sends its own change again", async () => {
-    const refusal = { error: "Max Chen reports to someone in another workspace...", code: "manager_elsewhere", field: "managerId" };
+    const refusal = { error: "That would make a reporting loop...", code: "manager_cycle", field: "managerId" };
     expect(refusalIsAbout(refusal, { roleId: "r1" })).toBe(false);
     expect(refusalIsAbout(refusal, { managerId: "sam" })).toBe(true);
     expect(refusalIsAbout({ error: "x", fields: ["status"] }, { status: "INACTIVE" })).toBe(true);
@@ -110,7 +112,7 @@ describe("refusalIsAbout", () => {
       send: async (_m, _u, body) => {
         sent.push(body);
         if (sent.length === 1) await new Promise<void>((r) => { release = r; });
-        if ("managerId" in body) return { ok: false, transient: false, status: 409, error: "asked", data: { code: "manager_elsewhere", field: "managerId" } } as SendOutcome;
+        if ("managerId" in body) return { ok: false, transient: false, status: 409, error: "loop", data: { code: "manager_cycle", field: "managerId" } } as SendOutcome;
         return { ok: true, data: {} };
       },
     });

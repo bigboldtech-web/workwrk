@@ -75,15 +75,18 @@ describe("member drawer Retry", () => {
   });
 });
 
-// Docs-found fixes batch 7: a Reports to another workspace counts is asked
-// about (409 manager_elsewhere), and the row's Retry is the confirmation.
-describe("member drawer: a Reports to another workspace counts", () => {
-  it("keeps the change with the confirmation for Retry, and says so", () => {
-    const error = "Max Chen reports to someone in another workspace they work in, and that workspace still counts the line. Changing who they report to here changes it there too.";
-    expect(refusedSave({ managerId: "sam" }, { error, code: "manager_elsewhere" })).toEqual({
-      body: { managerId: "sam", replaceOtherWorkspaceLine: true },
-      message: `${error} Retry to change it anyway.`,
-    });
+// Docs-found fixes batch 7 asked about a Reports to another workspace counted
+// (409 manager_elsewhere), and the row's Retry was the confirmation. Since
+// workspace-status-2.md step 4 (E1, E6) the line here is this workspace's
+// alone: no such question, so every refusal's Retry resends the change as it
+// was, with nothing added.
+describe("member drawer: a refused Reports to", () => {
+  it("keeps the change as it was for Retry, with the server's sentence, and never adds a confirmation", () => {
+    for (const code of ["manager_elsewhere", "agent_cannot_manage", "manager_cycle"]) {
+      const out = refusedSave({ managerId: "sam" }, { error: "Refused.", code });
+      expect(out, code).toEqual({ body: { managerId: "sam" }, message: "Refused." });
+      expect(out.body, code).not.toHaveProperty("replaceOtherWorkspaceLine");
+    }
   });
 
   it("leaves every other refusal as it was", () => {

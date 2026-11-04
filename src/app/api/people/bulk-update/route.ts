@@ -31,6 +31,7 @@ import { canWritePersonGroup } from "@/lib/people/person-fields";
 import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
+import { seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
 import { rolesBusyOrThrow } from "@/lib/access/roles-busy";
 import { keptSeatWhere } from "@/lib/access/workspace-seat";
 
@@ -110,14 +111,24 @@ export async function POST(req: NextRequest) {
         // invariant 13), and the loop check runs again under the lock
         // against the line above the manager as it stands now, so two
         // crossing edits can never make a loop (docs-found fixes batch 4).
+        // Each person's line is THIS workspace's (workspace-status-2.md E1,
+        // step 4), written by seat-writes.ts writeLineHere under their row
+        // lock, in id order, on the row that holds their seat as read
+        // (anchored here). Before, one updateMany wrote the account's line
+        // with no workspace and no lock, so someone who switched to their
+        // other workspace between the read and this write had that
+        // workspace's line overwritten. Now their write lands nowhere and
+        // they are skipped, as anyone who left the selection is.
         const outcome = await prisma.$transaction(async (tx) => {
           await lockOrgRoles(tx, orgId);
           const again = await managerCandidateIn(orgId, managerId, { db: tx, live: true });
           if (again !== "ok") return { refused: again };
           const above = await lineAbove(orgId, managerId, tx);
-          const go = ok.filter((id) => !above.has(id));
-          if (go.length) await tx.user.updateMany({ where: { id: { in: go } }, data: { managerId } });
-          return { moved: go };
+          const moved: string[] = [];
+          for (const id of ok.filter((x) => !above.has(x)).sort()) {
+            if (await writeLineHere(tx, seatRefOf(orgId, { id, organizationId: orgId }), managerId)) moved.push(id);
+          }
+          return { moved };
         }).catch(rolesBusyOrThrow);
         if (outcome instanceof NextResponse) return outcome;
         if ("refused" in outcome) {

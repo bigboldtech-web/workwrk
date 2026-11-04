@@ -1,7 +1,9 @@
 // The answer every route gives when the workspace's role lock was busy
-// (membership.ts lockOrgRoles, OrgRolesBusy): 503 with code roles_busy, the
-// plain sentence, and Retry-After, never a timeout's bare 500. Nothing was
-// written, so trying again is always safe.
+// (membership.ts lockOrgRoles, OrgRolesBusy), or Postgres ended the
+// transaction to break a deadlock (40P01, workspace-status-2.md step 4): 503
+// with code roles_busy, the plain sentence, and Retry-After, never a
+// timeout's or a deadlock's bare 500. Nothing was written, so trying again
+// is always safe.
 
 import { NextResponse } from "next/server";
 import { rolesBusyAnswer } from "./org-roles-busy";

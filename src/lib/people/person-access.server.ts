@@ -138,9 +138,7 @@ const isAdminLevel = (accessLevel: string) => accessLevel === "COMPANY_ADMIN" ||
  * org-wide levels (C-level, VP, Director, HR) and the People team for every
  * non-Admin of the workspace. They keep Remove only where DELETE already
  * lets it land, for someone who holds nothing to hand over (DELETE refuses
- * with handover_first while open tasks, reports or Spaces remain), and the
- * person picked to take the reports (`handoverTo`) is read only from someone
- * who may hand over (mayHandOverPerson).
+ * with handover_first while open tasks, reports or Spaces remain).
  */
 export function mayRemovePerson(ctx: Pick<PeopleCtx, "isAdmin" | "managerTier">, relation: PersonRelation, subject: { accessLevel: string }): boolean {
   if (relation === "self") return false;
@@ -151,8 +149,8 @@ export function mayRemovePerson(ctx: Pick<PeopleCtx, "isAdmin" | "managerTier">,
 
 /**
  * May the viewer hand this person's work over (GET and POST
- * /api/users/[id]/handover, and the recipient a PATCH deactivation or a
- * DELETE names)? Docs-found fixes batch 9: Admins, and a manager-tier viewer
+ * /api/users/[id]/handover, and the handover_first refusal's words in PATCH
+ * and DELETE)? Docs-found fixes batch 9: Admins, and a manager-tier viewer
  * over their own SOLID report tree (writeChain), never on an Admin, never
  * themselves. Decided on the chain itself, never on the relation's label:
  * relationTo answers "people-team" or "org-wide" before it asks the chain,

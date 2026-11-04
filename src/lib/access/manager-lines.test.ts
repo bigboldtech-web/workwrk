@@ -126,7 +126,6 @@ import {
   effectiveManagersOf,
   lineFactsAround,
   liveHereAmong,
-  managerLineIsOthers,
   managesNobody,
   reportsThroughAgents,
 } from "./manager-lines";
@@ -380,31 +379,14 @@ describe("people who work here through a membership are on the lines", () => {
   });
 });
 
-// Docs-found fixes batch 8, from the batch 7 review: PATCH asked before
-// replacing a Reports to another workspace relies on only when the manager
-// held no level here, so an Agent here who manages the person there was
-// overwritten with no question, while the Agent move and the dotted lines'
-// rule kept that line.
-describe("a Reports to another workspace relies on", () => {
-  beforeEach(() => {
-    // ida also works in the client workspace, where sam (an Agent here) is a Manager.
-    st.memberships.push({ userId: "ida", organizationId: "client", role: "EMPLOYEE" }, { userId: "sam", organizationId: "client", role: "MANAGER" });
-  });
-
-  it("is the other workspace's when the manager holds the Agent tier here, as a dotted line is", async () => {
-    // Before: false, since sam holds a level here.
-    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBe("agent");
-    // The record's "Reports to someone in another workspace" (recordLinesOfOthers)
-    // retired with workspace-status-2 step 3 (E6): the record reads the line here.
-  });
-
-  it("is unnamed for a manager with no level here, and nobody's for a Manager here or an Agent there too", async () => {
-    add("fay", null, "MANAGER", { organizationId: "client" });
-    expect(await managerLineIsOthers(ORG, "ida", "fay")).toBe("unnamed");
-    st.memberships.push({ userId: "mona", organizationId: "client", role: "MANAGER" });
-    expect(await managerLineIsOthers(ORG, "ida", "mona")).toBeNull();
-    st.memberships = st.memberships.map((m) => (m.userId === "sam" ? { ...m, role: "AGENT" } : m));
-    expect(await managerLineIsOthers(ORG, "ida", "sam")).toBeNull();
-    expect(await managerLineIsOthers(ORG, "ida", null)).toBeNull();
+// Docs-found fixes batches 6 to 8: PATCH asked before replacing a Reports to
+// another workspace relied on (managerLineIsOthers), and the dotted-lines PUT
+// kept such a line (othersDottedLines). Since workspace-status-2.md E1 and E2
+// a line is one workspace's row, so step 4 retired both (E6).
+describe("the relied-line helpers are gone (workspace-status-2 E6, step 4)", () => {
+  it("answers no question about another workspace's line", async () => {
+    const lines = await import("./manager-lines");
+    for (const name of ["managerLineIsOthers", "othersDottedLines", "recordLinesOfOthers"]) expect(lines, name).not.toHaveProperty(name);
   });
 });
+

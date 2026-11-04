@@ -27,6 +27,7 @@ import { mayEditGoal } from "@/lib/goals/goal-rights";
 import { objectHref } from "@/lib/nav/object-href";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { liveAccountFor } from "@/lib/auth/invite-facts.server";
+import { managerCandidateIn } from "@/lib/access/manager-candidate";
 import { ACCESS_LEVELS } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { canPost } from "@/lib/talk-access";
@@ -628,13 +629,30 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
       const org = person.organizationId;
       const input = inviteInput(email, level.level);
       const lines: string[] = [INVITE_CARD.level(accessLevelWords(level.level))];
+      // The manager, at the seat they hold HERE (workspace-status-2.md E4,
+      // E10, step 4): live here, anchored here or here through a membership,
+      // and never an Agent here, as sendInvitation and the acceptance
+      // (managerOnAccept) read them. Before, only someone anchored here whose
+      // account was not deactivated, so a manager here through a membership
+      // was "not in this workspace", and one this workspace deactivated
+      // through their membership was named on the card.
+      let managerLine: string | null = null;
+      if (str(raw.managerId)) {
+        const managerId = str(raw.managerId);
+        const ok = (await managerCandidateIn(org, managerId, { live: true })) === "ok";
+        const m = ok ? await prisma.user.findUnique({ where: { id: managerId }, select: { id: true, firstName: true, lastName: true } }) : null;
+        if (!m) return { error: INVITE_CARD.unknown("manager") };
+        input.managerId = m.id;
+        managerLine = INVITE_CARD.manager(`${m.firstName ?? ""} ${m.lastName ?? ""}`.trim());
+      }
       // Someone who already uses WorkwrK accepts signed in, and that path
-      // sets only the level (accept-invite's signed-in branch): no role,
-      // manager, department, office, KRAs or SOPs. So none is stored or
-      // promised; the card says where to set them (review round 2).
+      // sets the level and the manager (accept-invite's signed-in branch,
+      // E10): no role, department, office, KRAs or SOPs from this card. So
+      // none of those is stored or promised; the card says where to set them
+      // (review round 2).
       const account = await liveAccountFor(email);
       if (account && account.organizationId !== org) {
-        lines.push(INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending);
+        lines.push(...(managerLine ? [managerLine] : []), INVITE_CARD.existingAccount, PREVIEW_LINES.inviteSent, PREVIEW_LINES.invitePending);
         return { input, preview: { title: placeTitle(verb(tool), email), lines, target: { label: email } } };
       }
       const kraIds = ids(raw.kraIds);
@@ -648,15 +666,7 @@ async function prepareOne(tool: ToolName, raw: Record<string, unknown>, ctx: Pre
         // SOPs are listed either. Listed ones replace the role's own.
         lines.push(kraIds.length ? INVITE_CARD.roleListedOnly(role.title) : sopIds.length ? INVITE_CARD.roleKrasListedSops(role.title) : INVITE_CARD.role(role.title));
       }
-      if (str(raw.managerId)) {
-        const m = await prisma.user.findFirst({
-          where: { id: str(raw.managerId), organizationId: org, deletedAt: null, status: { not: "INACTIVE" } },
-          select: { id: true, firstName: true, lastName: true },
-        });
-        if (!m) return { error: INVITE_CARD.unknown("manager") };
-        input.managerId = m.id;
-        lines.push(INVITE_CARD.manager(`${m.firstName ?? ""} ${m.lastName ?? ""}`.trim()));
-      }
+      if (managerLine) lines.push(managerLine);
       if (str(raw.departmentId)) {
         const d = await prisma.department.findFirst({ where: { id: str(raw.departmentId), organizationId: org }, select: { id: true, name: true } });
         if (!d) return { error: INVITE_CARD.unknown("department") };

@@ -23,7 +23,8 @@ describe("a membership made by accepting an invitation (Phase 5 step 3)", () => 
     const upsert = branch.indexOf("tx.organizationMembership.upsert(");
     const committed = branch.indexOf("}, LOCKED_TX);", upsert);
     const back = branch.indexOf("await skillsBackFor(inv.organizationId, [me.id]);");
-    const answer = branch.indexOf("return NextResponse.json({ ok: true, landing, refreshSession: true }, { status: 201 });");
+    // The answer says when the invitation's manager could not be written (workspace-status-2 step 4 review L3).
+    const answer = branch.indexOf("return NextResponse.json({ ok: true, landing, refreshSession: true, ...(managerDropped ? { managerDropped: true } : {}) }, { status: 201 });");
     expect(upsert).toBeGreaterThan(0);
     // Before: nothing cleared, so a returning person's skills there were deleted on their old leave's 30th day.
     expect(back).toBeGreaterThan(committed);

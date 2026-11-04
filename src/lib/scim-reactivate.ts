@@ -24,8 +24,13 @@
 //      POST, must not undo: M1), as are an erased account and a second live
 //      account of the address. Someone reactivated a moment ago (not_ended)
 //      is left exactly as they are (L2).
-//   5. only once the seat is back: the reporting lines that no longer hold
-//      cleared (manager-candidate.ts staleLinesOf), each with its
+//   5. only once the seat is back: the reporting lines HERE that no longer
+//      hold cleared (manager-candidate.ts staleLinesOf; the line the seat
+//      here holds, through seat-writes.ts writeLineHere on the row that
+//      holds it now, and this workspace's dotted rows, through
+//      removeDottedHere: never another workspace's line, workspace-status-2.md
+//      E4, step 4; before, it cleared the account's line, which for someone
+//      here through a membership is their own company's), each with its
 //      reporting_line_changed row, and the open reviews moved with a cleared
 //      manager line (review-cycle.server.ts followReportingLine, to the
 //      first Owner when no person acted), all in the same transaction (L1:
@@ -48,6 +53,7 @@ import { scimReactivated } from "@/lib/scim-deprovision";
 import { SCIM_WORKSPACE_INACTIVE } from "@/lib/scim-auth";
 import { skillsBackFor } from "@/lib/skills/store";
 import { lockPerson } from "@/lib/access/workspace-anchor";
+import { removeDottedHere, seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
 import { identityShared, touchesIdentity, withoutIdentity } from "@/lib/access/shared-identity";
 
 /** The fields SCIM answers a resource with. */
@@ -118,10 +124,15 @@ export async function scimReactivateSeat(organizationId: string, userId: string,
       const restored = r.outcome === "restored" ? r : null;
 
       if (restored) {
-        // The lines, only now the seat is back, in this transaction (L1, L2).
+        // The lines here, only now the seat is back, in this transaction (L1,
+        // L2), on the row that holds the seat now (a D6 restore may have
+        // moved the account here, E3 carrying the line with it).
         const stale = await staleLinesOf(organizationId, userId, tx);
-        if (stale.dotted.length) await tx.userDottedLine.deleteMany({ where: { userId, managerId: { in: stale.dotted.map((d) => d.managerId) } } });
-        if (stale.manager) await tx.user.update({ where: { id: userId }, data: { managerId: null }, select: { id: true } });
+        await removeDottedHere(tx, organizationId, stale.dotted.map((d) => ({ userId, managerId: d.managerId })));
+        if (stale.manager) {
+          const now = await tx.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true } });
+          if (!now || !(await writeLineHere(tx, seatRefOf(organizationId, now), null))) throw new Refused(409, "Their status here changed a moment ago. Try again.");
+        }
         const cleared: StaleLine[] = [...(stale.manager ? [stale.manager] : []), ...stale.dotted];
         if (cleared.length > 0) {
           const who = await tx.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
