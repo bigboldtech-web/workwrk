@@ -250,12 +250,41 @@ export function staleLineWords(line: StaleLine): string {
 }
 
 /**
- * The audit sentence for one line a restore or a reactivation cleared:
- * "Reactivated Max Chen with no manager: Dana Ray is deactivated".
+ * How a seat came back with a line that no longer held, for its audit
+ * sentence: an Admin's (or the identity provider's) restore or reactivation
+ * here; the person's own return by invitation ("Rejoined": they are the
+ * actor, never "Restored" by themselves); or the account restored or
+ * reactivated in another workspace, which brought this seat back with
+ * nobody here acting ("RestoredWithAccount", "ReactivatedWithAccount").
+ * The final review of workspace-status-2, product L7 and the part A clears.
  */
-export function clearedLineSentence(verb: "Restored" | "Reactivated", name: string, line: StaleLine, solid: boolean): string {
-  if (solid) return `${verb} ${name} with no manager: ${staleLineWords(line)}`;
+export type ClearedHow = "Restored" | "Reactivated" | "Rejoined" | "RestoredWithAccount" | "ReactivatedWithAccount";
+
+/** The sentence's opening, and whether it ends on a clause (so "with no manager" follows a comma). */
+function clearedLead(how: ClearedHow, name: string): { lead: string; clause: boolean } {
+  switch (how) {
+    case "Rejoined":
+      return { lead: `${name} rejoined from an invitation`, clause: false };
+    case "RestoredWithAccount":
+      return { lead: `${name} is back in this workspace after their account was restored`, clause: true };
+    case "ReactivatedWithAccount":
+      return { lead: `${name} is back in this workspace after their account was reactivated`, clause: true };
+    default:
+      return { lead: `${how} ${name}`, clause: false };
+  }
+}
+
+/**
+ * The audit sentence for one line a restore, a reactivation or a return by
+ * invitation cleared: "Reactivated Max Chen with no manager: Dana Ray is
+ * deactivated", "Pat Lee rejoined from an invitation with no manager: Dana
+ * Ray is no longer in the workspace".
+ */
+export function clearedLineSentence(how: ClearedHow, name: string, line: StaleLine, solid: boolean): string {
+  const { lead, clause } = clearedLead(how, name);
+  const sep = clause ? ", " : " ";
+  if (solid) return `${lead}${sep}with no manager: ${staleLineWords(line)}`;
   // Never named (batch 7): someone who holds no level here.
-  if (line.why === "elsewhere") return `${verb} ${name} without a dotted line to someone who doesn't work in this workspace`;
-  return `${verb} ${name} without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
+  if (line.why === "elsewhere") return `${lead}${sep}without a dotted line to someone who doesn't work in this workspace`;
+  return `${lead}${sep}without their dotted line to ${line.name ?? "a former manager"}: ${staleLineWords(line)}`;
 }

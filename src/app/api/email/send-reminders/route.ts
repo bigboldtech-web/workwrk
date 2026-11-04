@@ -522,21 +522,25 @@ async function handle(req: NextRequest) {
   // ──────────────────────────────────────
   if (type === "all" || type === "kpi-recording") {
     const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    // The KRAs and KPI numbers of the workspace the account is in, where
+    // the email's link opens (docs/plans/workspace-status-2.md, the final
+    // review, product M5): an assignment names no workspace, and someone who
+    // joined another workspace by invitation holds its KRAs too, which that
+    // workspace's My KRAs shows and this one's never does.
     const assignments = await prisma.kRAAssignment.findMany({
       where: { status: "ACTIVE", user: { ...LIVE_PERSON, organization: LIVE_ORG } },
-      select: { userId: true, user: { select: { id: true, email: true, firstName: true, organizationId: true } } },
+      select: { userId: true, kra: { select: { organizationId: true } }, user: { select: { id: true, email: true, firstName: true, organizationId: true } } },
     });
     const uniqueUsers = new Map<string, any>();
-    for (const a of assignments) uniqueUsers.set(a.userId, a.user);
+    for (const a of assignments) if (a.kra.organizationId === a.user.organizationId) uniqueUsers.set(a.userId, a.user);
 
     // Fetch all users' existing KPI records for the period in ONE query
     // instead of N per-user counts (previously: 500 users = 500 round trips).
     const usersWithRecords = new Set(
       (await prisma.kPIRecord.findMany({
         where: { userId: { in: Array.from(uniqueUsers.keys()) }, period: currentPeriod },
-        select: { userId: true },
-        distinct: ["userId"],
-      })).map((r) => r.userId),
+        select: { userId: true, kpi: { select: { organizationId: true } }, user: { select: { organizationId: true } } },
+      })).filter((r) => r.kpi.organizationId === r.user.organizationId).map((r) => r.userId),
     );
 
     const toRemind = Array.from(uniqueUsers.entries()).filter(([userId]) => !usersWithRecords.has(userId));

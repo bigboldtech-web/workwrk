@@ -21,9 +21,11 @@
 //      title assigns her no KRA or SOP and the answer says so (E7, the step
 //      5 review M1);
 //   6. the pickers, a task, a message and Workload reach her (E12, E13);
-//   7. B's identity provider sets and removes her B manager through the
-//      enterprise extension, and a refused manager writes one audit row and
-//      nothing else (E9 i, step 7), in the shapes Okta and Entra send;
+//   7. B's identity provider is ignored until Bo turns on Provisioning's
+//      "Let your identity provider set Reports to" (the final review, H1);
+//      then it sets and removes her B manager through the enterprise
+//      extension, and a refused manager writes one audit row and nothing
+//      else (E9 i, step 7), in the shapes Okta and Entra send;
 //   8. B's announcement, policy, survey and goal to B's Design reach her and
 //      never Rita, whom B deactivated (E15, step 8);
 //   9. the after-deploy window check lists none of the proof's rows (all
@@ -1056,6 +1058,18 @@ async function main() {
   const getB0 = await scim("GET", `/Users/${pat.id}`);
   const getA0 = await scim("GET", `/Users/${pat.id}`, undefined, scimA);
   check("SCIM GET names B's line in B (Lee) and A's in A (Max), in the enterprise extension", getB0.status === 200 && scimManagerOf(getB0) === lee.id && getA0.status === 200 && scimManagerOf(getA0) === max.id, { b: getB0.body[ENTERPRISE], a: getA0.body[ENTERPRISE] });
+  // The final review, product H1: the provider sets Reports to only where a
+  // workspace turned on Security > Provisioning's switch, off by default.
+  const t7off = new Date();
+  const ignored = await scim("PATCH", `/Users/${pat.id}`, { schemas: [SCIM_PATCH], Operations: [{ op: "replace", value: { [ENTERPRISE]: { manager: { value: dana.id } } } }] });
+  check(
+    "with Let your identity provider set Reports to off (the default), an Okta-shaped PATCH answers 200 and writes and logs nothing of Pat's B line",
+    ignored.status === 200 && (await seat(pat.id, B))?.managerId === lee.id && (await auditRows(B, "reporting_line_changed", pat.id, t7off)).length === 0 && (await auditRows(B, "reporting_line_refused", pat.id, t7off)).length === 0,
+    { status: ignored.status, seatB: (await seat(pat.id, B))?.managerId },
+  );
+  const onB = await bo.json("PATCH", "/api/settings", { section: "security", data: { identityProviderSetsReportsTo: true } });
+  const onA = await ari.json("PATCH", "/api/settings", { section: "security", data: { identityProviderSetsReportsTo: true } });
+  check("Bo and Ari turn on Let your identity provider set Reports to (PATCH /api/settings, section security: 200)", onB.status === 200 && onA.status === 200, { b: onB.status, a: onA.status });
   const t7 = new Date();
   const okta = await scim("PATCH", `/Users/${pat.id}`, { schemas: [SCIM_PATCH], Operations: [{ op: "replace", value: { [ENTERPRISE]: { manager: { value: dana.id } } } }] });
   check(

@@ -6,7 +6,7 @@
 // is always safe.
 
 import { NextResponse } from "next/server";
-import { retryAnswer, rolesBusyAnswer } from "./org-roles-busy";
+import { placementRetryAnswer, retryAnswer, rolesBusyAnswer } from "./org-roles-busy";
 
 /** The 503 for an OrgRolesBusy, or null for any other error (the caller rethrows it). */
 export function rolesBusyResponse(e: unknown): NextResponse | null {
@@ -35,6 +35,20 @@ export function rolesBusyOrThrow(e: unknown): NextResponse {
  */
 export function retryOrThrow(e: unknown): NextResponse {
   const busy = retryAnswer(e);
+  if (!busy) throw e;
+  return NextResponse.json(
+    { error: busy.error, code: busy.code },
+    { status: busy.status, headers: { "Retry-After": String(busy.retryAfterSeconds) } },
+  );
+}
+
+/**
+ * retryOrThrow for a batch of placement writes (the bulk Change department
+ * and Change office), whose deadlock is told PEOPLE_BUSY, never "roles or
+ * reporting lines" (the final review, product L6).
+ */
+export function placementRetryOrThrow(e: unknown): NextResponse {
+  const busy = placementRetryAnswer(e);
   if (!busy) throw e;
   return NextResponse.json(
     { error: busy.error, code: busy.code },

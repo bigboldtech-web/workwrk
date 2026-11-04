@@ -80,7 +80,10 @@
 // lock at all (scimManagerChanges, the step 7 review L3). Every resource answered names the line the seat here holds, as
 // a reference to the manager's SCIM id, while that manager holds a seat
 // here. Not in a suspended or cancelled workspace (a deprovision only), and
-// never on an erased account.
+// never on an erased account. Only while the workspace lets its identity
+// provider set Reports to (Security > Provisioning, off by default: the final
+// review, product H1); until then the manager is ignored and GET still
+// names the line.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -97,7 +100,7 @@ import { IDENTITY_FIELDS, identityShared, touchesIdentity, withoutIdentity } fro
 import { lockPerson } from "@/lib/access/workspace-anchor";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { LOCKED_TX } from "@/lib/access/org-roles-busy";
-import { scimManagerChanges, scimManagerHere, scimManagerRetry, scimSetManager, scimUserHere } from "@/lib/scim-manager";
+import { scimManagerAsked, scimManagerChanges, scimManagerHere, scimManagerRetry, scimSetManager, scimUserHere } from "@/lib/scim-manager";
 
 /** The row SCIM answers with. */
 const SEAT_ROW_SELECT = SCIM_USER_SELECT;
@@ -281,7 +284,8 @@ export async function PUT(
   if (!body) return scimError(400, "Invalid JSON body");
 
   // The manager this workspace's line names (see the header); a PUT that leaves it out leaves the line as it is.
-  let manager = managerAskOfResource(body);
+  // Nothing asked unless the workspace lets its identity provider set Reports to (scimManagerAsked).
+  let manager = await scimManagerAsked(auth.organizationId, managerAskOfResource(body));
   const existing = await prisma.user.findFirst({
     where: { id, organizationId: auth.organizationId },
   });
@@ -405,6 +409,8 @@ export async function PATCH(
     // Unknown paths are silently ignored; SCIM spec allows skipping
     // unsupported attributes rather than 400-ing the whole request.
   }
+  // Nothing asked of the manager unless the workspace lets its identity provider set Reports to (scimManagerAsked).
+  manager = await scimManagerAsked(auth.organizationId, manager);
 
   if (!existing) {
     // Someone who works here through a membership: their seat here only (batch 7, D14), and their manager here.

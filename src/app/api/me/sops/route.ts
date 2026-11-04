@@ -72,7 +72,9 @@ export async function GET(req: NextRequest) {
       },
       orderBy: orderBy as never,
     }),
-    prisma.sOPAssignment.count({ where: { userId: u.id, status: { not: "COMPLETED" } } }),
+    // The open count is this workspace's too, as the list above (docs/plans/
+    // workspace-status-2.md, the final review, product M5).
+    prisma.sOPAssignment.count({ where: { userId: u.id, status: { not: "COMPLETED" }, sop: { organizationId: u.organizationId } } }),
   ]);
 
   const checklistIds = assignments.filter((a) => a.sop.sopType === "CHECKLIST").map((a) => a.sopId);

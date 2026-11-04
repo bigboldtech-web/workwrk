@@ -6,7 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { sopAssignedTemplate } from "@/lib/email-templates";
 import { employedAmong } from "@/lib/people/employed.server";
 import { idsPlacedHere, placedHere } from "@/lib/access/profile-here";
-import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
+import { sopLeftOutWords, sopNotAssignedNamedWords } from "@/lib/people/person-fields";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
 // report tree. Mirrors the scope logic on GET /api/kras.
@@ -122,13 +122,18 @@ export async function POST(req: NextRequest) {
   // (docs/plans/workspace-status-2.md, the step 5 review M1): an SOP
   // assignment names no workspace, so it showed and counted in the workspace
   // their account is in (My SOPs, the open count), and its notice and email
-  // went there. Refused in words, nothing written, so the person picking
-  // knows rather than seeing one fewer assigned.
+  // went there. Refused in words, nothing written, naming them in the order
+  // they were picked, so the person picking knows whom to take off (the
+  // final review, product M2). Each holds a live seat here (employedAmong),
+  // so naming them tells nothing of another workspace.
   if (resolvedUserIds.length > 0) {
-    const elsewhere = (await prisma.user.findMany({ where: { id: { in: resolvedUserIds } }, select: { id: true, organizationId: true } }))
-      .filter((u) => u.organizationId !== orgId)
-      .map((u) => u.id);
-    if (elsewhere.length > 0) return NextResponse.json({ error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere", userIds: elsewhere }, { status: 400 });
+    const read = await prisma.user.findMany({ where: { id: { in: resolvedUserIds } }, select: { id: true, organizationId: true, firstName: true, lastName: true } });
+    const byId = new Map(read.map((u) => [u.id, u]));
+    const elsewhere = resolvedUserIds.map((id) => byId.get(id)).filter((u): u is NonNullable<typeof u> => !!u && u.organizationId !== orgId);
+    if (elsewhere.length > 0) {
+      const names = elsewhere.map((u) => `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone");
+      return NextResponse.json({ error: sopNotAssignedNamedWords(names), code: "alignment_elsewhere", userIds: elsewhere.map((u) => u.id) }, { status: 400 });
+    }
   }
 
   // By department or everyone: the people ANCHORED here only, by their
@@ -169,7 +174,7 @@ export async function POST(req: NextRequest) {
     ? (await idsPlacedHere(orgId, all === true ? "everyone" : { departmentIds: [departmentId] }, "live", { only: "membership" })).filter((uid) => !teamIds || teamIds.has(uid)).length
     : 0;
   const elsewhereNote: { notAssignedElsewhere?: number; alignmentNote?: string } = notAssignedElsewhere > 0
-    ? { notAssignedElsewhere, alignmentNote: `${notAssignedElsewhere} ${notAssignedElsewhere === 1 ? "person" : "people"} here from another workspace's account ${notAssignedElsewhere === 1 ? "was" : "were"} not assigned. ${ALIGNMENT_NOT_HERE}` }
+    ? { notAssignedElsewhere, alignmentNote: sopLeftOutWords(notAssignedElsewhere) }
     : {};
 
   if (resolvedUserIds.length === 0) {

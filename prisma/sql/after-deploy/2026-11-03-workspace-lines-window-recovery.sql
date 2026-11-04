@@ -3,8 +3,9 @@
    review, integrity H1): what 2026-11-03-workspace-lines-window-check.sql
    lists as recoverable. NOT in the deploy manifest: run by hand, with psql
    -v ON_ERROR_STOP=1, right after the check, with T1 (the new release's
-   first request, UTC, from the deploy log) written in place of <T1> in each
-   of its three statements; then run the check again.
+   first request, UTC: the deploy log's "live: build" notice says "reloaded
+   at YYYY-MM-DD HH:MM:SS UTC") written in place of <T1> in each of its three
+   statements; then run the check again.
 
    FROM THE SNAPSHOT AND THE FILE'S OWN RULES. The file copied every
    account's line and every dotted line into "_deploy_lines_2026_11_03_accounts"
@@ -189,8 +190,8 @@ held AS (
 INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "oldValue", "newValue", "metadata", "createdAt")
 SELECT 'deploy-window-line-' || s."userId" || '-' || s."organizationId", 'reporting_line_changed', NULL, 'system', s."organizationId",
        CASE WHEN s."now" IS NULL
-            THEN 'Cleared a reporting line after the deploy: a move made while the release before it served had carried it in from another workspace'
-            ELSE 'Put back the reporting line the deploy left here: a move made while the release before it served had lost it or replaced it'
+            THEN 'Cleared this person''s manager here after a WorkwrK update: a change made during the update had brought in their manager from another workspace.'
+            ELSE 'Put back this person''s manager here after a WorkwrK update: a change made during the update had dropped or replaced it.'
        END,
        s."userId", 'user', 'info',
        jsonb_build_object('managerId', s."was"), jsonb_build_object('managerId', s."now"),
@@ -331,8 +332,8 @@ held AS (
 INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "oldValue", "newValue", "metadata", "createdAt")
 SELECT 'deploy-window-line-' || s."userId" || '-' || s."organizationId", 'reporting_line_changed', NULL, 'system', s."organizationId",
        CASE WHEN s."now" IS NULL
-            THEN 'Cleared a reporting line after the deploy: a move made while the release before it served had carried it in from another workspace'
-            ELSE 'Put back the reporting line the deploy left here: a move made while the release before it served had lost it or replaced it'
+            THEN 'Cleared this person''s manager here after a WorkwrK update: a change made during the update had brought in their manager from another workspace.'
+            ELSE 'Put back this person''s manager here after a WorkwrK update: a change made during the update had dropped or replaced it.'
        END,
        s."userId", 'user', 'info',
        jsonb_build_object('managerId', s."was"), jsonb_build_object('managerId', s."now"),
@@ -414,7 +415,7 @@ held AS (
 )
 INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "oldValue", "newValue", "metadata", "createdAt")
 SELECT p."id", 'reporting_line_changed', NULL, 'system', p."organizationId",
-       'Put back a dotted line after the deploy: a change made while the release before it served had taken it off here',
+       'Put back this person''s dotted line here after a WorkwrK update: a change made during the update had taken it off.',
        p."userId", 'user', 'info',
        jsonb_build_object('dottedManagerId', NULL), jsonb_build_object('dottedManagerId', p."managerId"),
        jsonb_build_object('onDeploy', 'workspace-lines-2026-11-03', 'reason', 'window recovery: the dotted line the deploy left, from its snapshot',

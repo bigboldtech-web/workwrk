@@ -744,22 +744,26 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
     const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
     const fixes: Array<[string, RegExp, number]> = [
-      ["src/app/api/users/[id]/route.ts", /if \(target\.seat\.kind !== "anchor"\) alignmentNote = \{ alignmentNote: ALIGNMENT_NOT_HERE \};/, 1],
+      // The final review L8: said only for a job title that carries KRAs, in one sentence.
+      ["src/app/api/users/[id]/route.ts", /if \(carries > 0\) alignmentNote = \{ alignmentNote: JOB_TITLE_SAVED_NOT_ASSIGNED \};/, 1],
       ["src/app/api/users/[id]/route.ts", /seedAlignmentForUser\(/, 1],
       ["src/app/api/users/[id]/route.ts", /if \(identity\.length && relation === "self"\) return err\(409, OWN_SESSION_STALE_WORDS/, 1],
-      ["src/app/api/sop-assignments/route.ts", /error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere"/, 1],
+      // The final review M2: the refusal names the people it could not assign.
+      ["src/app/api/sop-assignments/route.ts", /error: sopNotAssignedNamedWords\(names\), code: "alignment_elsewhere"/, 1],
       ["src/app/api/kra-assignments/route.ts", /return jsonError\(ALIGNMENT_NOT_HERE, 400\)/, 1],
       ["src/app/api/users/[id]/seed-alignment/route.ts", /return jsonError\(ALIGNMENT_NOT_HERE, 400\)/, 1],
       ["src/app/api/departments/[id]/route.ts", /dept\._count\.members \+ \(await membershipsPlacedHere\(orgId, \{ departmentId: id \}\)\)/, 1],
       ["src/app/api/offices/route.ts", /membershipsPlacedHere\(orgId, \{ officeId: id \}\)/, 1],
       ["src/app/api/roles/[id]/route.ts", /membershipsPlacedHere\(orgId, \{ roleId: id \}\)/, 1],
-      ["src/app/api/people/bulk-update/route.ts", /BATCH_TX\)\s*\.catch\(retryOrThrow\)/, 2],
+      // The final review L6: the placement batch's deadlock says "changing people", the manager batch's stays the role lock's.
+      ["src/app/api/people/bulk-update/route.ts", /BATCH_TX\)\s*\.catch\(retryOrThrow\)/, 1],
+      ["src/app/api/people/bulk-update/route.ts", /BATCH_TX\)\s*\.catch\(placementRetryOrThrow\)/, 1],
       ["src/app/api/scim/v2/Groups/[id]/route.ts", /await groupWriteRetry\(/, 3],
       ["src/app/api/scim/v2/Groups/route.ts", /await groupWriteRetry\(/, 1],
     ];
     for (const [file, re, n] of fixes) expect(count(file, re), `${file} ${re}`).toBe(n);
     // The only seeding left in PATCH is the anchored seat's, inside the else of the membership note.
-    expect(code("src/app/api/users/[id]/route.ts")).toMatch(/alignmentNote = \{ alignmentNote: ALIGNMENT_NOT_HERE \};\n\s+else \{\n\s+try \{\n\s+await seedAlignmentForUser\(/);
+    expect(code("src/app/api/users/[id]/route.ts")).toMatch(/alignmentNote = \{ alignmentNote: JOB_TITLE_SAVED_NOT_ASSIGNED \};\n\s+\} else \{\n\s+try \{\n\s+await seedAlignmentForUser\(/);
     expect(code("src/app/api/people/bulk-update/route.ts")).not.toMatch(/rolesBusyOrThrow|LOCKED_TX/);
   });
 
@@ -797,7 +801,8 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       // A membership person's reactivation still carries none of the push's fields, only the manager.
       ["src/app/api/scim/v2/Users/[id]/route.ts", /writeScimUser\(organizationId, id, \{\}, true, manager\)/, 1],
       ["src/app/api/scim/v2/Users/[id]/route.ts", /const asked = managerAskOfOperation\(op\);/, 1],
-      ["src/app/api/scim/v2/Users/[id]/route.ts", /let manager = managerAskOfResource\(body\);/, 1],
+      // The final review H1: read through the workspace's switch, off by default.
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /let manager = await scimManagerAsked\(auth\.organizationId, managerAskOfResource\(body\)\);/, 1],
       ["src/app/api/scim/v2/Users/route.ts", /if \(manager\) await lockOrgRoles\(tx, auth\.organizationId\);\n\s+if \(active\) \{\n\s+await lockWorkspaceSeats\(tx, auth\.organizationId, \{ bounded: !!manager \}\);/, 1],
       ["src/app/api/scim/v2/Users/route.ts", /if \(manager\) await scimManagerHere\(tx, auth\.organizationId, made\.id, manager\);/, 1],
       ["src/app/api/scim/v2/Users/route.ts", /scimReactivateSeat\(auth\.organizationId, ended\.userId, \{\}, asked\)/, 1],
@@ -880,7 +885,8 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       ["src/app/api/offices/route.ts", /membershipPlacedCounts\(orgId, "officeId", "kept"\)/, 1],
       ["src/app/api/roles/route.ts", /membershipPlacedCounts\(orgId, "roleId", "kept"\)/, 1],
       ["src/lib/export/workspace-export.server.ts", /membershipPlacedCounts\(orgId, "departmentId", "kept"\)/, 1],
-      ["src/app/(dashboard)/settings/structure/page.tsx", /prisma\.organizationMembership\.count\(\{ where: \{ \.\.\.membershipHereWhere\(orgId, "live"\), managerId: null \} \}\)/, 1],
+      // The final review L5: the membership half counted as Members' No manager lists it.
+      ["src/app/(dashboard)/settings/structure/page.tsx", /membershipsListedWithNoManager\(orgId\)/, 1],
       // The kudos filter's membership half, read on its own.
       ["src/app/api/kudos/route.ts", /idsPlacedHere\(orgId, \{ departmentIds: \[dept\] \}, "any", \{ only: "membership" \}\)/, 1],
       ["src/lib/sop-compliance.ts", /seatPlacementsHere\(orgId, read\.map\(\(a\) => a\.user\)\)/, 1],
@@ -892,9 +898,11 @@ describe("every reader and writer of a person's line and profile is listed (E16)
     // The account-placement reads they replaced are gone.
     expect(code("src/app/api/boot/route.ts")).not.toMatch(/select: \{ officeId: true, departmentId: true \}/);
     expect(code("src/lib/goal-audience.ts")).not.toMatch(/ACTIVE_USER|prisma\.user\.find/);
-    for (const f of ["src/lib/alignment-assign.ts", "src/app/api/reviews/[id]/launch/route.ts"]) {
-      expect(code(f), f).not.toMatch(/peoplePlacedHere|idsPlacedHere|countPlacedHere|membershipPlacedCounts/);
-    }
+    expect(code("src/lib/alignment-assign.ts")).not.toMatch(/peoplePlacedHere|idsPlacedHere|countPlacedHere|membershipPlacedCounts/);
+    // The review launch reads the membership half once, only to say how many it leaves out (the final review, product L4), never to review them.
+    expect(code("src/app/api/reviews/[id]/launch/route.ts")).not.toMatch(/idsPlacedHere|countPlacedHere|membershipPlacedCounts/);
+    expect(count("src/app/api/reviews/[id]/launch/route.ts", /peoplePlacedHere\(/)).toBe(1);
+    expect(code("src/app/api/reviews/[id]/launch/route.ts")).toMatch(/const notReviewedElsewhere = launchAudience\(\{ \.\.\.audience, people: elsewhere \}\)\.length;/);
     // The SOP route reads the membership half only to say who it left out (the step 8 review L5), never to assign.
     expect(code("src/app/api/sop-assignments/route.ts")).not.toMatch(/peoplePlacedHere|countPlacedHere|membershipPlacedCounts/);
     expect(count("src/app/api/sop-assignments/route.ts", /idsPlacedHere\(/)).toBe(1);
@@ -983,5 +991,63 @@ describe("every reader and writer of a person's line and profile is listed (E16)
       expect(code(f), f).not.toMatch(/userId_periodStart|userId_weekStartDate/);
     }
     expect(code("src/lib/access/manager-lines.ts")).not.toMatch(/where: \{ id: \{ in: frontier \}, deletedAt: null \}/);
+  });
+
+  it("holds the final review's fixes, part B: the identity provider's switch, KRAs and SOPs read here only, the counts and the words", () => {
+    const code = (file: string) => codeOf(readFileSync(path.join(ROOT, file), "utf8"));
+    const count = (file: string, re: RegExp) => code(file).match(new RegExp(re.source, "g"))?.length ?? 0;
+    const held: Array<[string, RegExp, number]> = [
+      // H1: every SCIM door reads the manager through the workspace's switch, off by default.
+      ["src/lib/scim-manager.ts", /return idpSetsReportsToOf\(org\?\.settings\) \? ask : undefined;/, 1],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /scimManagerAsked\(auth\.organizationId, /, 2],
+      ["src/app/api/scim/v2/Users/[id]/route.ts", /manager = await scimManagerAsked\(auth\.organizationId, manager\);/, 1],
+      ["src/app/api/scim/v2/Users/route.ts", /const asked = await scimManagerAsked\(auth\.organizationId, managerAskOfResource\(body\)\);/, 1],
+      ["src/lib/settings/org-policy.ts", /return rec\(rec\(settings\)\.security\)\[IDP_SETS_REPORTS_TO\] === true;/, 1],
+      ["src/lib/settings/org-settings-sections.ts", /identityProviderSetsReportsTo: z\.boolean\(\)\.optional\(\),/, 1],
+      ["src/app/api/settings/route.ts", /type: "security\.provisioning\.updated",/, 1],
+      ["src/app/(dashboard)/settings/security/page.tsx", /idp\.save\(\{ \[IDP_SETS_REPORTS_TO\]: v \}\)/, 1],
+      // M4: the refused manager's row carries what was sent.
+      ["src/lib/scim-manager.ts", /newValue: \{ managerAsked: r\.asked \},/, 1],
+      // M5: every reader of a person's KRAs, KPI numbers and SOPs reads this workspace's only.
+      ["src/app/api/me/kras/route.ts", /where: \{ userId: u\.id, status: "ACTIVE", kra: \{ organizationId: u\.organizationId \} \}/, 1],
+      ["src/app/api/users/[id]/kpis/route.ts", /where: \{ userId, status: "ACTIVE", kra: \{ organizationId: orgId \} \}/, 1],
+      ["src/app/api/kpi-records/self-report/route.ts", /where: \{ userId, status: "ACTIVE", kra: \{ organizationId: getOrgId\(session\) \} \}/, 1],
+      ["src/app/api/reviews/[id]/self-assessment/route.ts", /status: "ACTIVE", kra: \{ organizationId: (orgId|getOrgId\(session\)) \}/, 2],
+      ["src/app/api/reviews/[id]/self-assessment/route.ts", /sop: \{ organizationId: orgId \}, createdAt/, 1],
+      ["src/app/api/kra-assignments/route.ts", /status: \{ not: "ARCHIVED" \}(, id: \{ not: existing\.id \})?, kra: \{ organizationId: orgId \}/, 2],
+      ["src/app/api/kra-assignments/[id]/route.ts", /status: \{ not: "ARCHIVED" \},\n\s+kra: \{ organizationId: orgId \},/, 1],
+      ["src/app/api/me/sops/route.ts", /status: \{ not: "COMPLETED" \}, sop: \{ organizationId: u\.organizationId \}/, 1],
+      ["src/app/(dashboard)/me/weekly-review/page.tsx", /kra: \{ organizationId: viewer\.organizationId \}/, 1],
+      ["src/app/api/me/home/route.ts", /kra: \{ organizationId \} \} \}\)|kpi: \{ organizationId \} \} \}\)/, 2],
+      ["src/lib/team-alignment.ts", /status: "ACTIVE", kra: \{ organizationId \} \}|sop: \{ organizationId \} \}/, 2],
+      ["src/lib/role-defaults.ts", /kra: \{ organizationId: user\.organizationId \}|none: \{ kra: \{ organizationId \} \}/, 2],
+      ["src/app/api/people/backfill-role-defs/route.ts", /kraAssignments: \{ none: \{ kra: \{ organizationId: orgId \} \} \}/, 1],
+      ["src/app/api/ai/route.ts", /kraAssignments: \{ where: \{ kra: \{ organizationId: orgId \} \} \}/, 1],
+      ["src/app/api/team/attention/route.ts", /none: \{ status: "ACTIVE", kra: \{ organizationId: ctx\.organizationId \} \}/, 1],
+      ["src/lib/kpi-review.server.ts", /status: "ACTIVE", kra: \{ organizationId: ctx\.organizationId \}/, 1],
+      ["src/services/performanceScoreService.ts", /kpi: \{ organizationId \},|sop: \{ organizationId \} \}/, 2],
+      ["src/lib/analytics.ts", /sop: \{ organizationId: orgId \}/, 3],
+      ["src/lib/performance/review-cycle.server.ts", /sop: \{ organizationId \}/, 2],
+      ["src/app/api/email/send-reminders/route.ts", /a\.kra\.organizationId === a\.user\.organizationId/, 1],
+      ["src/app/api/cron/kpi-reminders/route.ts", /r\.kpi\.organizationId === r\.user\.organizationId/, 1],
+      // Lows: Working on and the shared-identity line, the counts, the words.
+      ["src/components/people/person-record.tsx", /\{workingOnShown\(person\) \? <WorkingOnSection/, 1],
+      ["src/components/people/person-record.tsx", /\{sharedIdentityShown\(person\) \?/, 1],
+      ["src/app/api/reviews/[id]/launch/route.ts", /peoplePlacedHere\(orgId, "everyone", "active", \{ only: "membership" \}\)/, 1],
+      ["src/lib/scim-groups.ts", /const busy = placementRetryAnswer\(e\);/, 1],
+      ["src/app/api/auth/accept-invite/route.ts", /clearedLineSentence\("Rejoined", name, line, solid\)/, 1],
+      ["src/lib/access/workspace-status.ts", /clearedLineSentence\(verb === "Restored" \? "RestoredWithAccount" : "ReactivatedWithAccount", name, line, solid\)/, 1],
+    ];
+    for (const [file, re, n] of held) expect(count(file, re), `${file} ${re}`).toBe(n);
+    // No reader of a person's KRAs, KPI numbers or SOPs by person alone is left in these files.
+    const byPerson: Array<[string, RegExp]> = [
+      ["src/app/api/me/kras/route.ts", /where: \{ userId: u\.id, status: "ACTIVE" \}/],
+      ["src/app/api/users/[id]/kpis/route.ts", /where: \{ userId, status: "ACTIVE" \},/],
+      ["src/app/api/kpi-records/self-report/route.ts", /where: \{ userId, status: "ACTIVE" \},/],
+      ["src/app/api/reviews/[id]/self-assessment/route.ts", /where: \{ userId, status: "ACTIVE" \}/],
+      ["src/app/api/me/home/route.ts", /count\(\{ where: \{ userId, status: "(ACTIVE|PENDING)" \} \}\)/],
+      ["src/app/api/team/attention/route.ts", /none: \{ status: "ACTIVE" \} \}/],
+    ];
+    for (const [file, re] of byPerson) expect(code(file), `${file} ${re}`).not.toMatch(re);
   });
 });

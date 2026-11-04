@@ -32,9 +32,11 @@ export async function POST(req: NextRequest) {
     return jsonError("Numbers can only be recorded for this month or last month.", 400);
   }
 
-  // Verify KPIs belong to this user's KRA assignments
+  // Verify KPIs belong to this user's KRA assignments in THIS workspace
+  // (docs/plans/workspace-status-2.md, the final review, product M5): a
+  // number for another workspace's KPI is never taken here.
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId, status: "ACTIVE" },
+    where: { userId, status: "ACTIVE", kra: { organizationId: getOrgId(session) } },
     include: {
       kra: {
         select: {

@@ -111,6 +111,13 @@
 // their defaults, their person, manager and approver, and a timesheet's
 // entries as a list relation, so a week is found, made and read per
 // workspace as Postgres answers it.
+//
+// The final review, part B (product M5): a KRA's assignments as a list
+// relation, an SOP compliance row's SOP, a KPI's KRA and a review's reviewer
+// as relations, a KRA assignment's and an SOP assignment's schema defaults
+// (ACTIVE, "ongoing"; ASSIGNED), `aggregate` with `_avg` and `_count`, and
+// findUniqueOrThrow, so the readers of a person's KRAs, KPI numbers and
+// SOPs are answered, per workspace, as Postgres answers them.
 
 import { Prisma } from "@/generated/prisma";
 
@@ -125,7 +132,9 @@ const RELATIONS: Record<string, Record<string, [string, string]>> = {
   apiKey: { organization: ["organization", "organizationId"] },
   kRAAssignment: { kra: ["kRA", "kraId"] },
   kPIRecord: { kpi: ["kPI", "kpiId"], user: ["user", "userId"] },
-  review: { cycle: ["reviewCycle", "cycleId"], subject: ["user", "subjectId"] },
+  review: { cycle: ["reviewCycle", "cycleId"], subject: ["user", "subjectId"], reviewer: ["user", "reviewerId"] },
+  sOPCompliance: { sop: ["sOP", "sopId"] },
+  kPI: { kra: ["kRA", "kraId"] },
   userDottedLine: { manager: ["user", "managerId"], user: ["user", "userId"], organization: ["organization", "organizationId"] },
   kudos: { giver: ["user", "giverId"], receiver: ["user", "receiverId"] },
   kudosReaction: { kudos: ["kudos", "kudosId"] },
@@ -187,7 +196,7 @@ const LISTS: Record<string, Record<string, [string, string]>> = {
   // survey's responses (and above, a job title's instances).
   oKR: { assignees: ["goalAssignee", "okrId"] },
   policy: { assignments: ["policyAssignment", "policyId"], acknowledgments: ["policyAcknowledgment", "policyId"] },
-  kRA: { kpis: ["kPI", "kraId"] },
+  kRA: { kpis: ["kPI", "kraId"], assignments: ["kRAAssignment", "kraId"] },
   pulseSurvey: { responses: ["surveyResponse", "surveyId"] },
   // The step 8 review: a review cycle's reviews (its launch refuses a cycle that has them).
   reviewCycle: { reviews: ["review", "cycleId"] },
@@ -261,6 +270,9 @@ const DEFAULTS: Record<string, () => Row> = {
   weeklyReview: () => ({ kpiSnapshots: [], kraProgress: [], highlights: null, blockers: null, plan: null, status: "DRAFT", submittedAt: null, managerId: null, managerStatus: null, managerNotes: null, reviewedAt: null, createdAt: new Date(), updatedAt: new Date() }),
   timesheet: () => ({ status: "DRAFT", submittedAt: null, approverId: null, decisionAt: null, decisionNote: null, createdAt: new Date(), updatedAt: new Date() }),
   timeEntry: () => ({ description: null, taskId: null, itemId: null, source: "WEB", clockedInAt: null, clockedOutAt: null, billable: false, tags: [], createdAt: new Date(), updatedAt: new Date() }),
+  // The final review, part B: a KRA and an SOP assignment as the schema's defaults fill them.
+  kRAAssignment: () => ({ weightage: 0, period: "ongoing", status: "ACTIVE", createdAt: new Date(), updatedAt: new Date() }),
+  sOPAssignment: () => ({ status: "ASSIGNED", mandatory: true, dueDate: null, progress: null, stepsTotal: 0, stepsCompleted: 0, score: null, completedAt: null, assignedBy: null, createdAt: new Date(), updatedAt: new Date() }),
 };
 
 /** The stamps Prisma fills on a create only (`@updatedAt`), never on a seed. */
@@ -583,6 +595,13 @@ export function createSeatDb(): SeatDb {
         const r = table(name).find((row) => matches(name, row, a.where));
         return r ? project(name, r, a) : null;
       },
+      // As Prisma's: P2025 when no row matches (the final review, part B: a self-assessment's save reads its review back so).
+      findUniqueOrThrow: async (a: { where: Where; select?: Record<string, unknown>; include?: Record<string, unknown> }) => {
+        read("findUniqueOrThrow");
+        const r = table(name).find((row) => matches(name, row, a.where));
+        if (!r) throw Object.assign(new Error(`seat-test-db: no ${name} matches`), { code: "P2025" });
+        return project(name, r, a);
+      },
       findFirst: async (a: { where?: Where; select?: Record<string, unknown>; include?: Record<string, unknown>; orderBy?: OrderBy } = {}) => {
         read("findFirst");
         const r = ordered(table(name).filter((row) => matches(name, row, a.where)), a.orderBy, name)[0];
@@ -612,6 +631,19 @@ export function createSeatDb(): SeatDb {
       count: async (a: { where?: Where } = {}) => {
         read("count");
         return table(name).filter((row) => matches(name, row, a.where)).length;
+      },
+      // `_avg` over the numbers of the matching rows (null for none, as Postgres), and `_count`.
+      aggregate: async (a: { where?: Where; _avg?: Record<string, boolean>; _count?: { _all?: boolean } }) => {
+        read("aggregate");
+        const rows = table(name).filter((row) => matches(name, row, a.where));
+        const avg = (c: string) => {
+          const xs = rows.map((r) => r[c]).filter((v): v is number => typeof v === "number");
+          return xs.length ? xs.reduce((n, x) => n + x, 0) / xs.length : null;
+        };
+        return {
+          ...(a._avg ? { _avg: Object.fromEntries(Object.keys(a._avg).map((c) => [c, avg(c)])) } : {}),
+          ...(a._count ? { _count: { _all: rows.length } } : {}),
+        };
       },
       create: async (a: { data: Row; select?: Record<string, unknown> }) => {
         wrote("create");

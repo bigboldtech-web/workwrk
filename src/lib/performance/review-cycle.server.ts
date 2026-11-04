@@ -193,8 +193,10 @@ export async function reviewMetrics(userId: string, organizationId: string, wind
       where: { userId, kpi: { organizationId }, createdAt: { gte: window.start, lte: window.end } },
       select: { score: true },
     }),
+    // This workspace's SOPs only, as the KPIs (docs/plans/workspace-status-2.md,
+    // the final review, product M5): a compliance row names no workspace of its own.
     prisma.sOPCompliance.findMany({
-      where: { userId, createdAt: { gte: window.start, lte: window.end } },
+      where: { userId, sop: { organizationId }, createdAt: { gte: window.start, lte: window.end } },
       select: { score: true },
     }),
     prisma.oKR.findMany({ where: { organizationId, ownerId: userId }, select: { id: true } }),
@@ -230,12 +232,12 @@ export async function reviewMetrics(userId: string, organizationId: string, wind
   };
 }
 
-/** Mean SOP compliance per person inside a window (for calibration rows). */
-export async function sopScoresFor(userIds: string[], window: { start: Date; end: Date }): Promise<Map<string, number>> {
+/** Mean SOP compliance per person inside a window (for calibration rows), on this workspace's SOPs only (M5, as reviewMetrics). */
+export async function sopScoresFor(organizationId: string, userIds: string[], window: { start: Date; end: Date }): Promise<Map<string, number>> {
   if (!userIds.length) return new Map();
   const rows = await prisma.sOPCompliance.groupBy({
     by: ["userId"],
-    where: { userId: { in: userIds }, createdAt: { gte: window.start, lte: window.end }, score: { not: null } },
+    where: { userId: { in: userIds }, sop: { organizationId }, createdAt: { gte: window.start, lte: window.end }, score: { not: null } },
     _avg: { score: true },
   });
   return new Map(rows.filter((r) => r._avg.score != null).map((r) => [r.userId, Math.round(r._avg.score as number)] as const));

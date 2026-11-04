@@ -208,8 +208,10 @@ export async function POST(req: NextRequest) {
     // 100% (from role-seed defaults or legacy data) — they could never
     // save the very edit that rebalances them. We save and warn instead,
     // handing back the running total so the UI can nudge a trim.
+    // This workspace's weights only (docs/plans/workspace-status-2.md, the
+    // final review, product M5): another workspace's KRAs never count here.
     const otherAssignments = await prisma.kRAAssignment.findMany({
-      where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id } },
+      where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id }, kra: { organizationId: orgId } },
     });
     const othersTotal = otherAssignments.reduce((sum, a) => sum + a.weightage, 0);
     const weightTotal = othersTotal + weightage;
@@ -225,10 +227,11 @@ export async function POST(req: NextRequest) {
     return jsonSuccess({ ...assignment, ...weightSignal(weightTotal) });
   }
 
-  // Running total across the person's active KRAs after this add. Over
-  // 100 is warned, never blocked (see the update branch above).
+  // Running total across the person's active KRAs here after this add
+  // (this workspace's only, M5). Over 100 is warned, never blocked (see the
+  // update branch above).
   const existingAssignments = await prisma.kRAAssignment.findMany({
-    where: { userId, status: { not: "ARCHIVED" } },
+    where: { userId, status: { not: "ARCHIVED" }, kra: { organizationId: orgId } },
   });
   const currentTotal = existingAssignments.reduce((sum, a) => sum + a.weightage, 0);
   const weightTotal = currentTotal + weightage;

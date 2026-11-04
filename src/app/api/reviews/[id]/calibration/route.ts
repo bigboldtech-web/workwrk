@@ -63,7 +63,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }),
     orgScoring(orgId),
   ]);
-  const sop = await sopScoresFor(reviews.map((r) => r.subjectId), { start: cycle.startDate, end: cycle.endDate });
+  const sop = await sopScoresFor(orgId, reviews.map((r) => r.subjectId), { start: cycle.startDate, end: cycle.endDate });
 
   const rows = reviews.map((review) => {
     const n = calibrationNumbers({

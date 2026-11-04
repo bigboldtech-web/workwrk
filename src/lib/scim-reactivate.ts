@@ -110,7 +110,9 @@ class Refused extends Error {
  * Brings back this person's deactivated seat here (see the header). `fields`:
  * what the push also writes on the account of someone anchored here (never
  * pass any for a membership person). `manager`: what the push asks of their
- * manager here (step 6 of the header), for either kind.
+ * manager here (step 6 of the header), for either kind, as the route took it
+ * (scim-manager.ts scimManagerAsked: none while the workspace does not let
+ * its identity provider set Reports to).
  */
 export async function scimReactivateSeat(organizationId: string, userId: string, fields: Record<string, unknown> = {}, manager?: ScimManagerAsk): Promise<ScimReactivation> {
   let placed: { row: ScimUserRow | null; seat: PersonSeat | null; restored: Extract<RestoreSeatResult, { outcome: "restored" }> | null };

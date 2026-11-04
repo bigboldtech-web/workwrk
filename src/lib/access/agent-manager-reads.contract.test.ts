@@ -317,8 +317,12 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
     }
     // workspace-status-2 step 5 review L5: the bulk update's two batch
     // transactions answer the same busy and deadlock 503, and a batch past
-    // its 20 seconds too (retryOrThrow, over rolesBusyAnswer).
-    expect(read("src/app/api/people/bulk-update/route.ts").match(/BATCH_TX\)\s*\.catch\(retryOrThrow\)/g)?.length).toBe(2);
+    // its 20 seconds too (retryOrThrow, over rolesBusyAnswer). The final
+    // review L6: the placement batch's deadlock says "someone else is
+    // changing people" (placementRetryOrThrow, over retryAnswer).
+    expect(read("src/app/api/people/bulk-update/route.ts").match(/BATCH_TX\)\s*\.catch\(retryOrThrow\)/g)?.length).toBe(1);
+    expect(read("src/app/api/people/bulk-update/route.ts").match(/BATCH_TX\)\s*\.catch\(placementRetryOrThrow\)/g)?.length).toBe(1);
+    expect(read("src/lib/access/org-roles-busy.ts")).toContain("return retryAnswer(e);\n}");
     expect(read("src/lib/access/org-roles-busy.ts")).toContain("return rolesBusyAnswer(e) ?? (isTransactionTimeout(e) ?");
     expect(read("src/app/api/users/[id]/handover/route.ts")).toContain("const busy = rolesBusyResponse(e);");
     expect(read("src/app/api/users/[id]/agent-reports/route.ts")).toContain("const busy = rolesBusyResponse(e);");

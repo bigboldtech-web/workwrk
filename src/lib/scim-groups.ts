@@ -36,7 +36,7 @@ import { anchoredHereWhere, membershipHereWhere } from "@/lib/access/seated-here
 import { lockPeople } from "@/lib/access/workspace-anchor";
 import { placeDepartmentHere } from "@/lib/access/seat-writes";
 import { membershipsPlacedHere } from "@/lib/access/profile-here";
-import { BATCH_TX, retryAnswer } from "@/lib/access/org-roles-busy";
+import { BATCH_TX, placementRetryAnswer } from "@/lib/access/org-roles-busy";
 
 /** A group member as SCIM lists them. */
 export interface GroupMember {
@@ -123,7 +123,8 @@ export async function groupWriteRetry(run: () => Promise<unknown>): Promise<stri
     await run();
     return null;
   } catch (e) {
-    const busy = retryAnswer(e);
+    // A department write takes no role lock: a deadlock is "someone else is changing people" (the final review, product L6).
+    const busy = placementRetryAnswer(e);
     if (busy) return busy.error;
     throw e;
   }

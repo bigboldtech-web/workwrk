@@ -74,18 +74,50 @@ export const SEAT_FIELDS: ReadonlySet<string> = new Set(
 );
 
 /**
- * What a job title change and every KRA or SOP assignment door says for
- * someone here through a membership (docs/plans/workspace-status-2.md, the
- * step 5 review M1): a KRA or SOP assignment names no workspace, and the
- * readers of them (My KRAs, the KPI recorder, self-reports, review
- * self-assessments, the weight total, the open SOP count) read every row of
- * the person's, so a row B made for Pat showed in A and counted there,
- * while B's own record of her shows none (a known limit). So none is made
- * for them here: their job title, department and office are saved, and
- * this sentence says why nothing else was. Per workspace KRAs, KPIs,
- * reviews and skills, with those readers filtered, are the next step.
+ * What every KRA or SOP assignment door says for someone here through a
+ * membership (docs/plans/workspace-status-2.md, the step 5 review M1): a KRA
+ * or SOP assignment names no workspace, and B's record of Pat, who works in
+ * B from A's account, reads none of hers (her KPIs, reviews and alignment
+ * here are a known limit), so Dana would never see a KRA B gave her. So
+ * none is made for them here: their job title, department and office are
+ * saved, and this sentence says why nothing else was. Since the final
+ * review (M5) every reader of a person's KRAs and SOPs (My KRAs, the KPI
+ * recorder, self-reports, review self-assessments, the weight total, the
+ * open SOP count, the AI teammates' tools) reads the workspace it is read in
+ * only, so rows another workspace made (after Pat joined it by invitation,
+ * her account there) never show or count here.
  */
 export const ALIGNMENT_NOT_HERE = "KRAs and SOPs are not assigned to people who work here from another workspace's account.";
+
+/**
+ * The Members drawer's and Edit details' note (the answer's alignmentNote)
+ * when a job title that carries KRAs is saved for someone here through a
+ * membership: said once, plainly, and never for a job title with nothing to
+ * assign (the final review of workspace-status-2, product L8).
+ */
+export const JOB_TITLE_SAVED_NOT_ASSIGNED = `Job title saved. ${ALIGNMENT_NOT_HERE}`;
+
+/** People's names in a sentence: "Pat Lee", "Pat Lee and Max Chen", "Pat Lee, Max Chen and 2 others". Pure; tested. */
+export function namesInWords(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  const rest = names.length - 2;
+  return `${names.slice(0, 2).join(", ")} and ${rest} ${rest === 1 ? "other" : "others"}`;
+}
+
+/**
+ * POST /api/sop-assignments' refusal when the people named include someone
+ * who works here from another workspace's account (the final review,
+ * product M2): who they are, and what to do, since nothing was assigned.
+ */
+export function sopNotAssignedNamedWords(names: readonly string[]): string {
+  return `${namesInWords(names)} ${names.length === 1 ? "works" : "work"} here from another workspace's account, and SOPs are not assigned to people who do. Nothing was assigned: take them off the list and assign again.`;
+}
+
+/** An SOP by department or to everyone: how many it left out, and why, in one sentence (the final review, product L8). */
+export function sopLeftOutWords(count: number): string {
+  return `${count} ${count === 1 ? "person who works" : "people who work"} here from another workspace's account ${count === 1 ? "was" : "were"} not assigned, since KRAs and SOPs are not assigned to people who do.`;
+}
 
 /** Members' tooltip on "·" in Last logged in for someone here through a membership (the final review, product M4). */
 export const SIGN_IN_ELSEWHERE = "Not shown while they are working in another workspace.";

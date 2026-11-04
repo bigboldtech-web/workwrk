@@ -438,8 +438,9 @@ describe("POST signed in: a seat that comes back keeps only the lines that still
     expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d-home"]);
     expect(seatIn("home")).toMatchObject({ managerId: "max" });
     expect(lineRows().map((r) => [r.organizationId, r.description, r.oldValue, r.metadata])).toEqual([
-      ["here", "Restored Pat P with no manager: Dana Lee is no longer in the workspace", { managerId: "dana" }, { onJoin: true, reason: "removed" }],
-      ["here", "Restored Pat P without their dotted line to Ada Bot: Ada Bot is on the Agent tier, and an Agent can't be anyone's manager", { dottedManagerId: "ada" }, { onJoin: true, reason: "agent" }],
+      // She came back herself, by invitation: never "Restored" by herself (the final review, product L7).
+      ["here", "Pat P rejoined from an invitation with no manager: Dana Lee is no longer in the workspace", { managerId: "dana" }, { onJoin: true, reason: "removed" }],
+      ["here", "Pat P rejoined from an invitation without their dotted line to Ada Bot: Ada Bot is on the Agent tier, and an Agent can't be anyone's manager", { dottedManagerId: "ada" }, { onJoin: true, reason: "agent" }],
     ]);
     // Her open reviews here follow the cleared line, to the first Owner.
     expect(st.followed).toEqual([{ ids: ["pat"], actor: "olive" }]);
@@ -452,7 +453,7 @@ describe("POST signed in: a seat that comes back keeps only the lines that still
     signedIn();
     expect((await accept()).status).toBe(201);
     expect(pat()).toMatchObject({ organizationId: "here", managerId: null });
-    expect(lineRows()[0]).toMatchObject({ description: "Reactivated Pat P with no manager: Dana Lee is deactivated", metadata: { onJoin: true, reason: "inactive" } });
+    expect(lineRows()[0]).toMatchObject({ actorId: "pat", description: "Pat P rejoined from an invitation with no manager: Dana Lee is deactivated", metadata: { onJoin: true, reason: "inactive" } });
     expect(db.tables.userDottedLine.map((d) => d.id)).toEqual(["d-home"]);
   });
 

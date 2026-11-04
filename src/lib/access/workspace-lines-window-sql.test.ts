@@ -226,3 +226,45 @@ describe("where they live", () => {
     for (const sql of [CHECK, RECOVERY]) expect(sql).not.toMatch(/—|–|--/);
   });
 });
+
+// The final review, product L1: customers' Admins read these sentences on
+// the Access tab of the Audit log and in its export, with "System" as the
+// actor, and after the files run they can only be changed by an UPDATE of
+// the log. So they say what happened in a customer's words: never the
+// deploy, the release before or a membership.
+describe("the Audit sentences the file and the recovery write", () => {
+  const sentences = (sql: string) => [...body(sql).matchAll(/'((?:Cleared|Removed|Put back)(?:[^']|'')*)'/g)].map((m) => m[1].replace(/''/g, "'"));
+
+  it("are in a customer's words, each naming a WorkwrK update, with no deploy words and no dashes", () => {
+    expect(new Set(sentences(MAIN))).toEqual(new Set([
+      "Cleared a manager during a WorkwrK update: they don't work in this workspace, so no screen here showed them. Each workspace now keeps its own reporting lines.",
+      "Removed a dotted line during a WorkwrK update: its manager works in none of this person's workspaces, so no screen showed it. Each workspace now keeps its own dotted lines.",
+    ]));
+    expect(new Set(sentences(RECOVERY))).toEqual(new Set([
+      "Cleared this person's manager here after a WorkwrK update: a change made during the update had brought in their manager from another workspace.",
+      "Put back this person's manager here after a WorkwrK update: a change made during the update had dropped or replaced it.",
+      "Put back this person's dotted line here after a WorkwrK update: a change made during the update had taken it off.",
+    ]));
+    for (const s of [...sentences(MAIN), ...sentences(RECOVERY)]) {
+      expect(s, s).toContain("WorkwrK update");
+      expect(s, s).not.toMatch(/deploy|release|membership|-{2}|—|–/i);
+    }
+  });
+});
+
+// The final review, product L10 (T1): the check needs the reload's moment in
+// UTC, so the deploy run says it on the notice a person reads first.
+describe("the deploy log names T1", () => {
+  it("reads the UTC time as pm2's reload returns, and prints it on the live: build notice", () => {
+    const deploy = read(".github/workflows/deploy.yml");
+    const reload = deploy.indexOf("pm2 reload workwrk");
+    const stamp = deploy.indexOf("RELOADED_AT=$(date -u '+%F %T')");
+    expect(reload).toBeGreaterThan(0);
+    // After the reload returns (every request after it is the new release's), and before the release's own check.
+    expect(stamp).toBeGreaterThan(reload);
+    expect(stamp).toBeLessThan(deploy.indexOf("check_release \"$NEW_BUILD\""));
+    expect(deploy).toContain('echo "::notice::live: build $NEW_BUILD, commit $DEPLOY_SHA, reloaded at $RELOADED_AT UTC (previous build kept in .next-prev)"');
+    // The check and the recovery say where to read it.
+    for (const sql of [CHECK, RECOVERY]) expect(sql).toMatch(/"live: build" notice says\s+"?reloaded\s+at YYYY-MM-DD HH:MM:SS UTC/);
+  });
+});

@@ -85,7 +85,7 @@ vi.mock("@/lib/access/node-access", async (orig) => ({ ...(await orig<typeof imp
 
 import { seatDb as db } from "@/lib/access/seat-test-db";
 import { reanchorUser } from "@/lib/access/workspace-anchor";
-import { listMembers } from "@/lib/access/members-list.server";
+import { listMembers, membershipsListedWithNoManager } from "@/lib/access/members-list.server";
 import { directoryList } from "./directory-list.server";
 import { GET as record } from "@/app/api/users/[id]/route";
 import { GET as dottedLines } from "@/app/api/users/[id]/dotted-lines/route";
@@ -386,6 +386,22 @@ describe("Members (Settings > Members)", () => {
     expect(ids((await members("b", { noManager: true })).rows).sort()).toEqual(["bo", "dana", "kai"]);
     const a = (await members("a")).rows;
     expect(a.find((r) => r.id === "pat")?.manager).toEqual({ id: "max", name: "Max Ng" });
+  });
+
+  // The final review, product L5: Settings > Structure's "No manager: N" links here, so it counts what this filter lists.
+  it("Structure's No manager count of the people here through a membership is exactly who No manager lists, a line to someone with no seat here included", async () => {
+    const listed = async () => (await members("b", { noManager: true })).rows.filter((r) => db.row("user", r.id).organizationId !== "b").map((r) => r.id).sort();
+    expect(await listed()).toEqual(["kai"]);
+    expect(await membershipsListedWithNoManager("b")).toBe(1);
+    // Kai's B line names Ada, who holds no seat in B (a line copied in any state on the deploy): his row shows no manager, and he is listed.
+    db.tables.organizationMembership.find((m) => m.userId === "kai" && m.organizationId === "b")!.managerId = "ada";
+    expect(await listed()).toEqual(["kai"]);
+    // Before: the count read empty lines only, so 0 while the list it links to held Kai.
+    expect(await membershipsListedWithNoManager("b")).toBe(1);
+    // Someone B deactivated is in neither.
+    db.tables.organizationMembership.find((m) => m.userId === "kai" && m.organizationId === "b")!.status = "INACTIVE";
+    expect(await listed()).toEqual([]);
+    expect(await membershipsListedWithNoManager("b")).toBe(0);
   });
 
   it("after Pat switches, A names her A line and B her B line", async () => {

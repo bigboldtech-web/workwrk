@@ -14,6 +14,11 @@
 // Before this step SCIM ignored the enterprise extension: B's identity
 // provider could never set Pat's manager in B, nothing said why, and no
 // resource named anyone's manager.
+//
+// Since the final review (product H1) the identity provider sets Reports to
+// only where the workspace turned on Security > Provisioning's "Let your
+// identity provider set Reports to" (off by default): both workspaces here
+// have it on, and the last describe turns it off.
 
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +111,7 @@ beforeEach(() => {
   st.followed = [];
   st.seatLocks = [];
   db.onQueryRaw = () => [{ n: 0 }];
-  for (const id of ["a", "b"]) db.seed("organization", { id, name: `Org ${id.toUpperCase()}`, status: "ACTIVE", plan: "STARTER", settings: {}, domain: null });
+  for (const id of ["a", "b"]) db.seed("organization", { id, name: `Org ${id.toUpperCase()}`, status: "ACTIVE", plan: "STARTER", settings: { security: { identityProviderSetsReportsTo: true } }, domain: null });
   // A.
   person("ari", "a", "SUPER_ADMIN", null);
   person("max", "a", "MANAGER", "ari");
@@ -246,7 +251,7 @@ describe("a manager B can't give her is refused in words: nothing of the line is
       expect.objectContaining({
         actorType: "scim",
         targetId: "pat",
-        description: "The identity provider's manager for Pat Ng was not set: that manager isn't anyone who works in this workspace. Their manager here is unchanged.",
+        description: "The identity provider's manager for Pat Ng was not set: nobody who works in this workspace has the id or sign-in address it sent. Their manager here is unchanged. If their manager is provisioned later, send this person again.",
         metadata: { scim: true, asked: "zed", reason: "not_here" },
       }),
     ]);
@@ -540,5 +545,106 @@ describe("busy, a deadlock, and the workspaces that take no write", () => {
     expect((await patch("lee", [{ op: "replace", path: "active", value: false }, azureSet("bo")])).status).toBe(200);
     expect(account("lee")).toMatchObject({ status: "INACTIVE", managerId: "dana" });
     expect(lineIn("pat", "b")).toBeNull();
+  });
+});
+
+// The final review, product M4: the refusal's row shows what the provider
+// sent, and a manager not provisioned yet is told how to come right.
+describe("a refused manager's row says what the provider sent, in the Audit drawer's Diff", () => {
+  it("adds the provider's value as Manager asked, and for a manager not here yet says to send the person again", async () => {
+    expect((await patch("pat", [azureSet("nia@x.test")])).status).toBe(200);
+    expect((await patch("pat", [azureSet("ada")])).status).toBe(200);
+    const [notHere, agent] = rows("reporting_line_refused");
+    // Before: no newValue, so the drawer showed only the line here, never what was sent.
+    expect(notHere).toMatchObject({ oldValue: { managerId: null }, newValue: { managerAsked: "nia@x.test" } });
+    expect(notHere.description).toBe(
+      "The identity provider's manager for Pat Ng was not set: nobody who works in this workspace has the id or sign-in address it sent. Their manager here is unchanged. If their manager is provisioned later, send this person again.",
+    );
+    // A manager who works here is named, and the row carries the value as well, with no "send again".
+    expect(agent).toMatchObject({ newValue: { managerAsked: "ada" } });
+    expect(agent.description).not.toContain("send this person again");
+    // Nia is provisioned later, and the next push of Pat, with the same value, now lands.
+    person("nia", "b", "MANAGER", "bo", { email: "nia@x.test" });
+    expect((await patch("pat", [azureSet("nia@x.test")])).status).toBe(200);
+    expect(lineIn("pat", "b")).toBe("nia");
+    // A refused clear carries no value of its own.
+    Object.assign(seatOf("pat", "b"), { removedAt: new Date("2026-10-01"), status: "INACTIVE" });
+    expect((await patch("pat", [{ op: "remove", path: `${EXT}:manager` }])).status).toBe(200);
+    expect(rows("reporting_line_refused").at(-1)).toMatchObject({ newValue: { managerAsked: null }, metadata: { reason: "removed" } });
+    for (const r of rows("reporting_line_refused")) expect(String(r.description)).not.toMatch(/-{2}|\u2014|\u2013/);
+  });
+});
+
+// The final review, product H1: the identity provider sets Reports to only
+// where the workspace turned it on. Off, every push's manager is ignored:
+// nothing of the line is written or logged, no role lock is taken, and the
+// rest of the push lands; GET still names the line here.
+describe("with \"Let your identity provider set Reports to\" off (the default), SCIM ignores the manager", () => {
+  const off = () => { db.row("organization", "b").settings = {}; };
+
+  it("an Okta-shaped PATCH, an Azure-shaped PATCH and a remove write nothing of Pat's B line, log nothing and take no role lock", async () => {
+    off();
+    expect((await patch("pat", [{ op: "replace", value: { [EXT]: { manager: { value: "dana", displayName: "Dana Ng" } } } }])).status).toBe(200);
+    expect((await patch("pat", [azureSet("dana")])).status).toBe(200);
+    // Before: Dana written on her B membership.
+    expect(lineIn("pat", "b")).toBeNull();
+    seatOf("pat", "b").managerId = "lee";
+    expect((await patch("pat", [{ op: "Remove", path: `${EXT}:manager` }])).status).toBe(200);
+    expect(lineIn("pat", "b")).toBe("lee");
+    expect(lineIn("pat", "a")).toBe("max");
+    expect(rows("reporting_line_changed")).toEqual([]);
+    expect(rows("reporting_line_refused")).toEqual([]);
+    expect(roleLocked()).toBe(false);
+  });
+
+  it("a PUT of the full resource writes the names and leaves Reports to as Admins set it, a null manager included", async () => {
+    off();
+    const res = await put("lee", { userName: "lee@x.test", name: { givenName: "Leela", familyName: "Ng" }, [EXT]: { manager: { value: "bo" } } });
+    expect(res.status).toBe(200);
+    expect(account("lee")).toMatchObject({ firstName: "Leela", managerId: "dana" });
+    expect((await put("lee", { userName: "lee@x.test", [EXT]: { manager: null } })).status).toBe(200);
+    expect(account("lee").managerId).toBe("dana");
+    // A refusal is never logged either: Ada is an Agent here, and nothing was asked.
+    expect((await put("lee", { userName: "lee@x.test", [EXT]: { manager: { value: "ada" } } })).status).toBe(200);
+    expect(rows("reporting_line_changed")).toEqual([]);
+    expect(rows("reporting_line_refused")).toEqual([]);
+  });
+
+  it("POST makes the account with no Reports to and takes no role lock; a revive brings the seat back without the manager", async () => {
+    off();
+    const res = await post({ userName: "nia@x.test", name: { givenName: "Nia", familyName: "Ng" }, [EXT]: { manager: { value: "dana" } } });
+    expect(res.status).toBe(201);
+    const nia = db.tables.user.find((u) => u.email === "nia@x.test")!;
+    expect(nia.organizationId).toBe("b");
+    expect(nia.managerId ?? null).toBeNull();
+    expect(st.seatLocks).toEqual([false]);
+    expect(roleLocked()).toBe(false);
+    seatOf("pat", "b").status = "INACTIVE";
+    const revive = await post({ userName: "pat@x.test", name: { givenName: "Pat", familyName: "Ng" }, [EXT]: { manager: { value: "dana" } } });
+    expect(revive.status).toBe(201);
+    expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE", managerId: null });
+    expect(rows("reporting_line_changed")).toEqual([]);
+    expect(rows("reporting_line_refused")).toEqual([]);
+  });
+
+  it("GET still names this workspace's line, and A's setting is A's own", async () => {
+    off();
+    seatOf("pat", "b").managerId = "dana";
+    expect(managerOf(await get("pat"))).toEqual({ value: "dana", displayName: "Dana Ng" });
+    // A keeps it on: A's provider still sets Pat's A line, and B's stays as B set it.
+    st.org = "a";
+    expect((await patch("pat", [azureSet("ari")])).status).toBe(200);
+    expect(lineIn("pat", "a")).toBe("ari");
+    expect(lineIn("pat", "b")).toBe("dana");
+  });
+
+  it("turned on, the same push writes Pat's B line (step 7's rule)", async () => {
+    off();
+    expect((await patch("pat", [azureSet("dana")])).status).toBe(200);
+    expect(lineIn("pat", "b")).toBeNull();
+    db.row("organization", "b").settings = { security: { identityProviderSetsReportsTo: true } };
+    expect((await patch("pat", [azureSet("dana")])).status).toBe(200);
+    expect(lineIn("pat", "b")).toBe("dana");
+    expect(rows("reporting_line_changed")).toEqual([expect.objectContaining({ actorLabel: "Identity provider", newValue: { managerId: "dana" } })]);
   });
 });

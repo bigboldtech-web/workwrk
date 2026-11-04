@@ -116,8 +116,11 @@ export async function getTeamAlignment(args: {
   const periodStart = weekStartFor();
   // 4. Bulk-fetch aggregates in parallel.
   const [kraAssignments, kpiRecords, sopAssignments, weeklyReviews] = await Promise.all([
+    // This workspace's KRAs and SOPs only, as the KPI records (docs/plans/
+    // workspace-status-2.md, the final review, product M5): an assignment
+    // names no workspace, and a report may hold another workspace's.
     prisma.kRAAssignment.findMany({
-      where: { userId: { in: validIds }, status: "ACTIVE" },
+      where: { userId: { in: validIds }, status: "ACTIVE", kra: { organizationId } },
       include: { kra: { select: { id: true, name: true } } },
     }),
     prisma.kPIRecord.findMany({
@@ -127,7 +130,7 @@ export async function getTeamAlignment(args: {
       select: { userId: true, status: true },
     }),
     prisma.sOPAssignment.findMany({
-      where: { userId: { in: validIds } },
+      where: { userId: { in: validIds }, sop: { organizationId } },
       select: { userId: true, status: true, mandatory: true },
     }),
     prisma.weeklyReview.findMany({

@@ -27,8 +27,9 @@
    is left to that workspace's Admin.
 
    T0 is read from the marker comment ("applied ... UTC"); T1, the reload's
-   moment in UTC from the deploy log, is written in place of <T1> in each
-   statement (left as it is, the statement fails). Every list starts five
+   moment in UTC from the deploy log (its "live: build" notice says
+   "reloaded at YYYY-MM-DD HH:MM:SS UTC"), is written in place of <T1> in
+   each statement (left as it is, the statement fails). Every list starts five
    minutes before T0 (see the w CTE).
 
    1. The window itself.

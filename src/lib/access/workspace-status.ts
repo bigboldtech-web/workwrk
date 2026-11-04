@@ -474,7 +474,10 @@ export interface LinesClearedElsewhere {
  * anchor), each of its live memberships in another workspace has that
  * workspace's lines checked (staleLinesOf there) and what fails cleared on
  * that membership (writeLineHere, removeDottedHere), each with one
- * reporting_line_changed row in that workspace, actor the system. A clear
+ * reporting_line_changed row in that workspace, actor the system, in words
+ * that say nobody there acted ("Pat Lee is back in this workspace after
+ * their account was restored, with no manager: ...", the final review,
+ * part B). A clear
  * only removes a line, so it needs no role lock there. Answers what was
  * cleared, by workspace, so the caller moves open reviews where a manager
  * line was cleared; nothing of it is said in the caller's workspace (it
@@ -510,7 +513,8 @@ export async function clearLinesBackWithAccount(
           actorId: null,
           actorType: "system",
           organizationId,
-          description: clearedLineSentence(verb, name, line, solid),
+          // Nobody here acted: the account came back elsewhere (the final review, part B).
+          description: clearedLineSentence(verb === "Restored" ? "RestoredWithAccount" : "ReactivatedWithAccount", name, line, solid),
           targetType: "user",
           targetId: userId,
           severity: "info",

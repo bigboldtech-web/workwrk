@@ -473,6 +473,14 @@ jobs:
 
             echo "==> Reloading PM2 process"
             pm2 reload workwrk --update-env 9>&- > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
+            # The moment the new release took over, in UTC, read as the reload
+            # returns: every request after it is the new release's. It is T1
+            # for a check run by hand after a deploy (prisma/sql/after-deploy/,
+            # docs/plans/workspace-status-2.md, the deploy list), and is
+            # printed again on the "live: build" notice below, so it is easy
+            # to read off the run's annotations.
+            RELOADED_AT=$(date -u '+%F %T')
+            echo "==> Reloaded at $RELOADED_AT UTC"
 
             echo "==> Checking the new release at $BASE"
             if ! why=$(check_release "$NEW_BUILD"); then
@@ -494,7 +502,7 @@ jobs:
                 | while IFS= read -r l; do echo "::error::| $l"; done
             fi
 
-            echo "::notice::live: build $NEW_BUILD, commit $DEPLOY_SHA (previous build kept in .next-prev)"
+            echo "::notice::live: build $NEW_BUILD, commit $DEPLOY_SHA, reloaded at $RELOADED_AT UTC (previous build kept in .next-prev)"
             echo "==> Deploy complete"
         env:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}

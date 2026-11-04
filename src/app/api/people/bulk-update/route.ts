@@ -46,7 +46,7 @@ import { wouldCreateCycle } from "@/lib/people/reporting-lines";
 import { lineAbove, managerCandidateIn } from "@/lib/access/manager-candidate";
 import { lockOrgRoles } from "@/lib/access/membership";
 import { holdsOnAccount, seatRefOf, writeLineHere, writeProfileHere, type ProfilePatch, type SeatRef } from "@/lib/access/seat-writes";
-import { retryOrThrow } from "@/lib/access/roles-busy";
+import { placementRetryOrThrow, retryOrThrow } from "@/lib/access/roles-busy";
 import { membershipHereWhere } from "@/lib/access/seated-here";
 import { BATCH_TX } from "@/lib/access/org-roles-busy";
 
@@ -109,8 +109,9 @@ export async function POST(req: NextRequest) {
         const done: string[] = [];
         for (const id of allowed) if (await writeProfileHere(tx, seatOf.get(id)!, patch)) done.push(id);
         return done;
+        // A deadlock here is "someone else is changing people", never "roles or reporting lines" (the final review, product L6).
       }, BATCH_TX)
-      .catch(retryOrThrow);
+      .catch(placementRetryOrThrow);
 
   let description = "";
   let updated = allowed.length;

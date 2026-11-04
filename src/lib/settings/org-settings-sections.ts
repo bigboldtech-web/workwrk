@@ -74,7 +74,9 @@ export const scoringSectionSchema = z.strictObject({
  * characters, lockout at most after 20 failures, an idle window no longer
  * than NextAuth's 30 day ceiling. `sessionTimeout` and `twoFactorEnabled` are
  * accepted so an older stored shape still round-trips, but nothing reads
- * them.
+ * them. `identityProviderSetsReportsTo` is Provisioning's one switch, read
+ * by SCIM (org-policy.ts idpSetsReportsToOf; workspace-status-2.md, the
+ * final review, product H1), changed by the same Admins as the sign-in policy.
  */
 export const securitySectionSchema = z.strictObject({
   minPasswordLength: z.number().int().min(SIGN_IN_BOUNDS.minPasswordLength.min).max(SIGN_IN_BOUNDS.minPasswordLength.max).optional(),
@@ -89,6 +91,7 @@ export const securitySectionSchema = z.strictObject({
   lockoutMinutes: z.number().int().min(SIGN_IN_BOUNDS.lockoutMinutes.min).max(SIGN_IN_BOUNDS.lockoutMinutes.max).optional(),
   sessionTimeout: z.number().int().min(1).max(100000).optional(),
   twoFactorEnabled: z.boolean().optional(),
+  identityProviderSetsReportsTo: z.boolean().optional(),
 });
 
 /** Identity & culture > Profile (settings-architecture 5.2, section "profile"). */

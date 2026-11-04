@@ -316,7 +316,9 @@ export async function backfillUserRoleDefinitions(userId: string): Promise<{
   });
   if (!user) return { kraAssignments: 0, sopAssignments: 0, skipped: true };
 
-  const existingCount = await prisma.kRAAssignment.count({ where: { userId } });
+  // Their KRAs in this workspace (docs/plans/workspace-status-2.md, the
+  // final review, product M5): another workspace's never count as "has some".
+  const existingCount = await prisma.kRAAssignment.count({ where: { userId, kra: { organizationId: user.organizationId } } });
   if (existingCount > 0) return { kraAssignments: 0, sopAssignments: 0, skipped: true };
 
   const { krasByTier, starterSopId } = await ensureOrgStarterDefinitions(user.organizationId);
@@ -396,7 +398,8 @@ export async function backfillOrgRoleDefinitions(organizationId: string): Promis
   const missing = await prisma.user.findMany({
     where: {
       organizationId,
-      kraAssignments: { none: {} },
+      // None of this workspace's (M5, as backfillUserRoleDefinitions counts).
+      kraAssignments: { none: { kra: { organizationId } } },
     },
     select: { id: true },
   });

@@ -107,7 +107,7 @@ import { POST as seedAlignmentRoute } from "@/app/api/users/[id]/seed-alignment/
 import { DELETE as deptDelete } from "@/app/api/departments/[id]/route";
 import { DELETE as officeDelete } from "@/app/api/offices/route";
 import { DELETE as roleDelete } from "@/app/api/roles/[id]/route";
-import { ALIGNMENT_NOT_HERE } from "@/lib/people/person-fields";
+import { ALIGNMENT_NOT_HERE, JOB_TITLE_SAVED_NOT_ASSIGNED } from "@/lib/people/person-fields";
 
 type Row = Record<string, unknown> & { id: string };
 const req = (url: string, init?: { method: string; body?: unknown }) =>
@@ -490,7 +490,8 @@ describe("KRAs and SOPs are never assigned here to someone who works here from a
     const res = await patch("pat", { roleId: "role-b-lead" });
     expect(res.status).toBe(200);
     // Before this fix: B's KRA and SOP rows were made for Pat, and A read them.
-    expect(await res.json()).toMatchObject({ roleId: "role-b-lead", alignmentNote: ALIGNMENT_NOT_HERE });
+    // Said once, plainly, for a job title that carries KRAs (the final review, product L8).
+    expect(await res.json()).toMatchObject({ roleId: "role-b-lead", alignmentNote: JOB_TITLE_SAVED_NOT_ASSIGNED });
     expect(seatOf("pat", "b").roleId).toBe("role-b-lead");
     expect(st.seeded).toEqual([]);
     expect(rowsOf("pat")).toEqual({ kras: [], sops: [] });
@@ -516,7 +517,8 @@ describe("KRAs and SOPs are never assigned here to someone who works here from a
     for (const userIds of [["pat"], ["lee", "pat"]]) {
       const res = await sopAssign(req("/api/sop-assignments", { method: "POST", body: { sopId: "sop-b", userIds } }));
       expect(res.status, userIds.join()).toBe(400);
-      expect(await res.json()).toMatchObject({ error: ALIGNMENT_NOT_HERE, code: "alignment_elsewhere", userIds: ["pat"] });
+      // Named, so the person picking knows whom to take off (the final review, product M2).
+      expect(await res.json()).toMatchObject({ error: "Pat Ng works here from another workspace's account, and SOPs are not assigned to people who do. Nothing was assigned: take them off the list and assign again.", code: "alignment_elsewhere", userIds: ["pat"] });
     }
     expect(rowsOf("pat").sops).toEqual([]);
     expect(rowsOf("lee").sops).toEqual([]);

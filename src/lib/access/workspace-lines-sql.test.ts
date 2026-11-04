@@ -158,7 +158,8 @@ describe(FILE, () => {
     expect(clear).toMatch(/FROM cleared c\s+ON CONFLICT \("id"\) DO NOTHING;/);
     // A description naming nobody: no name or address is read into it.
     const description = /c\."organizationId",\s+('(?:[^']|'')*'),/.exec(clear)?.[1] ?? "";
-    expect(description).toMatch(/^'Cleared a stored manager on the deploy/);
+    // Customer words (the final review, product L1): the Audit log reads them, so no deploy words.
+    expect(description).toBe("'Cleared a manager during a WorkwrK update: they don''t work in this workspace, so no screen here showed them. Each workspace now keeps its own reporting lines.'");
     expect(clear).not.toMatch(/firstName|lastName|email/);
     // The account's line is written in this one place only.
     expect(BODY.match(/UPDATE "User"/g)).toHaveLength(1);

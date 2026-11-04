@@ -42,6 +42,10 @@ type Person = { id: string; firstName: string | null; lastName: string | null; e
 /** A role holder + how many of the role's template KRAs they're missing. */
 /** missingKras is null for someone here through a membership: no KRA is assigned to them here (the step 5 review M1). */
 type Holder = Person & { missingKras: number | null };
+
+/** The People tab's words, in the drift slot, for a holder here through a membership (the final review, product L3). */
+export const KRAS_NOT_HERE = "KRAs not assigned here";
+
 type KpiDirection = "HIGHER" | "LOWER" | "MAINTAIN";
 type Kpi = {
   id: string; name: string; description: string | null; unit: string | null; frequency: string; type: string;
@@ -229,6 +233,12 @@ function PeoplePanel({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean
                     </button>
                   </>
                 ) : totalTemplates > 0 ? <Chip as="span">Up to date</Chip> : null
+              ) : canEdit && totalTemplates > 0 ? (
+                // Someone here through a membership: none is assigned to them
+                // here, so their row says so rather than read as up to date
+                // by its silence (docs/plans/workspace-status-2.md, the final
+                // review, product L3).
+                <span className="text-sm text-ink-2">{KRAS_NOT_HERE}</span>
               ) : null}
             </li>
           );

@@ -273,7 +273,8 @@ describe("L8: an account ended where it is anchored, and the step 5 M1 holds", (
     expect(await json(res)).toMatchObject({
       count: 1,
       notAssignedElsewhere: 1,
-      alignmentNote: "1 person here from another workspace's account was not assigned. KRAs and SOPs are not assigned to people who work here from another workspace's account.",
+      // Said once (the final review, product L8).
+      alignmentNote: "1 person who works here from another workspace's account was not assigned, since KRAs and SOPs are not assigned to people who do.",
     });
     // Everyone: the same, Pat named in the count (Rita and Rex were never live here).
     expect(await json(await assignSop(post("/api/sop-assignments", { sopId: "sop-1", all: true })))).toMatchObject({ notAssignedElsewhere: 1 });
@@ -281,5 +282,25 @@ describe("L8: an account ended where it is anchored, and the step 5 M1 holds", (
 
     db.seed("reviewCycle", { id: "rc-1", organizationId: "b", name: "H2", type: "ANNUAL", status: "DRAFT", audienceType: "DEPARTMENTS", departmentIds: ["dep-b-design"], userIds: [], createdById: "bo", startDate: new Date(), endDate: new Date() });
     expect(await json(await launchPreview(req("/api/reviews/rc-1/launch"), params("rc-1")))).toMatchObject({ count: 1 });
+  });
+});
+
+// The final review of workspace-status-2, product L4: a launch still
+// reviews the people anchored here only, and its confirm now says how many
+// people here from another workspace's account it leaves out, and why.
+describe("a review launch says whom it leaves out", () => {
+  const cycle = (id: string, audienceType: string, extra: Record<string, unknown> = {}) =>
+    db.seed("reviewCycle", { id, organizationId: "b", name: "H2", type: "ANNUAL", status: "DRAFT", audienceType, departmentIds: [], userIds: [], createdById: "bo", startDate: new Date(), endDate: new Date(), ...extra });
+
+  it("counts Pat, placed in B's Design through her membership, for Design, for everyone and by name; never Rita or Rex, whom B ended", async () => {
+    cycle("rc-d", "DEPARTMENTS", { departmentIds: ["dep-b-design"] });
+    cycle("rc-all", "ALL");
+    cycle("rc-pat", "USERS", { userIds: ["pat"] });
+    // Before: { count: 1 } and nothing said of Pat.
+    expect(await json(await launchPreview(req("/api/reviews/rc-d/launch"), params("rc-d")))).toMatchObject({ count: 1, notReviewedElsewhere: 1 });
+    expect(await json(await launchPreview(req("/api/reviews/rc-all/launch"), params("rc-all")))).toMatchObject({ notReviewedElsewhere: 1 });
+    expect(await json(await launchPreview(req("/api/reviews/rc-pat/launch"), params("rc-pat")))).toMatchObject({ count: 0, notReviewedElsewhere: 1 });
+    // Nobody is reviewed who was not before: the launch's own audience is unchanged.
+    expect(db.tables.review ?? []).toEqual([]);
   });
 });

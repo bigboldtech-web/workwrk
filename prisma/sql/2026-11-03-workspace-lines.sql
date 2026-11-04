@@ -184,7 +184,8 @@
    reports to nobody, or to the wrong person, in that workspace, and a line
    someone writes by hand meanwhile turns their row into one to set by hand.
    T0 is in this column's comment; T1 (the reload) is taken from the deploy
-   log. A DEPLOY THAT STOPS AFTER THIS FILE (the unpack, the checksum,
+   log, whose "live: build" notice says "reloaded at YYYY-MM-DD HH:MM:SS
+   UTC". A DEPLOY THAT STOPS AFTER THIS FILE (the unpack, the checksum,
    the swap or the new release's check failed, and the build before it is
    put back) leaves the release before this one serving on the new data, and
    every move until the next deploy loses a line: redeploy at once, then run
@@ -277,7 +278,7 @@ BEGIN
     )
     INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "oldValue", "newValue", "metadata", "createdAt")
     SELECT 'deploy-line-cleared-' || c."id", 'reporting_line_changed', NULL, 'system', c."organizationId",
-           'Cleared a stored manager on the deploy: it named someone who does not work in this workspace, so no manager was shown here (each workspace now keeps its own reporting lines)',
+           'Cleared a manager during a WorkwrK update: they don''t work in this workspace, so no screen here showed them. Each workspace now keeps its own reporting lines.',
            c."id", 'user', 'info',
            jsonb_build_object('managerId', c."oldManagerId"),
            jsonb_build_object('managerId', NULL),
@@ -322,7 +323,7 @@ BEGIN
     )
     INSERT INTO "ActivityLog" ("id", "type", "actorId", "actorType", "organizationId", "description", "targetId", "targetType", "severity", "oldValue", "newValue", "metadata", "createdAt")
     SELECT 'deploy-dotted-removed-' || s."id", 'reporting_line_changed', NULL, 'system', u."organizationId",
-           'Removed a dotted line on the deploy that no workspace showed: its manager works in none of this person''s workspaces (each workspace now keeps its own dotted lines)',
+           'Removed a dotted line during a WorkwrK update: its manager works in none of this person''s workspaces, so no screen showed it. Each workspace now keeps its own dotted lines.',
            s."userId", 'user', 'info',
            jsonb_build_object('dottedManagerId', s."managerId"),
            jsonb_build_object('dottedManagerId', NULL),

@@ -25,7 +25,12 @@
 //                                     request still sends SIGN OUT).
 //   Provisioning     SCIM tokens (/api/scim-tokens) and the rules the SCIM
 //                    routes apply: Members by default, domain lock, deprovision
-//                    = deactivate and hand the work over.
+//                    = deactivate and hand the work over; and one switch,
+//                    "Let your identity provider set Reports to" (section
+//                    "security", off by default: SCIM ignores the manager
+//                    until it is on, docs/plans/workspace-status-2.md, the
+//                    final review, product H1), saved on its own as the Data
+//                    page's switches are.
 //   Single sign-on   not in the tab row until a SAML sign-in is verified end
 //                    to end; under "Show upcoming features" one line says so,
 //                    the Passwords card's last line.
@@ -57,9 +62,11 @@ import { ErrorState } from "@/components/ui/error-state";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useShowUpcoming } from "@/components/ui/coming-soon-row";
 import { draftAfterSave, useSettingsSection, type SettingsGetBody } from "@/hooks/use-settings-section";
-import { DEFAULT_SIGN_IN_POLICY, SIGN_IN_BOUNDS, minutesInWords, type SignInPolicy } from "@/lib/settings/org-policy";
+import { DEFAULT_SIGN_IN_POLICY, IDP_SETS_REPORTS_TO, SIGN_IN_BOUNDS, idpSetsReportsToOf, minutesInWords, type SignInPolicy } from "@/lib/settings/org-policy";
 import { formatRelative } from "@/lib/format/date";
 import {
+  IDP_REPORTS_TO_HINT,
+  IDP_REPORTS_TO_LABEL,
   INVITE_DOMAINS_DESCRIPTION,
   INVITE_DOMAINS_HINT,
   LOG_OUT_EVERYONE_HINT,
@@ -379,6 +386,12 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
   const [formErr, setFormErr] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<ScimToken | null>(null);
+  // "Let your identity provider set Reports to": the stored value, the one
+  // a click asked for while its save is out, and the row's save state.
+  const idp = useSettingsSection("security", (b: SettingsGetBody) => idpSetsReportsToOf(b.settings));
+  const [idpAsked, setIdpAsked] = useState<boolean | null>(null);
+  const [idpSavedAt, setIdpSavedAt] = useState<number | null>(null);
+  const [idpErr, setIdpErr] = useState<{ message: string; value: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -427,6 +440,21 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
     void load();
   };
 
+  // Saved on its own, as the Data page's switches: a failed save puts the
+  // switch back and says so on the row, with Retry sending the same value.
+  const saveIdp = async (v: boolean) => {
+    setIdpAsked(v);
+    setIdpErr(null);
+    const r = await idp.save({ [IDP_SETS_REPORTS_TO]: v });
+    setIdpAsked(null);
+    if (!r.ok) {
+      setIdpErr({ message: r.error ?? "Couldn't save", value: v });
+      toast(r.error ?? "Couldn't save");
+      return;
+    }
+    setIdpSavedAt(Date.now());
+  };
+
   const columns: TableColumn<ScimToken>[] = [
     { key: "name", label: "Name", title: true, width: "minmax(180px,1.4fr)", render: (t) => t.name },
     { key: "prefix", label: "Prefix", width: "140px", render: (t) => <span className="font-mono text-sm">{t.tokenPrefix}</span> },
@@ -467,7 +495,22 @@ function ProvisioningTab({ genSignal }: { genSignal: number }) {
         id="security.scimRules"
         description={PROVISIONING_LINE}
         more={PROVISIONING_MORE.map((line) => <p key={line} className="m-0">{line}</p>)}
-      />
+      >
+        {idp.status === "error" ? (
+          <ErrorState compact what="the provisioning setting" hint={idp.error ?? undefined} onRetry={idp.retry} />
+        ) : idp.status === "loading" ? (
+          <SkeletonRows rows={1} />
+        ) : (
+          <SettingsRow
+            id="security.idpSetsReportsTo"
+            label={IDP_REPORTS_TO_LABEL}
+            helper={IDP_REPORTS_TO_HINT}
+            savedAt={idpSavedAt}
+            error={idpErr ? { message: idpErr.message, onRetry: () => { void saveIdp(idpErr.value); } } : null}
+            control={<Switch checked={idpAsked ?? idp.data === true} aria-label={IDP_REPORTS_TO_LABEL} onChange={(v) => { void saveIdp(v); }} />}
+          />
+        )}
+      </SettingsCard>
 
       <ConfirmDialog open={genOpen} onOpenChange={setGenOpen} title="Generate a provisioning token" describes={false} width={560} confirmLabel="Generate token" onConfirm={generate} busy={busy} error={formErr}>
         <Field label="Name" htmlFor="scim-name" required>

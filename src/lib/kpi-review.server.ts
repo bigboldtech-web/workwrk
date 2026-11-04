@@ -52,7 +52,8 @@ export async function listAwaitingKpiNumbers(ctx: PeopleCtx): Promise<Array<{ us
   });
   if (rows.length === 0) return [];
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId: { in: [...new Set(rows.map((r) => r.userId))] }, status: "ACTIVE" },
+    // This workspace's KRAs, as the rows (docs/plans/workspace-status-2.md, the final review, product M5).
+    where: { userId: { in: [...new Set(rows.map((r) => r.userId))] }, status: "ACTIVE", kra: { organizationId: ctx.organizationId } },
     select: { userId: true, kra: { select: { kpis: { select: { id: true } } } } },
   });
   const carried = new Set<string>();

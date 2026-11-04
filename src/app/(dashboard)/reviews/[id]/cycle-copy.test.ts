@@ -42,6 +42,18 @@ describe("launch confirm", () => {
     expect(launchConfirmText(p)).toBeNull();
     expect(launchNobodyText(p)).toMatch(/^Nobody active is covered \(the 2 people it names who are in your reporting line\)/);
   });
+  // The final review of workspace-status-2, product L4.
+  it("says how many people here from another workspace's account it leaves out, and why", () => {
+    expect(launchConfirmText({ count: 4, audienceType: "ALL", named: null, covers: null, clipped: true, notReviewedElsewhere: 2 })).toBe(
+      "This creates a review for 4 people (everyone in your reporting line) and emails each of them. 2 people who work here from another workspace's account are not reviewed, since reviews are not made here for people who do.",
+    );
+    expect(launchConfirmText({ count: 4, audienceType: "ALL", named: null, covers: null, clipped: true, notReviewedElsewhere: 1 })).toMatch(/ 1 person who works here from another workspace's account is not reviewed, since reviews are not made here for people who do\.$/);
+    // None left out, or an older server: as before.
+    expect(launchConfirmText({ count: 4, audienceType: "ALL", named: null, covers: null, clipped: true, notReviewedElsewhere: 0 })).toBe("This creates a review for 4 people (everyone in your reporting line) and emails each of them.");
+    const nobody = launchNobodyText({ audienceType: "USERS", named: 1, covers: null, clipped: false, notReviewedElsewhere: 1 });
+    expect(nobody).toBe("Nobody active is covered (the person it names), so there is no one to launch it for yet. 1 person who works here from another workspace's account is not reviewed, since reviews are not made here for people who do. It can launch once someone active is in it, or cancel it and start a new cycle.");
+    expect(nobody).not.toMatch(/-{2}|\u2014|\u2013/);
+  });
   it("a manager's Everyone cycle is their line, never the company", () => {
     expect(audiencePhrase({ audienceType: "ALL", named: null, covers: null, clipped: true })).toBe("everyone in your reporting line");
   });

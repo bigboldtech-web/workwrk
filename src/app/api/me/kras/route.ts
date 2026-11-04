@@ -17,8 +17,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // This workspace's KRAs only (docs/plans/workspace-status-2.md, the final
+  // review, product M5): an assignment names no workspace, so a person
+  // whose account was in another workspace when its job title seeded theirs
+  // (after accepting its invitation) holds that workspace's rows too, and
+  // they showed and counted here.
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId: u.id, status: "ACTIVE" },
+    where: { userId: u.id, status: "ACTIVE", kra: { organizationId: u.organizationId } },
     include: {
       kra: {
         include: {

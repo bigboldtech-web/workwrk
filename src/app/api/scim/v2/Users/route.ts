@@ -52,7 +52,9 @@
 // in the reactivation's transaction. Every resource listed names the line
 // the seat here holds (the account's for someone anchored here, the
 // membership's for someone here through one), as a reference to the
-// manager's SCIM id, while that manager holds a seat here.
+// manager's SCIM id, while that manager holds a seat here. The manager is
+// read only while the workspace lets its identity provider set Reports to
+// (Security > Provisioning, off by default: the final review, product H1).
 
 import crypto from "crypto";
 import { inviteDomainsOf } from "@/lib/settings/org-policy";
@@ -67,7 +69,7 @@ import { SCIM_REMOVED_REFUSAL, scimReactivateSeat } from "@/lib/scim-reactivate"
 import { lockOrgRoles } from "@/lib/access/membership";
 import { LOCKED_TX } from "@/lib/access/org-roles-busy";
 import { personSeatIn } from "@/lib/access/acting-workspace";
-import { managersShownHere, scimManagerHere, scimManagerRetry, scimUserHere } from "@/lib/scim-manager";
+import { managersShownHere, scimManagerAsked, scimManagerHere, scimManagerRetry, scimUserHere } from "@/lib/scim-manager";
 
 // Sentinel passwordHash for SCIM-provisioned users. Not a valid
 // bcrypt shape, so any bcrypt.compare() against it returns false —
@@ -166,7 +168,8 @@ export async function POST(req: NextRequest) {
   // The person's manager here (see the header): for a revive, whatever it
   // asks; for a new account, a manager to set (a clear asks nothing of a
   // person who has no line yet).
-  const asked = managerAskOfResource(body);
+  // Nothing asked unless the workspace lets its identity provider set Reports to (scimManagerAsked).
+  const asked = await scimManagerAsked(auth.organizationId, managerAskOfResource(body));
   const manager = asked?.kind === "set" ? asked : undefined;
 
   // Email — prefer the primary email if a list was sent, else

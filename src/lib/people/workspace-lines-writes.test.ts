@@ -433,7 +433,8 @@ describe("a restore at the anchor checks the lines of the seats it brings back e
     expect(dottedIn("pat", "a")).toEqual(["ada"]);
     // Each clear has its row in B, actor the system (nobody in B acted), in the restore's transaction.
     expect(bRows()).toEqual([
-      expect.objectContaining({ actorId: null, actorType: "system", description: "Restored Pat Ng with no manager: Dana Ng is no longer in the workspace", oldValue: { managerId: "dana" }, newValue: { managerId: null }, metadata: { onRestore: true, reason: "removed", withAccount: true } }),
+      // In words that say nobody in B acted: A restored her account (the final review, part B).
+      expect.objectContaining({ actorId: null, actorType: "system", description: "Pat Ng is back in this workspace after their account was restored, with no manager: Dana Ng is no longer in the workspace", oldValue: { managerId: "dana" }, newValue: { managerId: null }, metadata: { onRestore: true, reason: "removed", withAccount: true } }),
       expect.objectContaining({ actorId: null, actorType: "system", oldValue: { dottedManagerId: "ada" }, newValue: { dottedManagerId: null }, metadata: { onRestore: true, reason: "agent", withAccount: true } }),
     ]);
     expect(st.logs.filter((r) => r.organizationId === "b")).toEqual([]);
@@ -471,7 +472,7 @@ describe("a restore at the anchor checks the lines of the seats it brings back e
     expect((await patch("pat", { status: "ACTIVE" })).status).toBe(200);
     expect(seatOf("pat", "b")).toMatchObject({ status: "ACTIVE" });
     expect(lineIn("pat", "b")).toBeNull();
-    expect(bRows()[0]).toMatchObject({ actorType: "system", description: "Reactivated Pat Ng with no manager: the manager on their record doesn't work in this workspace", metadata: { onReactivate: true, reason: "elsewhere", withAccount: true } });
+    expect(bRows()[0]).toMatchObject({ actorType: "system", description: "Pat Ng is back in this workspace after their account was reactivated, with no manager: the manager on their record doesn't work in this workspace", metadata: { onReactivate: true, reason: "elsewhere", withAccount: true } });
   });
 
   it("A's identity provider reactivating Pat does the same, in its transaction", async () => {

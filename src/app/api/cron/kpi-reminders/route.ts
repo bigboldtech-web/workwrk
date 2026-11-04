@@ -26,12 +26,19 @@ async function handle(req: NextRequest) {
   const refused = cronRefusal(req);
   if (refused) return refused;
 
-  // Everyone who owes a score: any KPI record still PENDING or REJECTED.
-  const owed = await prisma.kPIRecord.groupBy({
-    by: ["userId"],
+  // Everyone who owes a score: any KPI record still PENDING or REJECTED, of
+  // the workspace the account is in, where the nudge's link opens
+  // (docs/plans/workspace-status-2.md, the final review, product M5): a
+  // record names no workspace of its own, and someone who joined another
+  // workspace by invitation holds its records too, which only that
+  // workspace's KRAs tab shows.
+  const owing = await prisma.kPIRecord.findMany({
     where: { status: { in: ["PENDING", "REJECTED"] } },
-    _count: { _all: true },
+    select: { userId: true, kpi: { select: { organizationId: true } }, user: { select: { organizationId: true } } },
   });
+  const counted = new Map<string, number>();
+  for (const r of owing) if (r.kpi.organizationId === r.user.organizationId) counted.set(r.userId, (counted.get(r.userId) ?? 0) + 1);
+  const owed = [...counted].map(([userId, n]) => ({ userId, _count: { _all: n } }));
 
   if (owed.length === 0) {
     return Response.json({ ran: true, at: new Date().toISOString(), usersOwed: 0, nudgesCreated: 0 });

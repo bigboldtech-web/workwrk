@@ -139,6 +139,31 @@ async function membershipSeatsHere(organizationId: string): Promise<MemberSeat[]
 }
 
 /**
+ * Whether Members' No manager filter lists this membership seat: not
+ * deactivated here, and no line naming someone who holds a seat here
+ * (`shown`, managersWithSeatHere), so it reads the row's own view.
+ */
+function listedWithNoManager(m: { status: string; managerId: string | null }, shown: { has(id: string): boolean }): boolean {
+  return m.status !== "INACTIVE" && !(m.managerId && shown.has(m.managerId));
+}
+
+/**
+ * How many people here through a membership Members' No manager filter
+ * lists: the same seats (membershipSeatsHere) and the same rule
+ * (listedWithNoManager). Settings > Structure's "No manager" count adds it
+ * to the people anchored here with no line, so the count and the list it
+ * links to agree (docs/plans/workspace-status-2.md, the final review,
+ * product L5): before, it counted membership lines that were empty only,
+ * and a line to someone removed here (copied on the deploy in any state)
+ * was listed but not counted.
+ */
+export async function membershipsListedWithNoManager(organizationId: string): Promise<number> {
+  const seats = await membershipSeatsHere(organizationId);
+  const shown = await managersWithSeatHere(organizationId, seats.map((m) => m.managerId));
+  return seats.filter((m) => listedWithNoManager(m, shown)).length;
+}
+
+/**
  * Whether anyone anchored here holds a membership row here that is not the
  * home row (they joined through a membership, then switched in): then their
  * "joined" here is that row's date, not the account's (joined-here.ts), and
@@ -229,7 +254,7 @@ export async function listMembers(
     // names, only while that manager holds a seat here, so No manager reads
     // the same view (the step 3 review L3; workspace-status-2 E1).
     const shown = await managersWithSeatHere(organizationId, seats.map((m) => m.managerId));
-    seats = seats.filter((m) => m.status !== "INACTIVE" && !(m.managerId && shown.has(m.managerId)));
+    seats = seats.filter((m) => listedWithNoManager(m, shown));
   }
   if (query.peopleTeam) common.push({ id: { in: [...team.ids] } });
   if (query.inactive30) {

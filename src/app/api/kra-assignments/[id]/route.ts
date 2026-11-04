@@ -31,12 +31,16 @@ export async function PUT(
     }
 
     const targetPeriod = period || existing.period;
+    // This workspace's weights only (docs/plans/workspace-status-2.md, the
+    // final review, product M5): another workspace's KRAs of theirs never
+    // count toward the total here.
     const otherAssignments = await prisma.kRAAssignment.findMany({
       where: {
         userId: existing.userId,
         period: targetPeriod,
         id: { not: id },
         status: { not: "ARCHIVED" },
+        kra: { organizationId: orgId },
       },
     });
     othersTotal = otherAssignments.reduce((sum, a) => sum + a.weightage, 0);

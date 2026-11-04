@@ -641,6 +641,30 @@ function EditShortcut({ enabled, onOpen }: { enabled: boolean; onOpen: () => voi
 
 /* ─────────────────────────── record card ─────────────────────────── */
 
+/**
+ * Whether the Overview tab lists their open work (Working on): for the
+ * people who read this workspace's profile of them, never on your own
+ * record (that is My Work) or an ended one. For someone here through a
+ * membership that is `profileData`, the rule GET /api/team/person-work
+ * serves by (docs/plans/workspace-status-2.md, the final review, product
+ * M1): My team's "+N" on their row lands here, and their work here is this
+ * workspace's own tasks. Pure; tested.
+ */
+export function workingOnShown(person: { id: string; deletedAt: string | null; access: Pick<Access, "relation" | "peopleData" | "profileData"> }): boolean {
+  return (person.access.profileData ?? person.access.peopleData) && person.access.relation !== "self" && !person.deletedAt;
+}
+
+/**
+ * Whether the record says their name, sign-in address, phone, photo and
+ * birthday are shared with another workspace: only to a viewer who could
+ * edit something of theirs here (the final review, product L2), since it
+ * refuses an edit, and a colleague who can change nothing has nothing to be
+ * refused. Never to the person themselves. Pure; tested.
+ */
+export function sharedIdentityShown(person: { profileHere?: boolean; access: Pick<Access, "relation" | "editable"> }): boolean {
+  return person.profileHere === false && person.access.relation !== "self" && person.access.editable.length > 0;
+}
+
 /** Fields beyond the personal ones (names, phone, date of birth). */
 const PLACEMENT_FIELDS = ["roleId", "departmentId", "officeId", "managerId", "weeklyCapacityHours", "workSchedule", "customFields"];
 
@@ -723,7 +747,7 @@ function RecordCard({ person, datePrefs, onEditPlacement }: { person: Person; da
         ) : null}
       </dl>
       {/* Once, never per field (docs/plans/workspace-status.md, the final review, product M3): since workspace-status-2 step 5 (E8) only their name, phone, photo and birthday are not this workspace's. */}
-      {person.profileHere === false && !self ? <p className="pb-1 pt-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}
+      {sharedIdentityShown(person) ? <p className="pb-1 pt-2 text-sm text-ink-2">{SHARED_IDENTITY_REFUSAL}</p> : null}
       {self && !selfPlacement ? <p className="pb-1 pt-2 text-sm text-ink-2">Ask your manager or the People team to change your job title, department, office or manager.</p> : null}
       {self && selfPlacement && onEditPlacement ? (
         <p className="pb-1 pt-2 text-sm text-ink-2">
@@ -786,7 +810,7 @@ function OverviewTab({ person }: { person: Person }) {
       </Section>
       {/* The people who manage this person see what they are working on
           (My team's "+2" lands here). Not on your own record: that is My Work. */}
-      {person.access.peopleData && person.access.relation !== "self" && !person.deletedAt ? <WorkingOnSection userId={person.id} /> : null}
+      {workingOnShown(person) ? <WorkingOnSection userId={person.id} /> : null}
       {person.access.peopleData && person.score ? (
         <Section title="Score">
           <div className="flex flex-col gap-3 rounded-lg border border-line bg-raised p-4">

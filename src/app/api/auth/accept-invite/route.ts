@@ -446,7 +446,8 @@ export async function POST(req: NextRequest) {
               }
             }
             await removeDottedHere(tx, inv.organizationId, stale.dotted.map((d) => ({ userId: me.id, managerId: d.managerId })));
-            const verb = held.removedAt ? "Restored" : "Reactivated";
+            // They came back themselves, by invitation: never "Restored" or
+            // "Reactivated" by themselves (the final review, product L7).
             const name = `${me.firstName ?? ""} ${me.lastName ?? ""}`.trim() || "Someone";
             for (const line of [...(stale.manager ? [stale.manager] : []), ...stale.dotted]) {
               const solid = line === stale.manager;
@@ -455,7 +456,7 @@ export async function POST(req: NextRequest) {
                   type: "reporting_line_changed",
                   actorId: me.id,
                   organizationId: inv.organizationId,
-                  description: clearedLineSentence(verb, name, line, solid),
+                  description: clearedLineSentence("Rejoined", name, line, solid),
                   targetType: "user",
                   targetId: me.id,
                   severity: "info",

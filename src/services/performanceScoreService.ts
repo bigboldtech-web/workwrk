@@ -38,12 +38,19 @@ async function getOrgWeights(organizationId: string): Promise<ScoreWeights> {
   return scoreWeightsOf(org?.settings);
 }
 
-async function calcKpiScore(userId: string): Promise<number | null> {
+/**
+ * The KPI and SOP parts read this workspace's KPIs and SOPs only
+ * (docs/plans/workspace-status-2.md, the final review, product M5): a KPI
+ * record or an SOP assignment names no workspace of its own, and someone who
+ * joined another workspace by invitation holds that workspace's too.
+ */
+async function calcKpiScore(userId: string, organizationId: string): Promise<number | null> {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
   const records = await prisma.kPIRecord.findMany({
     where: {
       userId,
+      kpi: { organizationId },
       score: { not: null },
       createdAt: { gte: ninetyDaysAgo },
     },
@@ -118,9 +125,9 @@ async function calcSelfRating(userId: string): Promise<number | null> {
   return Math.min(Math.round((avg / 5) * 100), 100);
 }
 
-async function calcSopCompliance(userId: string): Promise<number | null> {
+async function calcSopCompliance(userId: string, organizationId: string): Promise<number | null> {
   const assignments = await prisma.sOPAssignment.findMany({
-    where: { userId, status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    where: { userId, status: { in: ["IN_PROGRESS", "COMPLETED"] }, sop: { organizationId } },
     select: { stepsTotal: true, stepsCompleted: true, score: true },
   });
 
@@ -221,11 +228,11 @@ export async function calculatePerformanceScore(
 
   const [kpiScore, managerRating, peerRating, selfRating, sopCompliance, kudosBonus, okr, taskScore] =
     await Promise.all([
-      calcKpiScore(userId),
+      calcKpiScore(userId, organizationId),
       calcManagerRating(userId),
       calcPeerRating(userId),
       calcSelfRating(userId),
-      calcSopCompliance(userId),
+      calcSopCompliance(userId, organizationId),
       calcKudosBonus(userId),
       okrPartsFor(userId, period),
       calcTaskScore(userId),

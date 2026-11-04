@@ -101,7 +101,8 @@ export async function POST(req: NextRequest) {
         accessLevel: true,
         department: { select: { name: true } },
         role: { select: { title: true } },
-        _count: { select: { kraAssignments: true } },
+        // This workspace's KRAs only (docs/plans/workspace-status-2.md, the final review, product M5).
+        _count: { select: { kraAssignments: { where: { kra: { organizationId: orgId } } } } },
       },
       take: 100,
     }),

@@ -34,6 +34,15 @@ export const LOCKED_TX = { timeout: 10_000 } as const;
  */
 export const BATCH_TX = { timeout: 20_000, maxWait: 10_000 } as const;
 
+/**
+ * What a writer of people's departments or offices over a batch (the bulk
+ * Change department and Change office, a SCIM Group's member writes) is
+ * told when Postgres broke a deadlock: it takes no role lock and changes no
+ * line, so never "roles or reporting lines" (the final review of
+ * workspace-status-2, product L6). The same 503, code roles_busy.
+ */
+export const PEOPLE_BUSY = "Someone else is changing people in this workspace right now. Try again in a moment.";
+
 /** What a writer whose transaction ran out of its time is told (the same 503, code roles_busy). */
 export const TOOK_TOO_LONG = "That took too long, so nothing was saved. Try again in a moment.";
 
@@ -98,6 +107,17 @@ export function isTransactionTimeout(e: unknown, depth = 0): boolean {
  */
 export function retryAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
   return rolesBusyAnswer(e) ?? (isTransactionTimeout(e) ? { status: 503, error: TOOK_TOO_LONG, code: "roles_busy", retryAfterSeconds: 2 } : null);
+}
+
+/**
+ * retryAnswer for a writer of placements, which takes no role lock (see
+ * PEOPLE_BUSY): a deadlock says PEOPLE_BUSY; a busy lock and a transaction
+ * past its time are answered as retryAnswer answers them. Null for any
+ * other error.
+ */
+export function placementRetryAnswer(e: unknown): { status: 503; error: string; code: "roles_busy"; retryAfterSeconds: number } | null {
+  if (!isOrgRolesBusy(e) && isDeadlock(e)) return { status: 503, error: PEOPLE_BUSY, code: "roles_busy", retryAfterSeconds: 2 };
+  return retryAnswer(e);
 }
 
 /** Postgres' "canceling statement due to lock timeout" (55P03), however the driver adapter wraps it. */

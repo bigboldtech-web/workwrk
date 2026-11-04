@@ -60,9 +60,12 @@
 // account-wide, the join date has no write door for anyone, and Admin scopes
 // are read from the anchored row only (a known limit). A new job title
 // seeds its KRAs and SOPs for a seat anchored here only: a KRA or SOP
-// assignment names no workspace, so one made here for a membership person
-// shows and counts in the workspace their account is in (the step 5 review
-// M1); their job title is saved and the answer says so (ALIGNMENT_NOT_HERE).
+// assignment names no workspace, and this workspace's record of a
+// membership person reads none of theirs (the step 5 review M1, a known
+// limit); their job title is saved and, when it carries KRAs, the answer
+// says so (JOB_TITLE_SAVED_NOT_ASSIGNED, the final review L8). Every
+// reader of a person's KRAs and SOPs reads this workspace's only (the final
+// review M5), so rows another workspace made are never shown or counted here.
 // Before
 // step 5 only the role and the status were written, and every other field
 // was refused ("their details here are read-only"). The record answers
@@ -154,7 +157,7 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import {
   PERSON_FIELD_GROUP,
   PERSON_FIELD_LABEL,
-  ALIGNMENT_NOT_HERE,
+  JOB_TITLE_SAVED_NOT_ASSIGNED,
   SEAT_FIELDS,
   canWritePersonField,
   checkPersonPatch,
@@ -1410,16 +1413,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Moving into a (new) job title seeds its KRA and SOP defaults, for a
   // seat anchored here only, as the bulk update does (E7; the step 5 review
-  // M1): a KRA or SOP assignment names no workspace, so one made here for
-  // someone here through a membership would show and count in the workspace
-  // their account is in, and not on their record here. Their job title is
-  // saved, and the answer says plainly that nothing was assigned. Best
-  // effort, a seeding hiccup never fails the edit.
+  // M1): a KRA or SOP assignment names no workspace, and this workspace's
+  // record of a membership person reads none of theirs (a known limit), so
+  // their managers here would never see one made for them. Their job title is saved,
+  // and the answer says plainly that nothing was assigned. Best effort, a
+  // seeding hiccup never fails the edit.
   const roleBefore = target.seat.kind === "anchor" ? target.roleId : target.seat.placement?.roleId ?? null;
   let alignmentNote: { alignmentNote: string } | Record<string, never> = {};
   if (profile.roleId && profile.roleId !== roleBefore) {
-    if (target.seat.kind !== "anchor") alignmentNote = { alignmentNote: ALIGNMENT_NOT_HERE };
-    else {
+    // Said only for a job title that carries KRAs, as seedAlignmentForUser
+    // would seed (the final review, product L8): a title with none assigns
+    // nothing to anyone.
+    if (target.seat.kind !== "anchor") {
+      const carries = await prisma.kRA.count({ where: { roleId: profile.roleId, organizationId: ctx.organizationId } });
+      if (carries > 0) alignmentNote = { alignmentNote: JOB_TITLE_SAVED_NOT_ASSIGNED };
+    } else {
       try {
         await seedAlignmentForUser({ userId: id, roleId: profile.roleId, organizationId: ctx.organizationId, assignedBy: ctx.userId });
       } catch (e) {

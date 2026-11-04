@@ -77,8 +77,10 @@ export default async function WeeklyReviewPage({
     return r.status === "SUBMITTED" || r.status === "ACKNOWLEDGED";
   };
 
+  // This workspace's KRAs only, as the week row is (docs/plans/
+  // workspace-status-2.md, the final review, product M5).
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId: viewer.userId, status: "ACTIVE" },
+    where: { userId: viewer.userId, status: "ACTIVE", kra: { organizationId: viewer.organizationId } },
     include: {
       kra: {
         select: {

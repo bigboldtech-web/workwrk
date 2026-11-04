@@ -55,6 +55,16 @@
 // a periodic push of an unchanged profile never queues on the workspace's
 // role lock. A real change is checked again under the lock.
 //
+// ONLY WHERE THE WORKSPACE TURNED IT ON (the final review, product H1).
+// Security > Provisioning's "Let your identity provider set Reports to"
+// (org-policy.ts idpSetsReportsToOf), off by default: until an Admin turns
+// it on, every route reads the push's manager through scimManagerAsked,
+// which answers nothing asked, so POST, PUT and PATCH write nothing of the
+// line and log nothing about it, and GET still names the line here. Why
+// off: Entra's default mapping sends every person's manager, and a restart
+// of its provisioning would replace every Reports to Admins set here, which
+// they never chose to hand to the provider.
+//
 // A written line is logged as reporting_line_changed (actor the identity
 // provider) and the person's open reviews follow it in the same
 // transaction, to the first live Owner when no person acted, as SCIM's
@@ -78,6 +88,7 @@ import { seatRefOf, writeLineHere } from "@/lib/access/seat-writes";
 import { seatIsLive } from "@/lib/access/workspace-status";
 import { followReportingLine } from "@/lib/performance/review-cycle.server";
 import { userToScim, type ScimManagerAsk, type ScimUser } from "@/lib/scim-mappers";
+import { idpSetsReportsToOf } from "@/lib/settings/org-policy";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | typeof prisma;
@@ -118,7 +129,10 @@ function fullName(u: { firstName: string | null; lastName: string | null } | nul
 function refusalWords(why: ScimManagerRefusal, person: string, manager: string): string {
   switch (why) {
     case "not_here":
-      return "that manager isn't anyone who works in this workspace";
+      // True a day later too: a manager provisioned after their report is
+      // here then, so it says what was sent, never who the manager is (the
+      // final review, product M4).
+      return "nobody who works in this workspace has the id or sign-in address it sent";
     case "agent":
       return `${manager} is an Agent here, and an Agent can't be anyone's manager`;
     case "inactive":
@@ -130,6 +144,18 @@ function refusalWords(why: ScimManagerRefusal, person: string, manager: string):
     case "removed":
       return `${person} was removed from this workspace`;
   }
+}
+
+/**
+ * What the push asks of the person's manager here, as this workspace takes
+ * it (see the header): the ask itself while the workspace lets its identity
+ * provider set Reports to, else nothing asked. One read of the workspace's
+ * settings, and only when the push names a manager at all.
+ */
+export async function scimManagerAsked(organizationId: string, ask: ScimManagerAsk | undefined, db: Db = prisma): Promise<ScimManagerAsk | undefined> {
+  if (ask === undefined) return undefined;
+  const org = await db.organization.findUnique({ where: { id: organizationId }, select: { settings: true } });
+  return idpSetsReportsToOf(org?.settings) ? ask : undefined;
 }
 
 /**
@@ -206,7 +232,10 @@ export async function scimManagerHere(tx: Tx, organizationId: string, userId: st
     const named = refusal === "agent" || refusal === "inactive" || refusal === "loop";
     const manager = named && managerId ? fullName(await tx.user.findUnique({ where: { id: managerId }, select: { firstName: true, lastName: true } }), "that person") : "";
     // A refused clear says it was not cleared (the step 7 review L8).
-    const said = `The identity provider's manager for ${person} was not ${ask.kind === "clear" ? "cleared" : "set"}: ${refusalWords(refusal, person, manager)}. Their manager here is unchanged.`;
+    // A value naming nobody here is never tried again on its own, so the
+    // row says what fixes it (the final review, product M4).
+    const again = refusal === "not_here" ? " If their manager is provisioned later, send this person again." : "";
+    const said = `The identity provider's manager for ${person} was not ${ask.kind === "clear" ? "cleared" : "set"}: ${refusalWords(refusal, person, manager)}. Their manager here is unchanged.${again}`;
     await logRefusal(tx, organizationId, userId, { asked: ask.kind === "set" ? ask.value.slice(0, ASKED_KEPT) : null, reason: refusal, before, said });
     return { outcome: "refused", why: refusal, said };
   }
@@ -276,6 +305,10 @@ async function logRefusal(
       targetId: userId,
       severity: "warning",
       oldValue: { managerId: r.before },
+      // What the provider sent, in the Audit drawer's Diff ("Manager asked"):
+      // the provider's own value, so its admin can see the mapping at work
+      // (the final review, product M4). Null for a refused clear.
+      newValue: { managerAsked: r.asked },
       metadata: { scim: true, asked: r.asked, reason: r.reason },
     },
   });
