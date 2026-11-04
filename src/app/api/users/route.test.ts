@@ -72,9 +72,11 @@ vi.mock("@/lib/prisma", () => {
     // Before step 2 alreadyInOrg asked for any membership row here.
     findFirst: async (a: { where: { user: { email: { equals: string } } } }) =>
       st.memberEmails.has(a.where.user.email.equals) || st.endedMemberEmails.has(a.where.user.email.equals) ? { id: "mem" } : null,
-    // alreadyInOrg's read: the seats here of accounts with the address, with this workspace's status on each.
-    findMany: async (a: { where: { user: { email: { equals: string } } } }) => {
-      const e = a.where.user.email.equals;
+    // alreadyInOrg's read: the seats here of accounts with the address, with this workspace's status on each;
+    // or, by person, a manager's seat here (managerCandidateIn reads it with seatsHeldFor, workspace-status-2 E4).
+    findMany: async (a: { where: { user?: { email: { equals: string } }; userId?: { in: string[] } } }) => {
+      if (a.where.userId) return a.where.userId.in.filter((id) => st.memberships[id]).map((userId) => ({ userId, role: st.memberships[userId], status: "ACTIVE", removedAt: null, managerId: null }));
+      const e = a.where.user!.email.equals;
       if (st.memberEmails.has(e)) return [{ status: "ACTIVE", removedAt: null }];
       if (st.endedMemberEmails.has(e)) return [{ status: "INACTIVE", removedAt: null }];
       return [];

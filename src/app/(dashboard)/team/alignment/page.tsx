@@ -20,8 +20,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { gatePage } from "@/lib/access/gate";
 import { getTeamAlignment } from "@/lib/team-alignment";
-import { prisma } from "@/lib/prisma";
 import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
+import { reportsHereOf, workspacePeopleLines } from "@/lib/access/acting-workspace";
+import { personHere } from "@/lib/access/seated-here";
 import { AlignmentView } from "@/components/team/alignment-view";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,8 @@ export default async function TeamAlignmentPage({ searchParams }: { searchParams
   if (managerParam && managerParam !== u.id) {
     // A manager outside the viewer's chain is not discoverable.
     if (!mayActOnKpisOf(ctx, managerParam)) notFound();
-    const m = await prisma.user.findFirst({ where: { id: managerParam, organizationId: u.organizationId, deletedAt: null }, select: { firstName: true, lastName: true, email: true } });
+    // A manager here through a membership leads a team here too (E1): read at the seat here, not removed.
+    const m = await personHere(u.organizationId, managerParam, "kept");
     if (!m) notFound();
     drill = { name: `${m.firstName ?? ""} ${m.lastName ?? ""}`.trim() || m.email };
     managerId = managerParam;
@@ -57,15 +59,30 @@ export default async function TeamAlignmentPage({ searchParams }: { searchParams
   // direct reports has reports of their own.
   // For the People team and Admin, Sub-teams reads the top of the org, so
   // the pill applies when someone with no manager manages people.
-  const hasSubTeams = !drill && (await prisma.user.count({
-    where: orgWide
-      ? { organizationId: u.organizationId, deletedAt: null, managerId: null, directReports: { some: { deletedAt: null } } }
-      : { organizationId: u.organizationId, deletedAt: null, manager: { managerId: u.id, deletedAt: null } },
-  })) > 0;
+  // Both read THIS workspace's lines (docs/plans/workspace-status-2.md E1,
+  // step 2): the account's line of people anchored here, the membership's
+  // of people here through one. Before, the people anchored here alone, by
+  // their account's line and the cross-workspace directReports relation.
+  const hasSubTeams = !drill && (await hasSubTeamsHere(u.organizationId, u.id, orgWide));
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-raised">
       <AlignmentView people={data.members} hasSubTeams={hasSubTeams} drill={drill} />
     </div>
   );
+}
+
+/**
+ * Does Sub-teams apply? Org-wide: someone here with no manager here manages
+ * someone here. Otherwise: one of the viewer's reports here has reports here.
+ * Removed people are never counted, a deactivated one is (as before).
+ */
+async function hasSubTeamsHere(organizationId: string, viewerId: string, orgWide: boolean): Promise<boolean> {
+  if (orgWide) {
+    const lines = new Map((await workspacePeopleLines(organizationId)).map((p) => [p.id, p.managerId]));
+    for (const managerId of lines.values()) if (managerId && lines.get(managerId) === null) return true;
+    return false;
+  }
+  const directs = (await reportsHereOf(organizationId, [viewerId])).map((r) => r.id).filter((id) => id !== viewerId);
+  return directs.length > 0 && (await reportsHereOf(organizationId, directs)).some((r) => r.id !== r.managerId);
 }

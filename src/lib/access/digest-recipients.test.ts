@@ -10,7 +10,7 @@ import { legacyLevelOfRow, legacyLevelRow } from "./test-fixtures";
 const st = vi.hoisted(() => ({
   effective: new Map<string, string | null>(),
   users: [] as Array<Record<string, unknown>>,
-  memberships: [] as Array<{ userId: string; organizationId: string; role: string }>,
+  memberships: [] as Array<{ userId: string; organizationId: string; role: string; managerId?: string | null }>,
   rows: null as unknown,
   grants: new Map<string, unknown>(),
   loads: 0,
@@ -22,7 +22,10 @@ const st = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("./manager-lines", () => ({
+// effectiveManagersOf is scripted; the walk past Agents it shares with the
+// member read (managersPastAgents) is the real one, over the rows below.
+vi.mock("./manager-lines", async () => ({
+  ...(await vi.importActual<object>("./manager-lines")),
   effectiveManagersOf: async (_org: string, ids: readonly string[]) => new Map(ids.filter((id) => st.effective.has(id)).map((id) => [id, st.effective.get(id) ?? null])),
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -142,22 +145,27 @@ describe("digestManagersOf, never a Guest", () => {
 describe("digestManagersOf, for someone who works here through a membership", () => {
   it("names their stored manager here, walked at the tier held here: never themselves, never someone with no level here, never an Agent", async () => {
     st.effective = new Map(); // nobody anchored here among them
-    const away = { organizationId: "partner" };
+    // Each line here is on the membership (docs/plans/workspace-status-2.md
+    // E1); every account names "pbo", their manager in the partner
+    // workspace, which is never read here.
+    const away = { organizationId: "partner", managerId: "pbo" };
     st.users = [
-      user("dana", "EMPLOYEE", { ...away, managerId: "sam" }), // switched to the partner workspace once
+      user("dana", "EMPLOYEE", away), // switched to the partner workspace once
       user("sam", "MANAGER", { managerId: null }),
-      user("pia", "EMPLOYEE", { ...away, managerId: "agt" }),
+      user("pia", "EMPLOYEE", away),
       user("agt", "AGENT", { managerId: "sam" }), // an Agent here from before rule 6
-      user("ida", "EMPLOYEE", { ...away, managerId: "agt2" }),
-      user("agt2", "MANAGER", { ...away, managerId: "sam" }), // anchored elsewhere, an Agent HERE by membership
-      user("sel", "EMPLOYEE", { ...away, managerId: "sel" }), // a stored self-line
-      user("fay", "EMPLOYEE", { ...away, managerId: "far" }),
+      user("ida", "EMPLOYEE", away),
+      user("agt2", "MANAGER", away), // anchored elsewhere, an Agent HERE by membership
+      user("sel", "EMPLOYEE", away), // a stored self-line here
+      user("fay", "EMPLOYEE", away),
       user("far", "MANAGER", { ...away, managerId: null }), // no level here
-      user("gil", "EMPLOYEE", { ...away, managerId: "sam", status: "INACTIVE" }), // deactivated
-      user("nom", "EMPLOYEE", { ...away, managerId: "sam" }), // no membership here
+      user("gil", "EMPLOYEE", { ...away, status: "INACTIVE" }), // deactivated
+      user("nom", "EMPLOYEE", away), // no membership here
+      user("pbo", "MANAGER", { organizationId: "partner", managerId: null }), // the partner's manager, no level here
     ];
-    st.memberships = ["dana", "pia", "ida", "sel", "fay", "gil"].map((userId) => ({ userId, organizationId: ORG, role: "EMPLOYEE" }));
-    st.memberships.push({ userId: "agt2", organizationId: ORG, role: "AGENT" });
+    const lineHere: Record<string, string> = { dana: "sam", pia: "agt", ida: "agt2", sel: "sel", fay: "far", gil: "sam" };
+    st.memberships = Object.entries(lineHere).map(([userId, managerId]) => ({ userId, organizationId: ORG, role: "EMPLOYEE", managerId }));
+    st.memberships.push({ userId: "agt2", organizationId: ORG, role: "AGENT", managerId: "sam" });
     const got = await digestManagersOf(ORG, ["dana", "pia", "ida", "sel", "fay", "gil", "nom"]);
     expect([...got].map(([p, m]) => [p, m.id]).sort()).toEqual([["dana", "sam"], ["ida", "sam"], ["pia", "sam"]]);
     expect(got.get("dana")?.viewer).toMatchObject({ userId: "sam", isAgent: false, denied: false });

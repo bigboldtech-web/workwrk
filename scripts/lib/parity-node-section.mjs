@@ -25,7 +25,7 @@ const SETTINGS_PAGES = ["overview", "identity", "locale", "apps", "members", "st
 
 export async function runNodeSection({ root, prisma, orgs, all, perKind, viewersPerOrg, log }) {
   const imp = (p) => import(pathToFileURL(join(root, p)).href);
-  const [engine, viewerMod, orgRole, nodeAccess, parity, itemGate, sopAccess, goalAudience, legacySettings, flags, legacyLevels, permissions, matrixRules, accessSettings, resolve] = await Promise.all([
+  const [engine, viewerMod, orgRole, nodeAccess, parity, itemGate, sopAccess, goalAudience, legacySettings, flags, legacyLevels, permissions, matrixRules, accessSettings, resolve, lines] = await Promise.all([
     imp("src/lib/access/index.ts"),
     imp("src/lib/access/viewer.ts"),
     imp("src/lib/access/org-role.ts"),
@@ -41,6 +41,7 @@ export async function runNodeSection({ root, prisma, orgs, all, perKind, viewers
     imp("src/lib/access/matrix-rules.ts"),
     imp("src/lib/access/settings.ts"),
     imp("src/lib/access/resolve.ts"),
+    imp("src/lib/access/acting-workspace.ts"),
   ]);
   const flagState = { resolver: flags.accessV2Resolver(), tables: flags.accessV2Tables() };
   const cases = [];
@@ -49,11 +50,15 @@ export async function runNodeSection({ root, prisma, orgs, all, perKind, viewers
   for (const organizationId of orgs) {
     const users = await prisma.user.findMany({
       where: { organizationId, deletedAt: null },
-      select: { id: true, accessLevel: true, status: true, _count: { select: { directReports: true } } },
+      select: { id: true, accessLevel: true, status: true },
       orderBy: [{ accessLevel: "asc" }, { id: "asc" }],
     });
     const viewers = all ? users : pickPerLevel(users, viewersPerOrg);
     if (viewers.length === 0) continue;
+    // Who has a report IN THIS WORKSPACE (docs/plans/workspace-status-2.md
+    // E1, step 2): reportsHereOf's two halves, never the cross-workspace
+    // directReports count.
+    const leads = new Set((await lines.reportsHereOf(organizationId, viewers.map((u) => u.id), prisma)).filter((r) => r.id !== r.managerId).map((r) => r.managerId));
 
     const take = { orderBy: { id: "asc" }, take: perKind };
     const where = { organizationId };
@@ -94,7 +99,7 @@ export async function runNodeSection({ root, prisma, orgs, all, perKind, viewers
         orgAdmin: legacyLevels.legacyIsAdminLevel(level),
         peopleTeam: !!viewer.peopleTeam,
         agent: level === "AGENT",
-        hasReports: u._count.directReports > 0,
+        hasReports: leads.has(u.id),
         status: u.status ?? "ACTIVE",
       };
       const session = { user: { id: u.id, organizationId, accessLevel: level } };

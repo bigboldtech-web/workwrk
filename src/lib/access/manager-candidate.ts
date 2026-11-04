@@ -14,6 +14,14 @@
 // (docs-found fixes batch 5). "Removed" is a removed account (deletedAt) or
 // someone who holds no level here.
 //
+// THE SEAT HERE (docs/plans/workspace-status-2.md E4, E5, step 2): a
+// manager's state and a line's next step are read at the seat each person
+// holds here (seatsHeldFor). "Deactivated" is the seat's, so Rita, whom B
+// deactivated through her membership, is refused in B as deactivated, never
+// as "not in this workspace"; and the loop walk (lineAbove) climbs THIS
+// workspace's lines, the account's line where someone is anchored here and
+// the membership's otherwise, so B's loop check never reads A's lines.
+//
 // A restore or a reactivation clears only lines this workspace owns
 // (batch 6): User.managerId and UserDottedLine are one row each, read by
 // every workspace the person belongs to, so a line to someone who holds no
@@ -25,7 +33,7 @@
 import type { AccessLevel, Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf } from "./org-role";
-import { levelHeldIn, levelsHeldFor, levelsHeldIn, lineKey, lineStandingsElsewhere } from "./acting-workspace";
+import { levelsHeldFor, levelsHeldIn, lineKey, lineStandingsElsewhere, seatsHeldFor, type HeldSeat } from "./acting-workspace";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -38,6 +46,12 @@ export type ManagerCandidate = "ok" | "not_found" | "agent_cannot_manage" | "ina
  * `live` also refuses a deactivated person ("inactive"): someone joining or
  * coming back never lands under a manager who has left, and a deactivated
  * person holds no reports (invariant 13, pendingHandover).
+ *
+ * At the seat here (E4): a seat this workspace removed, or none, is
+ * "not_found"; a seat it deactivated, through a membership as when anchored
+ * here, or an account ended where it is anchored, is "inactive". Before, a
+ * manager deactivated here through a membership read as "not in this
+ * workspace", since only their account's status was read.
  */
 export async function managerCandidateIn(
   organizationId: string,
@@ -45,13 +59,13 @@ export async function managerCandidateIn(
   opts: { db?: Db; live?: boolean } = {},
 ): Promise<ManagerCandidate> {
   const db = opts.db ?? prisma;
-  const m = await db.user.findFirst({ where: { id: managerId, deletedAt: null }, select: { organizationId: true, accessLevel: true, status: true } });
+  const m = await db.user.findFirst({ where: { id: managerId, deletedAt: null }, select: { organizationId: true, accessLevel: true, status: true, managerId: true } });
   // In this workspace at the tier held here: a manager who switched to
   // another workspace still manages their people here (batch 5).
-  const level = m ? await levelHeldIn(managerId, organizationId, m, db) : null;
-  if (!m || level === null) return "not_found";
-  if (isAgentOf(level)) return "agent_cannot_manage";
-  if (opts.live && m.status === "INACTIVE") return "inactive";
+  const seat = m ? (await seatsHeldFor(organizationId, [{ ...m, id: managerId }], db)).get(managerId) : undefined;
+  if (!m || !seat) return "not_found";
+  if (isAgentOf(seat.level)) return "agent_cannot_manage";
+  if (opts.live && (seat.deactivated || m.status === "INACTIVE")) return "inactive";
   return "ok";
 }
 
@@ -76,21 +90,32 @@ const LOOP_WALK_CAP = 64;
  * `managerId` and everyone above them on the solid line, as the lines stand
  * in `db` now: one small read per step, inside the caller's transaction.
  * Making anyone in this set report to `managerId` would close a loop.
+ *
+ * THIS WORKSPACE'S LINES (E5): each step reads the line the person's seat
+ * here holds (seatsHeldFor), so the locked check walks exactly the graph
+ * the check before the lock walks (person-access.server.ts managerMapFor,
+ * acting-workspace.ts workspacePeopleLines): the account's line for someone
+ * anchored here, the membership's for anyone else. Before, it climbed the
+ * account's line, which for a membership person is another workspace's: a
+ * B edit was refused as a loop through Pat's A line, and a loop through her
+ * B line went unseen.
  */
 export async function lineAbove(organizationId: string, managerId: string, db: Db = prisma): Promise<Set<string>> {
   const seen = new Set<string>();
   let cursor: string | null = managerId;
   while (cursor && !seen.has(cursor) && seen.size < LOOP_WALK_CAP) {
     seen.add(cursor);
-    const row: { managerId: string | null; organizationId: string; accessLevel: AccessLevel } | null = await db.user.findFirst({
-      where: { id: cursor, deletedAt: null },
-      select: { managerId: true, organizationId: true, accessLevel: true },
+    const id: string = cursor;
+    const row: { managerId: string | null; organizationId: string; accessLevel: AccessLevel; status: string } | null = await db.user.findFirst({
+      where: { id, deletedAt: null },
+      select: { managerId: true, organizationId: true, accessLevel: true, status: true },
     });
-    // The line goes on through anyone who holds a level here (batch 5), and
+    // The line goes on through anyone who holds a seat here (batch 5), and
     // stops where it leaves the workspace. Through someone deactivated here
     // too, by their membership as when anchored here (kept seats, step 1
     // review M2): a loop through them is still a loop.
-    cursor = row && (await levelHeldIn(cursor, organizationId, row, db, { keptSeats: true })) !== null ? row.managerId : null;
+    const seat: HeldSeat | undefined = row ? (await seatsHeldFor(organizationId, [{ ...row, id }], db)).get(id) : undefined;
+    cursor = seat ? seat.managerId : null;
   }
   return seen;
 }

@@ -24,10 +24,12 @@ beforeEach(() => {
   person("mia", "a", "EMPLOYEE");
   db.seed("organizationMembership", { id: "m-mia-b", userId: "mia", organizationId: "b", role: "MANAGER" });
   person("pat", "b", "EMPLOYEE", "mia");
-  // Sam manages in B, anchored there; Rae reports to him and works in B through a membership.
+  // Sam manages in B, anchored there; Rae reports to him and works in B
+  // through a membership, whose line names him (workspace-status-2 E1). In A
+  // Mia leads her: her account's line, never read in B.
   person("sam", "b", "MANAGER");
-  person("rae", "a", "EMPLOYEE", "sam");
-  db.seed("organizationMembership", { id: "m-rae-b", userId: "rae", organizationId: "b", role: "EMPLOYEE" });
+  person("rae", "a", "EMPLOYEE", "mia");
+  db.seed("organizationMembership", { id: "m-rae-b", userId: "rae", organizationId: "b", role: "EMPLOYEE", managerId: "sam" });
 });
 
 describe("the digest manager reads the seat here (D12)", () => {

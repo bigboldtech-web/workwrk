@@ -18,7 +18,13 @@ vi.mock("@/lib/auth", () => ({ authOptions: {} }));
 vi.mock("@/lib/prisma", async () => ({ prisma: (await import("@/lib/item-test-db")).itemTestPrisma }));
 vi.mock("@/lib/reporting-line", () => ({ getEffectiveReportTree: async () => ["u-mgr", "u-rep"] }));
 vi.mock("@/lib/access/manager-lines", () => ({ managesNobody: async () => false }));
-vi.mock("@/lib/access/acting-workspace", () => ({ inWorkspaceWhere: () => ({}) }));
+// Who reports to the viewer here (the Team pill, workspace-status-2 step 2), and what it was asked.
+const pill = vi.hoisted(() => ({ reports: [] as unknown[], asked: [] as unknown[][] }));
+const U_REP_HERE = { id: "u-rep", managerId: "u-mgr", kind: "anchor", level: "EMPLOYEE", deactivated: false };
+vi.mock("@/lib/access/acting-workspace", () => ({
+  inWorkspaceWhere: () => ({}),
+  reportsHereOf: async (...args: unknown[]) => { pill.asked.push(args.slice(0, 2)); return pill.reports; },
+}));
 vi.mock("@/lib/assignee-lift", () => ({ liftWithheldListIds: async () => new Set() }));
 const readable = new Set<string>();
 vi.mock("@/lib/access/node-access", () => ({
@@ -37,6 +43,8 @@ function task(id: string, boardId: string, ownerId: string, metadata: unknown = 
 }
 
 beforeEach(() => {
+  pill.reports = [U_REP_HERE];
+  pill.asked = [];
   readable.clear();
   db = installItemTestDb(itemTestDb());
   db.prisma.user = { findFirst: async () => ({ id: "u-rep" }), findMany: async () => [] };
@@ -75,5 +83,23 @@ describe("the team calendar's tasks", () => {
   it("does not narrow My calendar", async () => {
     task("t-mine", "b-private", "u-mgr");
     expect((await events("my")).map((e) => e.id)).toEqual(["item:t-mine"]);
+  });
+});
+
+describe("the Team pill (docs/plans/workspace-status-2.md step 2)", () => {
+  const pillFor = async () => {
+    const res = await GET(new Request("http://x/api/calendar/events?calendar=my&kinds=task&from=2026-09-14T00:00:00Z&to=2026-09-21T00:00:00Z"));
+    return ((await res.json()) as { hasTeam: boolean }).hasTeam;
+  };
+
+  it("asks who reports to the viewer in this workspace, by the lines here", async () => {
+    // Nobody reports to the viewer here. Before: the pill read every
+    // account's line (prisma.user.findFirst by managerId, which this store
+    // answers with u-rep), so a report in another workspace gave a Team pill here.
+    pill.reports = [];
+    expect(await pillFor()).toBe(false);
+    expect(pill.asked).toContainEqual(["org-1", ["u-mgr"]]);
+    pill.reports = [U_REP_HERE];
+    expect(await pillFor()).toBe(true);
   });
 });

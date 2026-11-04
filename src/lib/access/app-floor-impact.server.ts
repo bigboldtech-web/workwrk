@@ -2,7 +2,9 @@
 // live person of the workspace with the facts keepsApp reads. Server-only.
 
 import { prisma } from "@/lib/prisma";
+import { workspaceDottedLines } from "./acting-workspace";
 import { loadOrgFacts } from "./facts";
+import { membershipHereWhere } from "./seated-here";
 import { isAgentOf, orgRoleOf, isSeededPeopleTeam } from "./org-role";
 import { accessV2Tables } from "./flags";
 import { tiersOfLevel } from "./viewer-tiers";
@@ -35,21 +37,29 @@ async function guestsHolding(organizationId: string, guestIds: string[], appKey:
 }
 
 export async function loadImpactPeople(organizationId: string, appKey?: string | null): Promise<ImpactPerson[]> {
-  const [users, org, dotted] = await Promise.all([
+  const [users, org, members, dotted] = await Promise.all([
     prisma.user.findMany({
       where: { organizationId, deletedAt: null, status: "ACTIVE" },
       select: { id: true, firstName: true, lastName: true, email: true, accessLevel: true, managerId: true },
       take: 20000,
     }),
     loadOrgFacts(organizationId),
-    prisma.userDottedLine.findMany({ where: { user: { organizationId, deletedAt: null } }, select: { managerId: true } }),
+    // THIS WORKSPACE'S LINES (docs/plans/workspace-status-2.md E1, E2, step
+    // 2): the people anchored here by their account's line (above), the
+    // people here through a membership by its line and the level it holds
+    // here, and this workspace's dotted lines from anyone not removed here.
+    // Before, every dotted line of a person anchored here counted, whichever
+    // workspace it belonged to, and a membership person's line here none.
+    prisma.organizationMembership.findMany({ where: membershipHereWhere(organizationId, "active"), select: { userId: true, role: true, managerId: true }, take: 20000 }),
+    workspaceDottedLines(organizationId),
   ]);
   // An Agent is nobody's manager (AGENT_TIER_BLURB), whatever lines stored
   // before rule 6 still name them: the engine's viewer finds no reports
-  // below one (manager-lines.ts), so neither does this preview.
-  const agents = new Set(users.filter((u) => isAgentOf(u.accessLevel)).map((u) => u.id));
+  // below one (manager-lines.ts), so neither does this preview. The tier is
+  // the one held here, a membership's role included.
+  const agents = new Set([...users.filter((u) => isAgentOf(u.accessLevel)).map((u) => u.id), ...members.filter((m) => isAgentOf(m.role)).map((m) => m.userId)]);
   const managers = new Set<string>();
-  for (const u of users) if (u.managerId && !agents.has(u.managerId)) managers.add(u.managerId);
+  for (const line of [...users, ...members]) if (line.managerId && !agents.has(line.managerId)) managers.add(line.managerId);
   for (const d of dotted) if (!agents.has(d.managerId)) managers.add(d.managerId);
   // The People team the engine reads (resolve.ts isPeopleTeam, the same
   // union boot ships as viewer.peopleTeam): the configured list, plus an

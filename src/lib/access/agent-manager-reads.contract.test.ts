@@ -47,7 +47,8 @@ describe("the report trees and the facts read from them", () => {
   it("the shell's has-reports, the goal rules and the app-floor preview say the same", () => {
     expect(between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(")).toContain("if (await managesNobody(userId, organizationId)) return false;");
     expect(read("src/lib/alignment-scope.ts")).toContain("manager || isAgentOf(level)\n      ? Promise.resolve(0)");
-    expect(read("src/lib/access/app-floor-impact.server.ts")).toContain("if (u.managerId && !agents.has(u.managerId)) managers.add(u.managerId);");
+    // workspace-status-2 step 2: the lines here, of both halves, at the tier held here.
+    expect(read("src/lib/access/app-floor-impact.server.ts")).toContain("for (const line of [...users, ...members]) if (line.managerId && !agents.has(line.managerId)) managers.add(line.managerId);");
   });
 });
 
@@ -185,11 +186,22 @@ describe("batch 4: the tier held in the workspace whose lines are walked", () =>
     // workspace (it named none), root and reports, and so does the team walk
     // below its root (anchored here only, before).
     expect(rl).toContain("const [agent, ids] = await Promise.all([rootManagesNobody(rootUserId, scope), solidTreeRows(rootUserId, scope.organizationId, opts)]);");
+    // workspace-status-2 step 2: the root by its seat here, and each step
+    // down by the line HERE, both halves joined to the recursive name by a
+    // LATERAL subquery (the anchored by their account's line, the
+    // memberships by theirs), never the account line of everyone.
     const tree = between(rl, "async function solidTreeRows(", "SELECT DISTINCT");
-    expect(tree.split(`OR EXISTS (SELECT 1 FROM "OrganizationMembership" m`).length).toBe(3);
+    expect(tree.split(`OR EXISTS (SELECT 1 FROM "OrganizationMembership" m`).length).toBe(2);
+    expect(tree).toContain("CROSS JOIN LATERAL (");
+    expect(tree).toContain(`WHERE u."managerId" = t."id" AND u."organizationId" = \${organizationId} AND u."deletedAt" IS NULL`);
+    expect(tree).toContain(`WHERE m."managerId" = t."id" AND m."organizationId" = \${organizationId} AND \${keptSeatSql("m")}`);
+    expect(tree).not.toContain(`JOIN tree t ON u."managerId"`);
     const teamWalk = between(read("src/lib/team.ts"), "UNION", "SELECT id FROM team");
-    expect(teamWalk).toContain(`OR EXISTS (SELECT 1 FROM "OrganizationMembership" m`);
-    expect(teamWalk).not.toContain(`WHERE u."organizationId" = \${organizationId}`);
+    expect(teamWalk).toContain("CROSS JOIN LATERAL (");
+    expect(teamWalk).toContain(`WHERE u."managerId" = t.id AND u."organizationId" = \${organizationId} AND u."deletedAt" IS NULL`);
+    expect(teamWalk).toContain(`WHERE m."managerId" = t.id AND m."organizationId" = \${organizationId} AND \${keptSeatSql("m")}`);
+    expect(teamWalk).toContain(`AND u."organizationId" <> \${organizationId} AND u."deletedAt" IS NULL`);
+    expect(teamWalk).not.toContain(`INNER JOIN team t ON u."managerId"`);
     const team = read("src/lib/team.ts");
     expect(team).toContain('OR EXISTS (SELECT 1 FROM "OrganizationMembership" m');
     expect(team).toContain(": managesNobody(rootUserId, organizationId);");
@@ -317,13 +329,16 @@ describe("batch 4: every writer that waits on the role lock answers busy, never 
 describe("batch 5: the people a line counts, and the bounded seat lock", () => {
   it("the Team pill and the Teams badge count live reports of this workspace only", () => {
     const counts = between(read("src/lib/people/teams-counts.ts"), "export async function hasReportsFor(", "/** Candor sessions");
-    // Before: every workspace's lines, and removed dotted reports.
-    expect(counts).toContain("prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } })");
-    expect(counts).toContain("prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } })");
+    // Before: every workspace's lines, and removed dotted reports. Since
+    // workspace-status-2 step 2: the solid reports by the line HERE
+    // (reportsHereOf, both halves), the dotted ones this workspace's rows.
+    expect(counts).toContain("reportsHereOf(organizationId, [userId]),");
+    expect(counts).toContain("return solid.some((r) => r.id !== userId) || dotted > 0;");
+    expect(counts).toContain("prisma.userDottedLine.count({ where: { organizationId, managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } })");
     const cal = read("src/app/api/calendar/events/route.ts");
     // Before: a removed report answered the Team pill, and a dotted line from any workspace.
-    expect(cal).toContain("prisma.user.findFirst({ where: { managerId: viewerId, id: { not: viewerId }, deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) }, select: { id: true } })");
-    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } })");
+    expect(cal).toContain("reportsHereOf(orgId, [viewerId]).then((rows) => rows.some((r) => r.id !== viewerId)),");
+    expect(cal).toContain("prisma.userDottedLine.findFirst({ where: { organizationId: orgId, managerId: viewerId, userId: { not: viewerId }, user: { deletedAt: null, ...inWorkspaceWhere(orgId, { deactivatedToo: true }) } }, select: { userId: true } })");
   });
 
   it("My team, Who can see this record, the dotted-line loop walk and the import read people who work here", () => {

@@ -7,12 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const orgSettings: { access?: unknown } = {};
 const chains: Record<string, string[]> = {};
 const directReports: Record<string, number> = {};
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", async () => {
+  const { legacyLevelRow } = await import("./access/test-fixtures");
+  return { prisma: {
     organization: { findUnique: async () => ({ settings: orgSettings }) },
-    user: { count: async ({ where }: { where: { managerId: string } }) => directReports[where.managerId] ?? 0 },
-  },
-}));
+    // Who reports to the caller here (reportsHereOf, workspace-status-2 step 2): the anchored half by
+    // their account's line; nobody here through a membership.
+    user: {
+      findMany: async ({ where }: { where: { managerId: { in: string[] } } }) =>
+        where.managerId.in.flatMap((m) => Array.from({ length: directReports[m] ?? 0 }, (_, i) => ({ id: `${m}-r${i}`, managerId: m, status: "ACTIVE", ...legacyLevelRow("EMPLOYEE") }))),
+    },
+    organizationMembership: { findMany: async () => [] },
+  } };
+});
 vi.mock("@/lib/team", () => ({
   getTeamUserIds: async (_org: string, userId: string) => chains[userId] ?? [userId],
 }));

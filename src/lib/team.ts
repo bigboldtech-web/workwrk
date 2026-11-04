@@ -26,6 +26,22 @@ import { keptSeatSql, liveSeatSql } from "@/lib/access/workspace-seat";
  * their seat here is (deactivated included, removedAt null), and a removed
  * one ends the walk, as a removed account does. Before, any membership row
  * counted, an ended one included.
+ *
+ * THE LINE HERE (docs/plans/workspace-status-2.md E1, step 2). Each step
+ * down reads THIS workspace's lines: the people anchored here whose account
+ * line names someone in the team, and the people here through a membership
+ * whose membership line does. Before, the walk joined every account line,
+ * so Max had Pat in B through her line in A, and Dana, who leads Pat in B,
+ * did not. PostgreSQL allows one reference to the recursive name, so the
+ * step joins `team t` to a LATERAL subquery of the two indexed halves:
+ *
+ *   anchored here       "User" by "User_managerId_idx", then the workspace
+ *   a membership here   "OrganizationMembership" by
+ *                       "OrganizationMembership_managerId_organizationId_idx"
+ *                       (both columns), each person then by "User_pkey"
+ *
+ * The membership half leaves out the people anchored here, so the anchored
+ * workspace's own stale membership row is never read as their line.
  */
 export async function getTeamUserIds(
   organizationId: string,
@@ -43,12 +59,16 @@ export async function getTeamUserIds(
              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
                          WHERE m."userId" = ${rootUserId} AND m."organizationId" = ${organizationId} AND ${liveSeatSql("m")}))
       UNION
-      SELECT u.id FROM "User" u
-      INNER JOIN team t ON u."managerId" = t.id
-      WHERE u."deletedAt" IS NULL
-        AND (u."organizationId" = ${organizationId}
-             OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                         WHERE m."userId" = u.id AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}))
+      SELECT r.id FROM team t
+      CROSS JOIN LATERAL (
+        SELECT u.id FROM "User" u
+         WHERE u."managerId" = t.id AND u."organizationId" = ${organizationId} AND u."deletedAt" IS NULL
+        UNION ALL
+        SELECT m."userId" AS id FROM "OrganizationMembership" m
+          JOIN "User" u ON u.id = m."userId"
+         WHERE m."managerId" = t.id AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}
+           AND u."organizationId" <> ${organizationId} AND u."deletedAt" IS NULL
+      ) r
     )
     SELECT id FROM team
   `]);

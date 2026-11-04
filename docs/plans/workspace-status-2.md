@@ -178,6 +178,14 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
    - Split from step 1, closed here (the step 1 review M1): the dotted-lines GET still reads every workspace's rows by person, so after the SQL Max is listed twice for Pat, and a line held only in A whose manager holds a seat in B is listed in B, copied into B by B's next save, and cannot be taken off in B (the PUT deletes B's rows only). The GET by organizationId closes it, with step 4's writeDottedHere. members-list.server.ts, directory-list, my-team, the users GET and record-access read the account's line for membership people: another workspace's line since the swap.
    - The done gate: flip each step 3 entry to (a), then add 3 to MERGED.
    - Tests: each surface in A and in B for Pat and for Max.
+   - **Step 3 partners, from the step 2 review** (displays that disagree with step 2's walks until step 3 lands; file:line on 22991ade plus step 2):
+     - users/[id]/route.ts 447-448 and 531-536: the record's manager, dotted managers and reports, from the account line, `directReports` and every workspace's dotted rows.
+     - record-access/route.ts 43-58, "Who can see this record": walks the account line and every workspace's dotted rows. It names Max as a reader of Pat's B record while the engine (viewer.ts reportTree) now gives him none, and it leaves Dana out.
+     - members-list.server.ts 119, 128 and 250.
+     - directory-list.server.ts: 114, 147 and 152 (the Reports to filter); 190, 212 and 311 (report counts and sort); 303 and 368; 428-473 (the chart's lines; the org chart's client loop check in org-tree.tsx walks these).
+     - my-team/route.ts 41, 66 and 77: directReportIds and each member's managerId from the account line, while teamIds come from the walk here. Dana's My team lists Pat under Max.
+     - users/export 45 and 63; /api/users 156-164 and 197-231.
+     - dotted-lines GET 95-98; api/ai 97; team/members-work 91; reviews/[id]/peers 42, 61 and 84-86 with peerCandidateWhere's `subject.managerId`; named-here.ts.
 
 4. **Every write of a line writes this workspace's, and the relied-line machinery retires (E4 to E6, E10).**
    - PATCH Reports to (anchored here for now; step 5 opens it for membership people), without the manager_elsewhere 409.
@@ -190,6 +198,39 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
    - Split from step 1, closed here (the step 1 review M1 and L5): the locked loop check (wouldLoopIn at PATCH and bulk-update) with step 2's lineAbove at the seat; the five seat-writes.ts functions have no caller yet, so every line write is still the old one; the dotted-lines PUT's keep list goes with writeDottedHere. Two ends crossing workspaces (Pat manages Dana in A while Dana leads Pat in B: Pat's end in A locks Pat then Dana, Dana's in B Dana then Pat, under two role locks) deadlock; Postgres ends one (40P01) with nothing written, and the routes answer it as the role-busy "try again", never a 500.
    - The done gate: every writer the contract test names "step 4" goes through seat-writes.ts and each step 4 entry is flipped to (a), then 4 is added to MERGED.
    - Tests: B's removal of Dana moves B's reports only and A's lines stay; Max's D4 end with A suspended leaves A's lines; a dotted-line save in B keeps A's row; a restore in B clears a stale B line and never A's; Pat's join of B by invitation lands under the invited manager.
+   - **The pairings, from the step 2 review** ("For step 4 (pairings)"). Each is a place where step 2 now reads THIS workspace's line while its partner still reads or writes the account's, or every workspace's dotted rows. All of them must close in the one merge. "Named" means the step 4 text above already names it. File:line on 22991ade plus step 2.
+     1. **writeReportMoves, handover.server.ts 345 and 350**, writes `tx.user.updateMany({ where: { managerId: id, id: { in } } })`, while the plan comes from lineFactsAround (lines here, manager-lines.ts 118-121).
+        - (a) Pat, whose B line names Dana, is planned to move and nothing is written. She stays under Dana in B after Dana leaves.
+        - (b) When Pat's A line also names Dana, B's handover rewrites A's line to B's recipient or B's up-line, a cross-workspace write. Bo may hold no seat in A (Pat has no manager in A) or may hold one (Bo gains reach over Pat in A).
+        - followReportingLine then reads the lines here (review-cycle.server.ts 353-355), so Pat's open B reviews stay with Dana.
+        - Named: moveLinesHere. Held by handover.server.test.ts's three `it.fails` cases for (a) and its `it.fails` "never moves the account's line of a report here through a membership" for (b) (step 2 review fixes, L8): step 4 turns each to `it`.
+     2. **handoverReportCount, handover.server.ts 819-827** (account lines at 820, the relied exclusion at 825), **and pendingHandover 841-852**, the deactivation and removal gate (users/[id] PATCH and DELETE).
+        - B can end Dana while Pat's B line names her (not counted). Then effectiveManagerOf(B, Pat) names a removed Dana anchored in B (managersPastAgents answers a removed anchored manager as stored), so her reviews and timesheets go to a removed person.
+        - The reverse: a report whose A account line names Dana is counted in B's gate though B's line names someone else.
+        - Named. Held by handover.server.test.ts's `it.fails` "counts that report as pending before a deactivation".
+     3. **The handover GET summary, users/[id]/handover/route.ts 236-244**: `directReports` from account lines. The `?to=` preview (previewReportHandover) reads lines here, so the Transfer dialog's count and its preview disagree. Named in the contract entry.
+     4. **The relied-line machinery applied to pairs now drawn from lines here**: reportsStayingWith 487-491, handoverLinesFor's keepRelied 465-478, previewReportHandover's alsoElsewhere 549, moveReliedReportsAtEnd's lineStandingsElsewhere 634 and otherWorkspaceRows 411-454 (handover.server.ts).
+        - These judge a (Pat, leaver) pair "relied elsewhere" when the leaver is a live manager in another workspace Pat works in, whatever that workspace's line says.
+        - Worst case: B removes Dana with leavesOnlyHere, and Pat stays under Dana in B because Dana manages someone in A.
+        - Named (E6).
+     5. **moveReliedReportsAtEnd, handover.server.ts 614-668, and SCIM's deprovision (scim-deprovision.ts 176-188)** have the same write as 1, with SCIM's actor. Named.
+     6. **agentPlanFor 702-718 and moveAgentReports 764-800** (handover.server.ts).
+        - The solid plan now comes from the lines here, but the write at 785 is the account's.
+        - The dotted read at 707-710 is every workspace's rows to the Agent, while the Members drawer's agentsWithStoredReports (manager-lines.ts 383) now counts this workspace's only. The drawer and the move's preview disagree.
+        - The dotted delete at 787-788 names no organizationId. Worst case: Max is an Agent in B and deactivated in A. B's Admin moves his B reports, and A loses Pat's dotted line to Max (which A keeps for a reactivation), with no record in A.
+        - The WRITERS gate forces the delete through removeDottedHere. The step 4 text above ("without stays") does not name the read at 707-710: it must read `organizationId` here too, or the preview counts A's rows and says lines were taken off that never were.
+     7. **staleLinesOf, manager-candidate.ts 196-245**, reads the account line and every workspace's dotted rows. Its clears are users/[id]/route.ts 1034, 1079 and 1349-1351 and scim-reactivate.ts 123-124.
+        - The dotted deletes name no organizationId: a restore in B deletes A's copy of the same pair.
+        - `managerId: null` lands on the account, so B's reactivation of Pat can clear A's line.
+        - Pat's actual B line is never checked: B restores her under Rita, removed in B. Nothing leaks, because the walks stop at Rita, but the stale line stays.
+        - Named.
+     8. **PATCH Reports to's 409 manager_elsewhere, users/[id]/route.ts 882-898** (managerLineIsOthers). Since E1 the account line is the anchored workspace's alone, so the question "changing it here changes it there too" is now untrue. Worst case: Ada changes Pat's A line off Max, an Agent in A who manages Pat in B, and is asked to confirm a change that no longer reaches B. Named.
+     9. **bulk-update change_manager, people/bulk-update/route.ts 116-119.** The write `tx.user.updateMany({ where: { id: { in: go } } })` has no workspace and no person lock. A person who switches workspace between the read at 57-60 and the write has another workspace's line written. Named (writeLineHere).
+     10. **The dotted-lines PUT, users/[id]/dotted-lines/route.ts.**
+         - The keep list from othersDottedLines (manager-lines.ts 422-431, every workspace's rows by person): a B copy whose manager holds no live level in B but is relied on in A can never be taken off in B.
+         - 138 filters out `subject.managerId`, the account's line. For a membership subject (step 5) that drops a B dotted manager who is Pat's A manager.
+         - Named, except the 138 filter, which step 5 names too.
+     11. **The signed-in join, accept-invite**: it writes no membership line. Since step 2 the reads take the membership's line, so Pat joining B with an existing account shows no manager in B and is in nobody's B tree until the E10 write lands. Named.
 
 5. **A membership person's profile and lines are edited here (E7, E8, E9 ii, E10).**
    - PATCH for a membership person writes job title, department, office, weekly hours, working week, profile fields and Reports to on the membership (writeProfileHere, writeLineHere) under the role lock (lines), the person's lock and sameSeat. Personal and birthday fields are refused with SHARED_IDENTITY_REFUSAL. A new job title seeds its KRAs and SOPs.
@@ -197,6 +238,7 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
    - The drawer's profileEditable, the Directory's canEdit and bulk selection, the record's Edit details and dotted lines for membership people.
    - Bulk update's department and office actions write membership rows. PROFILE_ELSEWHERE goes, and SEAT_FIELDS widens to the placement and Reports to groups.
    - SCIM Groups write and list the membership's department.
+   - The dotted-lines PUT's filter at users/[id]/dotted-lines/route.ts 138 drops `subject.managerId`, the account's line: for a membership subject it must drop the line here instead (the step 2 review, pairing 10), or a B dotted manager who is Pat's A manager is dropped.
    - Tests: Dana, Bo and B's People team each edit Pat in B; A's values and line are unchanged; Max (chain-view through a dotted line only) is refused; a move landing between the read and the write is refused with nothing written; Workload and Members read the new hours.
 
 6. **Pickers, assignment checks and Workload (E12 to E14).**
@@ -220,6 +262,7 @@ As in phase 1: each step has one builder and one read-only reviewer, high and me
    - B edits Pat's hours, and Workload shows them. Dana assigns and messages Pat while Pat is anchored in A.
    - A bulk-imported invitation lands Pat's colleague under the right manager. SCIM sets a manager in B.
    - The raw walks run on Postgres.
+   - **The walk through a manager anchored elsewhere, measured at 5,000 people** (the step 2 review L1): Max anchored at A leads 5,000 people there and reports to Dana in B; every request Dana makes in B walks through him (viewer.ts reportTreeFor), and the anchored half reads his A rows from the heap by "User_managerId_idx" only to drop them by workspace. Measure Dana's tree in B; add an index on "User"("managerId", "organizationId") in a later SQL file only if it is slow.
    - No 500 in the dev server's log.
 
 ## Deploy notes (draft)
@@ -622,3 +665,164 @@ Tests changed: workspace-lines.contract.test.ts (M1, M2, L6, L7), workspace-line
 - **Record when the SQL applied**: the marker comment holds it ("applied ... UTC"); keep the deploy log too, with the reload's line (T1).
 - **A deploy that stops after the SQL: redeploy at once**, then the check and the recovery.
 - For the planted cases (the review's list): the window cases with the f16c2220 code on the migrated copy (the old reanchorUser for Pat, A to B, losing A's line; the old handover of Dana in B leaving Pat's B line), then the check and the recovery putting both back (the handover by hand); EXPLAIN on the renamed index; the rollback with a line saved in two workspaces and one re-saved.
+
+## Step 2, built
+
+Branch `workspace-status-2` in ~/theywrk-launch, on 22991ade (step 1 committed on main f16c2220), not committed. **No SQL, no schema change, no flag.** It ships only in the one merge of steps 1 to 4 (see "Left for step 4": the handover still writes the account's line while its plan now reads the line here).
+
+### The rule
+
+Every walk and every reach reads THIS workspace's line: User.managerId for someone anchored here, the membership's own managerId for someone here through a membership (never the anchored workspace's own stale row), and only the dotted lines whose organizationId is this workspace. Each reader keeps the seat rule it had (kept or live, which kinds); only the source of the line changed.
+
+Helpers (acting-workspace.ts and manager-lines.ts, the access layer):
+- `reportsHereOf` now answers the level held here with each report (`level`: the account's where anchored here, the membership's role otherwise), so the walks down know the Agent tier without another read.
+- New `linesHereOf(organizationId, ids)`: the line each person's seat here holds (kept seats, through seatsHeldFor), null for no line, absent for no seat.
+- New `managersPastAgents(organizationId, people)`: the walk up past Agents that effectiveManagersOf and the digests' memberManagersOf share, each manager read at their seat here (line and tier here; a membership manager counts only while live, as levelsHeldIn read it before).
+
+### Each reader: before, now, test
+
+Tests named here are in src/lib/access/workspace-lines-reads.test.ts (new, on the in-memory database through the real reads: Pat anchored at A under Max and at B under Dana, a dotted line to Kai in A and to Lee in B, Max a Manager in B, Kai in B too) unless another file is named.
+
+- **manager-lines.ts**
+  - factsHere. Before: the seat's level and status, the account's line (`r.managerId`). Now: the seat's line (`seat.managerId`). Test: "the handover's line facts hold B's line in B and A's in A".
+  - lineFactsAround, effectiveDirectReportIds, walkThroughAgents (effectiveReportsOfMany, listedUnderAgents), reportsThroughAgents, agentsWithStoredReports' solid half. Before: `user.findMany({ managerId })`, every account line naming them. Now: reportsHereOf, both halves. Tests: "Dana has Pat in B, Max has her in A only", "an Agent's stored reports here are this workspace's".
+  - effectiveManagersOf. Before: each person's account line, each manager walked by the account line. Now: each person's line at their seat here (people answered as before: anchored here, or a live membership), and managersPastAgents. Tests: "answers Max in A and Dana in B, before and after Pat switches", "never names a manager whose seat here ended". The reviewer a launch picks, the approver a timesheet stamps and the weekly-review manager all read this.
+  - countedDottedReportIds, countedDottedManagerIds, agentsWithStoredReports' dotted half. Before: every workspace's rows. Now: `organizationId` here. Test: "Kai counts in A and Lee in B; A's row never counts in B".
+  - othersDottedLines, managerLineIsOthers, recordLinesOfOthers: untouched (step 4 retires them).
+- **manager-candidate.ts**
+  - managerCandidateIn. Before: "in this workspace" by levelHeldIn (live), "inactive" by the account's status, so Rita, deactivated by B through her membership, was "not_found". Now: the kept seat here (seatsHeldFor); "inactive" when the seat here is deactivated or the account ended (E4). Test: "someone B deactivated through their membership is refused as deactivated".
+  - lineAbove (wouldLoopIn). Before: the account's line. Now: the line each seat here holds, the same graph managerMapFor walks (workspacePeopleLines), which closes the step 1 review's split. Tests: "B may make Max report to Pat, since in B Pat reports to Dana; A may not", "sees a loop through a membership's line in B", "holds after Pat switches into B"; src/lib/people/person-access-anchor.test.ts "is on the line a loop check walks" (lineAbove and managerMapFor agree).
+  - staleLinesOf: untouched (step 4).
+- **team.ts getTeamUserIds and reporting-line.ts solidTreeRows (the raw walks).** Before: `JOIN team t ON u."managerId" = t.id` with an EXISTS for a membership, so every account's line. Now: `team t CROSS JOIN LATERAL (anchored half UNION ALL membership half) r`, the anchored half `u."managerId" = t.id AND u."organizationId" = org AND u."deletedAt" IS NULL`, the membership half `m."managerId" = t.id AND m."organizationId" = org AND m."removedAt" IS NULL`, joined to its person anchored elsewhere and not removed. The root's live seat is unchanged. dottedRowsHere reads `organizationId` here. getReportingChain, which named no workspace and had no caller, is deleted. Tests: src/lib/report-tree-seat.test.ts, whose double now asserts the LATERAL clauses (and refuses step 1's statement) and walks the membership lines: "Dana's tree in B holds Pat by her membership's line; Max's in B does not, his in A does", "a manager whose seat here ended leads nobody here, and a report removed here leaves the tree", for team.ts, getSolidReportTree and getEffectiveReportTree; and on Postgres, below.
+- **membership.ts**
+  - reportCountOf (rule 6). Before: `user.findMany({ managerId })` with no workspace at all, and every workspace's dotted rows. Now: reportsHereOf (kept) and this workspace's dotted rows, a dotted report counted while their seat here is kept. Tests: "B may make Max an Agent: nobody reports to him in B", "still counts them after Pat switches into B".
+  - unattendedRecipient. Before: the person's account line, then each manager's account line. Now: the person's seat here (personSeatIn, an ended seat keeps its line), then each manager's seat line. Tests: "give Pat's B work and B digest to Dana, and her A ones to Max", "walk past a manager whose seat here ended, by that manager's own line here".
+- **digest-recipients.ts memberManagersOf.** Before: the account line of a membership person, managers walked by account lines. Now: the membership's line (seatsHeldFor) and managersPastAgents. Tests: the digest cases above; digest-recipients.test.ts and digest-recipients-seat.test.ts with the lines on the memberships and the accounts naming another workspace's manager, so reading the account would fail them.
+- **person-access.server.ts.** No edit: the chain is getTeamUserIds plus the viewer's report tree (both walks above), and managerMapFor already read workspacePeopleLines.
+- **teams-counts.ts hasReportsFor and calendar/events' Team pill.** Before: `user.count/findFirst({ managerId })` over every account line of anyone here, and every workspace's dotted rows. Now: reportsHereOf (kept) for the solid half, `organizationId` here for the dotted half. Tests: "the Teams badge and the goal rules see the reports here"; calendar/events/route.test.ts "the Team pill asks who reports to the viewer in this workspace".
+- **app-floor-impact.server.ts and scripts/report-app-floors.ts.** Before: the anchored people's account lines and the anchored people's dotted rows of every workspace. Now: those account lines, the line and level each active membership here holds (an Agent's membership leads nobody), and this workspace's dotted rows (workspaceDottedLines in the app, the same rule written out in the script). Test: app-floor-impact-agent.test.ts "counts a manager here by the line a membership holds".
+- **alignment-scope.ts goalRightsActor.** Before: a count of people anchored here by the account line. Now: reportsHereOf, live. Test: "the Teams badge and the goal rules see the reports here" (Eve, a Member, leads Zia through Zia's membership).
+- **team-alignment.ts and team-rollup.ts.** Before: the dotted marks by manager over every workspace. Now: `organizationId` here. Their rows stay people anchored here (a membership person's alignment here is a known limit).
+- **team/alignment page.** Before: the Sub-teams pill by anchored people, the account line and the cross-workspace directReports relation; the drill's manager anchored only. Now: workspacePeopleLines (org-wide) and reportsHereOf twice (a manager's own chain); the drill's manager by personHere at a kept seat. **team/rollup page**: the org-wide roots by workspacePeopleLines (live). Server pages, no route test; the helpers are tested.
+- **weekly-review.ts managerQueueWhere and managerQueueWhereFor.** Before: `{ user: { managerId } }` (the subject's account line) and "no manager today" by the account. Now: the reports here by id (reportsHereOf) with the people under an Agent, and "no line here" per kind (anchored with none, or a membership here with none). Tests: "the weekly-review queue holds the people who report here"; weekly-review-agent.test.ts updated to the new shape.
+- **weekly-queue.server.ts.** Before: the drawer's direct manager from `row.user.managerId`. Now: the subject's seat here (personSeatIn); the subject select no longer reads the account line.
+- **review-cycle.server.ts reviewerFacts.** Before: "self stamped" needed no account line. Now: no line at the seat here (linesHereOf). The reviewer itself is effectiveManagersOf. Tests: "is Dana in B and Max in A", "lets someone with no line here write their own, whatever line their account holds elsewhere". The peer pool (peerCandidateWhere) is unchanged: people anchored here, by their own lines, the subject's line passed by its caller (reviews/[id]/peers, step 3).
+- **reviews/[id] and reviews/[id]/manager-review.** Before: each selected the subject's account line (the cycle GET sent it to the client; the manager-review GET stripped it; the PUT never used it). Now: not read. The writer is reviewerFacts.
+- **send-reminders, the monthly evaluation.** Before: people anchored here with an account line. Now: that half, then live memberships here with a line, each named to their digest manager. Test: send-reminders/route.test.ts "names a member in the monthly evaluation reminder of their manager here" (its double now holds members' lines on their memberships).
+- **The parity job** (scripts/access-parity-job.mjs, scripts/lib/parity-node-section.mjs). Before: `hasReports` from `_count.directReports`, every workspace. Now: reportsHereOf over the sampled viewers (both halves), loaded through the job's own TypeScript hooks. Checked with node's syntax check and the contract pins; not run (it loads .env, which this session never reads).
+- **Via the helpers, no edit:** kra-assignments, kpi-record.ts, kpi-review.server.ts, team-scope.server.ts, weekly-reviews/[id]/manager-review, weekly-reviews/reminders, reviews/[id]/launch (its department audience stays step 8's).
+
+### The contract test (E16)
+
+Every step 2 entry (31) is flipped with its new reason: 27 to (a), and four keep a later step for their other half (manager-lines.ts and manager-candidate.ts step 4, teams-counts.ts and reviews/[id]/launch step 8). tools.ts (step 4) now says its team alignment is step 2's, done. Three files now touch less: reviews/[id]/route.ts and reviews/[id]/manager-review/route.ts read no line (profile only), app-floor-impact.server.ts reads its dotted lines through workspaceDottedLines (line only). The named readers step 2 replaced are dropped from "holds the plan's named readers", and a new list holds each replacement in the code (the LATERAL halves, reportsHereOf in rule 6, the Team pill and the badge, factsHere's seat line, lineAbove's seat line, workspaceDottedLines in the preview, reportsHereOf in both parity files, no account join left in either walk). **MERGED is [2]**; the done gate holds: no (b) entry names step 2.
+
+Other source pins brought to the new code, each asserting the equivalent or more: agent-manager-reads.contract.test.ts (the preview's line, the two walks' halves, the pill and the badge), workspace-status.test.ts (inWorkspaceWhere: the calendar and teams-counts now call it once each, for the dotted half), kept-seats.test.ts (the level helpers' callers: manager-candidate.ts live 1, kept 1, seats 2; manager-lines.ts live 5, kept 1, seats 3; digest-recipients.ts seats 1).
+
+### Postgres: the raw walks (read only, the local database)
+
+Run through ~/workwrk-launch-backup/tools/q.mjs, SELECT and EXPLAIN only, with `PGOPTIONS="-c default_transaction_read_only=on"` (and `-c enable_seqscan=off` for the plans: the local tables are a few hundred rows, so unforced the planner reads them whole).
+- **The shape runs.** PostgreSQL accepts the one reference to the recursive name joined to a LATERAL subquery whose UNION ALL halves read `t.id`: both walks, as Prisma sends them (seven parameters each), plan and execute. No fallback was needed.
+- **The indexes.** EXPLAIN (ANALYZE, BUFFERS) of both walks rooted at the local manager with the largest team: the root by "User_pkey"; each step a Nested Loop over the WorkTable, the anchored half by a Bitmap Index Scan on "User_managerId_idx" (Index Cond `"managerId" = t.id`, the workspace as a filter), the membership half by an Index Scan on "OrganizationMembership_managerId_organizationId_idx" with both columns in the Index Cond, each person then by "User_pkey". team.ts 2.6 ms, reporting-line.ts 0.4 ms, 42 shared buffers each. The membership half of reportsHereOf (as Prisma shapes its relation filter) uses the same membership index; the dotted reads by workspace plan on an index over both columns (on the empty local table, the unique key).
+- **The right tree, real data.** For each of the 17 managers with a line in the local data, the new team walk and step 1's give the same set (no membership holds a line locally yet).
+- **The right tree, Pat's case.** The same statements run over Pat, Dana and Max given as CTEs that shadow the two tables in one SELECT (nothing written): in B, Dana's tree is {Ann, Dana, Pat} and Max's {Max, Rae}; in A, Max's is {Max, Pat, Zoe}; Dana has none in A; Sol, removed in B, is in nobody's B tree. Step 1's walk over the same rows gives Dana {Ann, Dana} and Max {Max, Pat} in B.
+- **Cost.** One more indexed read per round of a walk (the membership half), probing by both columns of its index; the round count is unchanged. The step 2 reviewer's measurement on a 5,000-person workspace (the Risks line) still stands.
+
+### Decisions made here (worst case first)
+
+- **Each reader keeps its seat rule and changes only its line's source.** Worst case of tightening rules on the way: a deactivated report anchored here drops out of a walk on the deploy. Worst case of this: none found; the rules were tested per reader in phase 1.
+- **managerCandidateIn reads kept seats and answers "inactive" for a seat deactivated here (E4).** Worst case: a check without `live` (send-invitation, users POST before the lock, checkManagerCandidate) accepts Rita, deactivated here, and the locked live check or the acceptance (managerOnAccept) refuses her, as for a deactivated manager anchored here today.
+- **The reviews' unused account lines are dropped rather than read at the seat.** Worst case of keeping them: the cycle GET sends Pat's A manager's id to B's client.
+- **The team/alignment drill reads its manager at the seat here.** Worst case of leaving it: a drill into a manager here through a membership is a 404 while their team here is now read.
+
+### Tests
+
+- New: workspace-lines-reads.test.ts 18; report-tree-seat.test.ts 7 (the line here, three walks, plus the double's self-test); one each in calendar/events/route.test.ts, app-floor-impact-agent.test.ts and send-reminders/route.test.ts. **28 new tests, 27 fail on step 1's code** (22991ade in a scratch copy, this step's tests put in): all 18 of workspace-lines-reads, 6 of 7 in report-tree-seat (the double's self-test passes by design), and the three single ones. Of the 20 changed test files, 32 tests fail on step 1's code (agent-manager-reads 3, workspace-lines 1, manager-lines 6, digest-recipients-seat 2, digest-recipients 1, membership 3, workspace-status 1, kept-seats 5, weekly-review-agent 1, the contract 2, person-access-anchor 1, process-run-access 1, report-tree-seat's earlier 5) plus the reminders double's 2 membership cases and goal-rights 5 (their doubles now hold the lines here); handover.server, send-invitation and users route pass on both (their doubles only learned the new reads' shapes).
+- Changed tests, no assertion weakened: the lines of membership people moved from their account onto their membership in every fixture that meant "their manager here" (and the account now names another workspace's manager, so a read of the account fails the test); dotted fixtures name their workspace; the doubles learned reportsHereOf's two halves; the source pins above.
+- Every test related to a changed source (`vitest related` over the 24 changed sources): 273 files, 3,380 tests, all pass. The touched folders (src/lib, src/app/api/calendar, email, reviews, weekly-reviews, users, people, team, the team pages, scripts): 736 files, 11,104 tests, all pass.
+- Type check clean, run twice at the end. ESLint on every touched file: no new problem; the 4 errors and 2 warnings left (calendar/events' accessLevel read, send-reminders' two `any` and two unused `subject`) are on 22991ade too, on no line this step wrote. `node scripts/check-schema-sql.mjs` passes.
+
+### Left for later steps
+
+- **Step 4 (must ship with this).** The handover plans from the lines here (lineFactsAround) but still writes the account's line (`tx.user.updateMany({ where: { managerId: id, id: { in } } })`): a membership report here is planned to move and nothing is written for them, and a report whose B line and A line both name the leaver would have A's line moved by B's handover. moveLinesHere replaces both writes. The same for moveAgentReports, the stale clears (staleLinesOf), handoverReportCount and pendingHandover's report count, which read account lines.
+- **Step 3.** The surfaces: users/[id] GET, record-access, members-list, directory-list, my-team, users/export, /api/users, the dotted-lines GET, api/ai, team/members-work's Reports to filter, reviews/[id]/peers (which passes the subject's account line to peerCandidateWhere).
+- **Not in this step's list, for the final sweep.** The Apps page preview lists people anchored here only (its lines are now this workspace's, its people are not); a Sub-teams row names a membership manager's job title only when the account's is this workspace's (the membership's own title is not read there).
+
+### Deploy notes (step 2, in the one merge of steps 1 to 4)
+
+No SQL to apply, no schema change, no environment flag. Nothing is written differently by this step's code. What customers notice comes with steps 1 to 4 together (the draft notes above), and from this step:
+1. **Trees, reach and counts follow each workspace's own Reports to and dotted lines:** a manager's team, Teams counts and the Team calendar pill, the Sub-teams and Alignment pages, the weekly-review queue, the digests and the monthly evaluation reminder, the reviewer of a review, the approver of a timesheet, rule 6's count (who can be made an Agent), the unattended handover's recipient, the Apps page's manager floor and the nightly parity job.
+2. **B can make Max an Agent when nobody reports to him in B**, whoever reports to him elsewhere.
+3. **A manager deactivated here through their membership is refused as deactivated** ("That person is deactivated..."), no longer "isn't in this workspace".
+4. **A Reports to edit is checked for a loop in this workspace only**, so B is never refused because of how A is organised.
+
+## Step 2, review fixes
+
+The review is ~/workwrk-launch-backup/agents/workspace-status-2/step2-review.md: no high and no medium findings. The lows are fixed or noted as the coordinator ruled. Same branch, still not committed. **No SQL.**
+
+### L2: an invitation under a manager deactivated here is refused at send time
+
+- sendInvitation (src/lib/people/send-invitation.server.ts) now asks `managerCandidateIn(orgId, managerId, { live: true })`. A manager this workspace deactivated is refused before anything is written: 400, `manager_inactive`, "That person is deactivated, and a deactivated person can't have reports. Reactivate them first, or pick someone else." This is the sentence PATCH Reports to and bulk update already use. It covers someone anchored here, and someone here through a membership (E4).
+- Before: a membership manager deactivated here was "That manager isn't in this workspace" (step 1), or after step 2 was stored. A deactivated manager anchored here was stored too. Either way, the acceptance (managerOnAccept, live) then dropped the manager without telling anyone, and the new person joined under nobody.
+- An HR label (On leave) is a live seat and passes, as at acceptance.
+- Test: send-invitation.server.test.ts "refuses a manager deactivated here, in words, and makes no invitation": Rita (membership, deactivated here) and Dee (anchored here, deactivated) are each refused with no invitation made, and both pass once on leave. It fails on step 1's code.
+
+### L3 and L6: the switch tests tell the rows apart
+
+- workspace-lines-reads.test.ts has a new helper, `patSwitchesToB(stale)`. It runs the real swap, checks that the account now holds B's line (Dana) and A's membership holds A's (Max), then gives Pat's stale B membership row another manager.
+- So a reader that took the stale row, or that took the account in A, answers wrong:
+  - effectiveManagerOf, with stale Lee: B answers Dana, A answers Max.
+  - reportCountOf, with stale Kai (who works in B): B counts 0 for Kai and 1 for Dana.
+  - unattendedRecipient and digestManagersOf, with stale Lee: Dana in B and Max in A, the digest now checked in both workspaces after the switch (L6).
+  - wouldLoopIn and lineAbove, with stale Lee: Lee reporting to Pat in B closes no loop, Dana does, and in A the walk is Pat then Max.
+
+### L4: the report-tree double checks the bound values
+
+- report-tree-seat.test.ts's double maps every placeholder to the text before it:
+  - each `"organizationId" =` or `<>` must hold the walk's workspace, in both halves and the root;
+  - each id or `"userId" =` must hold the root;
+  - the depth cap must be a number;
+  - any other placeholder is refused.
+- New test: team.ts's statement with the membership half's workspace bound to the root, or `<>` bound to another workspace, is refused; the right bindings walk to Dana's B tree. It tests the double itself, so it passes on step 1's code as well, by design.
+
+### L5: the Apps preview's mocks check their arguments
+
+- app-floor-impact-agent.test.ts now answers each read only when it is asked what the preview must ask:
+  - the anchored read: `{ organizationId, deletedAt: null, status: "ACTIVE" }`;
+  - the memberships: exactly `membershipHereWhere("org", "active")`;
+  - the dotted statement: as Postgres receives it (raw fragments inline), naming `d."organizationId"` in both halves, every bound value this workspace.
+- New test, "asks for active seats here and this workspace's dotted lines, nothing wider", asserts each argument. It fails on step 1's code.
+
+### L8: the handover double holds the two lines apart
+
+- handover.server.test.ts's double now keeps the membership's line here (`st.memberLine`) apart from the account's (`st.managers`).
+- Its `user.updateMany` writes only the rows whose account line still names the leaver, as Postgres would.
+- Where a test's report works here through a membership, its line here is on the membership and its account names the client workspace's manager (Cleo). Where the test means "the same manager in both workspaces" (a1 under the Agent Sam), both name Sam.
+- Four tests now hold step 4's pairings and are marked `it.fails`, each with a note naming step 4:
+  - "moves a report who last switched to another workspace" (pairing 1a): the plan reads r1's membership line, and the account write lands nowhere;
+  - "the handover still moves a report anchored elsewhere whose line no other workspace relies on" (1a);
+  - "counts that report as pending before a deactivation" (pairing 2: handoverReportCount counts account lines);
+  - new: "never moves the account's line of a report here through a membership, whose line in their own workspace names the leaver too" (1b: today B's handover rewrites the client workspace's line).
+- Each was run once as a plain `it` (in a throwaway copy, since deleted) and fails for exactly that reason. Step 4 must turn each into `it`; vitest fails an `it.fails` that starts passing.
+- None was deleted. The other 48 handover tests pass as before.
+
+### Notes
+
+- **L7.** memberManagersOf is kept, now commented as a guard only. No production path reaches it (effectiveManagersOf answers every live membership first). It is the one digest read that also refuses an account ended where it is anchored (D12), which effectiveManagersOf does not check. Deleting it means moving its tests onto the real effectiveManagersOf, which is left to the final review.
+- **L1.** Noted under step 9: measure the walk through a manager anchored elsewhere at 5,000 people, and add "User"("managerId", "organizationId") in a later SQL file only if it is slow.
+- The review's **"For step 4 (pairings)"** list is copied under step 4 above, with file:line, and with the `it.fails` tests that hold pairings 1 and 2. Its step 3 partners are copied under step 3, and the dotted-lines PUT's filter at 138 under step 5.
+
+### Files
+
+Changed in this pass: src/lib/people/send-invitation.server.ts, src/lib/access/digest-recipients.ts (the guard comment), docs/plans/workspace-status-2.md (steps 3, 4, 5 and 9, this section). Tests changed or added: send-invitation.server.test.ts (1 new), workspace-lines-reads.test.ts (the four switch cases), report-tree-seat.test.ts (1 new), app-floor-impact-agent.test.ts (1 new), handover.server.test.ts (the double, 3 marked `it.fails`, 1 new `it.fails`).
+
+### Tests
+
+- The touched files plus src/app/api/invitations and src/lib/agents (sendInvitation's callers): 74 files, 1,825 tests, all pass.
+- Every test related to a changed source (`vitest related` over the 25 changed sources): 273 files, 3,384 tests, all pass.
+- Against step 1's sources: the new L2 and L5 tests fail. workspace-lines-reads still fails 18 of 18. The L4 test of the double passes there by design.
+- Type check clean, run twice with the 6 GB heap.
+- ESLint on this pass's files: no new problem. The 5 errors in send-invitation.server.ts (accessLevel at 181, 184, 233, 256 and 273) are on 22991ade too, at 173, 176, 225, 248 and 265, on no line this pass wrote.
+
+### Deploy notes, added to step 2's
+
+5. **An invitation can no longer name a deactivated manager as Reports to.** Before, it was sent, and the person joined with no manager.

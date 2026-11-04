@@ -215,9 +215,10 @@ export async function getDirectorRollup(args: {
     if (own.length) reportsBySubManager.set(subId, own);
   }
 
-  // 3. Mark dotted reports of the director.
+  // 3. Mark dotted reports of the director: this workspace's dotted lines
+  // only (docs/plans/workspace-status-2.md E2).
   const dottedDirects = await prisma.userDottedLine.findMany({
-    where: { managerId: directorId, userId: { in: directIds } },
+    where: { organizationId, managerId: directorId, userId: { in: directIds } },
     select: { userId: true },
   });
   const dottedSet = new Set(dottedDirects.map((d) => d.userId));

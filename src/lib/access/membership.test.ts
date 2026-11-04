@@ -130,7 +130,11 @@ describe("applyRoleChange counts the team under the role lock", () => {
         findUnique: async () => ({ id: "mona", organizationId: "org", deletedAt: null, accessLevel: "MANAGER", createdAt: t2, firstName: "Mona", lastName: "Lee", email: "mona@x.test" }),
         findMany: async (a: { where: Record<string, unknown> }) => {
           if ("accessLevel" in a.where) return [admin];
-          if (a.where.managerId === "mona") return (o.solid ?? []).map((id) => ({ id }));
+          // Who reports to Mona here (reportsHereOf): the anchored half, by
+          // their account's line (workspace-status-2 E1).
+          if (((a.where.managerId as { in?: string[] } | undefined)?.in ?? []).includes("mona")) {
+            return (o.solid ?? []).filter((id) => !(id in elsewhere)).map((id) => ({ id, managerId: "mona", status: "ACTIVE", accessLevel: "EMPLOYEE" }));
+          }
           const ids = (a.where.id as { in?: string[] } | undefined)?.in;
           if (ids) return ids.map((id) => ({ id, organizationId: id in elsewhere ? "client" : "org", accessLevel: "EMPLOYEE" }));
           return [];
@@ -144,8 +148,14 @@ describe("applyRoleChange counts the team under the role lock", () => {
         },
       },
       organizationMembership: {
-        findMany: async (a: { where: { userId?: { in: string[] } } }) =>
-          (a.where.userId?.in ?? []).filter((id) => elsewhere[id]).map((userId) => ({ userId, role: elsewhere[userId] })),
+        // By person; or (reportsHereOf's membership half) by the line it holds:
+        // a report anchored elsewhere reports to Mona here on their membership (E1).
+        findMany: async (a: { where: { userId?: { in: string[] }; managerId?: { in: string[] } } }) =>
+          a.where.managerId
+            ? a.where.managerId.in.includes("mona")
+              ? (o.solid ?? []).filter((id) => elsewhere[id]).map((userId) => ({ userId, managerId: "mona", status: "ACTIVE", role: elsewhere[userId] }))
+              : []
+            : (a.where.userId?.in ?? []).filter((id) => elsewhere[id]).map((userId) => ({ userId, role: elsewhere[userId] })),
         // The target's own row here, read for when they joined here (joined-here.ts, the step 4 review H1): none.
         findUnique: async () => null,
         updateMany: async () => ({ count: 0 }),
@@ -203,6 +213,8 @@ describe("unattendedRecipient reads past an Agent", () => {
   /** People anchored elsewhere, with the role their membership here holds (and its status here, step 4). */
   const memberships = new Map<string, string>();
   const seatStatus = new Map<string, string>();
+  /** The line each membership here holds (workspace-status-2 E1): its person's manager here. */
+  const lines = new Map<string, string>();
   const put = (id: string, managerId: string | null, accessLevel: string, status = "ACTIVE", organizationId = "org") =>
     rows.set(id, { id, organizationId, managerId, accessLevel, status, deletedAt: null, createdAt: t0 });
   const db = {
@@ -223,10 +235,11 @@ describe("unattendedRecipient reads past an Agent", () => {
       findMany: async (a: { where: { organizationId?: string; role?: unknown; userId?: { in: string[] } } }) =>
         a.where.role || !a.where.userId || a.where.organizationId !== "org"
           ? []
-          : a.where.userId.in.filter((id) => memberships.has(id)).map((userId) => ({ userId, role: memberships.get(userId), status: seatStatus.get(userId) ?? "ACTIVE", removedAt: null, createdAt: t0, isPrimary: false })),
+          : a.where.userId.in.filter((id) => memberships.has(id)).map((userId) => ({ userId, role: memberships.get(userId), status: seatStatus.get(userId) ?? "ACTIVE", removedAt: null, createdAt: t0, isPrimary: false, managerId: lines.get(userId) ?? null })),
       findUnique: async (a: { where: { userId_organizationId: { userId: string } } }) => {
-        const role = memberships.get(a.where.userId_organizationId.userId);
-        return role ? { role } : null;
+        const id = a.where.userId_organizationId.userId;
+        const role = memberships.get(id);
+        return role ? { role, status: seatStatus.get(id) ?? "ACTIVE", removedAt: null, adminScopes: [], departmentId: null, officeId: null, roleId: null, managerId: lines.get(id) ?? null } : null;
       },
     },
   };
@@ -287,13 +300,18 @@ describe("unattendedRecipient reads past an Agent", () => {
     rows.clear();
     memberships.clear();
     seatStatus.clear();
+    lines.clear();
     put("owner", null, "COMPANY_ADMIN");
     put("vp", null, "MANAGER");
-    put("dana", "vp", "EMPLOYEE", "ACTIVE", "client");
+    // Cleo leads both in the client workspace: their accounts' line, never read here.
+    put("cleo", null, "MANAGER", "ACTIVE", "client");
+    put("dana", "cleo", "EMPLOYEE", "ACTIVE", "client");
     memberships.set("dana", "MANAGER");
+    lines.set("dana", "vp");
     // Ida works here through a membership too, anchored in the client workspace.
-    put("ida", "dana", "EMPLOYEE", "ACTIVE", "client");
+    put("ida", "cleo", "EMPLOYEE", "ACTIVE", "client");
     memberships.set("ida", "EMPLOYEE");
+    lines.set("ida", "dana");
     expect(await unattendedRecipient("org", "ida", db as never)).toBe("dana");
     seatStatus.set("dana", "INACTIVE");
     expect(await unattendedRecipient("org", "ida", db as never)).toBe("vp");

@@ -153,10 +153,11 @@ const prisma = baseClient.$extends({
 globalThis.prisma = prisma;
 globalThis.prismaByClass = new WeakMap([[PrismaClient, prisma]]);
 
-const [{ prisma: appPrisma }, facts, harness] = await Promise.all([
+const [{ prisma: appPrisma }, facts, harness, lines] = await Promise.all([
   import(pathToFileURL(join(ROOT, "src/lib/prisma.ts")).href),
   import(pathToFileURL(join(ROOT, "src/lib/access/legacy-facts.ts")).href),
   import(pathToFileURL(join(ROOT, "src/lib/access/parity.ts")).href),
+  import(pathToFileURL(join(ROOT, "src/lib/access/acting-workspace.ts")).href),
 ]);
 if (appPrisma !== prisma) {
   console.error("src/lib/prisma.ts did not reuse the read-only client; the server-side guard still holds, but stop and check");
@@ -187,29 +188,32 @@ async function sampleOrgs() {
   return rows.map((r) => r.id);
 }
 
-/** Up to two users per access level, so every rung of today's ladder is seen. */
+/**
+ * Up to two users per access level, so every rung of today's ladder is seen.
+ * `hasReports` is someone reporting to them IN THIS WORKSPACE
+ * (docs/plans/workspace-status-2.md E1, step 2): acting-workspace.ts
+ * reportsHereOf, the account's line of people anchored here and the
+ * membership's line of people here through one. Before, the cross-workspace
+ * directReports count, so a manager "had reports" here through a line of
+ * another workspace.
+ */
 async function sampleViewers(organizationId) {
   const rows = await prisma.user.findMany({
     where: { organizationId, deletedAt: null },
-    select: {
-      id: true,
-      organizationId: true,
-      accessLevel: true,
-      status: true,
-      _count: { select: { directReports: true } },
-    },
+    select: { id: true, organizationId: true, accessLevel: true, status: true },
     orderBy: [{ accessLevel: "asc" }, { id: "asc" }],
   });
   const perLevel = new Map();
-  const out = [];
+  const picked = [];
   for (const row of rows) {
     const n = perLevel.get(row.accessLevel) ?? 0;
     if (n >= VIEWERS_PER_LEVEL) continue;
     perLevel.set(row.accessLevel, n + 1);
-    out.push({ ...row, hasReports: row._count.directReports > 0 });
-    if (out.length >= MAX_VIEWERS_PER_ORG) break;
+    picked.push(row);
+    if (picked.length >= MAX_VIEWERS_PER_ORG) break;
   }
-  return out;
+  const leads = new Set((await lines.reportsHereOf(organizationId, picked.map((r) => r.id), prisma)).filter((r) => r.id !== r.managerId).map((r) => r.managerId));
+  return picked.map((row) => ({ ...row, hasReports: leads.has(row.id) }));
 }
 
 /** How many candidate rows per kind and org the picker sees (a window, not the whole table). */

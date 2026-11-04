@@ -22,7 +22,7 @@ import { countChainReviewsAwaiting, countReviewsAwaitingManager } from "@/lib/we
 import { getUserTagIds } from "@/lib/user-tags";
 import { inSurveyAudience, surveyOpenNow } from "./survey-audience";
 import { managesNobody } from "@/lib/access/manager-lines";
-import { inWorkspaceWhere } from "@/lib/access/acting-workspace";
+import { inWorkspaceWhere, reportsHereOf } from "@/lib/access/acting-workspace";
 import { reviewsWrittenBy } from "@/lib/performance/review-cycle.server";
 
 export interface TeamsViewerFacts {
@@ -84,14 +84,18 @@ export async function hasReportsFor(userId: string, organizationId: string): Pro
   // Live reports of THIS workspace only (docs-found fixes batch 5): anchored
   // here or through a membership here, never a removed person, never the
   // person themselves. It counted lines from every workspace and removed
-  // dotted reports. inWorkspaceWhere is safe here (batch 6): each count is
-  // narrowed by "User_managerId_idx" and "UserDottedLine_managerId_idx"
+  // dotted reports. The lines are this workspace's too
+  // (docs/plans/workspace-status-2.md E1, E2, step 2): the solid ones whose
+  // line HERE names them (reportsHereOf, both halves: Max "had reports" in B
+  // through Pat's line in A, and Dana none through hers in B), the dotted
+  // ones this workspace's rows. inWorkspaceWhere is safe here (batch 6): the
+  // dotted count is narrowed by "UserDottedLine_organizationId_managerId_idx"
   // first, so its OR only filters this person's own reports.
   const [solid, dotted] = await Promise.all([
-    prisma.user.count({ where: { managerId: userId, id: { not: userId }, deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } }),
-    prisma.userDottedLine.count({ where: { managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } }),
+    reportsHereOf(organizationId, [userId]),
+    prisma.userDottedLine.count({ where: { organizationId, managerId: userId, userId: { not: userId }, user: { deletedAt: null, ...inWorkspaceWhere(organizationId, { deactivatedToo: true }) } } }),
   ]);
-  return solid > 0 || dotted > 0;
+  return solid.some((r) => r.id !== userId) || dotted > 0;
 }
 
 /** Candor sessions open to the viewer as a respondent (never their own). */

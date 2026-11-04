@@ -97,9 +97,10 @@ export async function getTeamAlignment(args: {
     };
   }
 
-  // 2. Mark which reports come via dotted-line so the UI can label them.
+  // 2. Mark which reports come via dotted-line so the UI can label them:
+  // this workspace's dotted lines only (docs/plans/workspace-status-2.md E2).
   const dotted = await prisma.userDottedLine.findMany({
-    where: { managerId, userId: { in: reportIds } },
+    where: { organizationId, managerId, userId: { in: reportIds } },
     select: { userId: true },
   });
   const dottedSet = new Set(dotted.map((d) => d.userId));
@@ -186,6 +187,7 @@ export async function getTeamAlignment(args: {
       avatar: u.avatar,
       via: dottedSet.has(u.id) ? "dotted" : "solid",
       jobTitle: u.role?.title ?? null,
+      // `users` are anchored here, so their account's line is this workspace's (E1).
       direct: u.managerId === managerId || dottedSet.has(u.id),
       activeKras: krasByUser.get(u.id) ?? [],
       kpis,

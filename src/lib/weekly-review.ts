@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
 import { effectiveManagerOf, managesNobody, reportsThroughAgents } from "@/lib/access/manager-lines";
+import { reportsHereOf } from "@/lib/access/acting-workspace";
 
 export interface KpiSnapshot {
   kpiId: string;
@@ -286,23 +287,48 @@ export interface ManagerReviewQueueItem extends WeeklyReviewDoc {
 
 /**
  * Whose weekly reviews a manager's queue holds: the people who report to
- * them NOW (User.managerId), whoever was recorded on the row when it was
- * submitted, plus rows recorded to them whose subject has no manager today.
- * A report who moved takes their pending review to the new manager (the
- * old one no longer sees it or decides it), and nobody's review is left in
- * a queue nobody reads.
+ * them NOW, whoever was recorded on the row when it was submitted, plus rows
+ * recorded to them whose subject has no manager today. A report who moved
+ * takes their pending review to the new manager (the old one no longer sees
+ * it or decides it), and nobody's review is left in a queue nobody reads.
+ *
+ * NOW is THIS workspace's line (docs/plans/workspace-status-2.md E1, step
+ * 2): `reports` are the people whose line here names the manager
+ * (acting-workspace.ts reportsHereOf: the account's line for people
+ * anchored here, the membership's otherwise), and "no manager today" is no
+ * line here (noLineHere). Before, the subject's account line, so Pat's B
+ * review went to Max's queue in B through her line in A, never to Dana's.
  *
  * `lifted` are people listed under one of this manager's Agent reports, who
  * report to this manager in effect (an Agent is nobody's manager;
  * manager-lines.ts). Callers outside this file use managerQueueWhereFor,
- * which reads them and answers nothing for an Agent.
+ * which reads both and answers nothing for an Agent.
  */
-export function managerQueueWhere(managerId: string, lifted: readonly string[] = []): Prisma.WeeklyReviewWhereInput {
+export function managerQueueWhere(
+  managerId: string,
+  organizationId: string,
+  reports: readonly string[],
+  lifted: readonly string[] = [],
+): Prisma.WeeklyReviewWhereInput {
+  const people = [...new Set([...reports, ...lifted])];
   return {
     OR: [
-      { user: { managerId, deletedAt: null } },
-      { managerId, user: { managerId: null, deletedAt: null } },
-      ...(lifted.length ? [{ userId: { in: [...lifted] }, user: { deletedAt: null } }] : []),
+      ...(people.length ? [{ userId: { in: people }, user: { deletedAt: null } }] : []),
+      { managerId, user: noLineHere(organizationId) },
+    ],
+  };
+}
+
+/**
+ * A person with no line HERE, not removed (E1): anchored here with no
+ * account line, or here through a membership, not removed, with none on it.
+ */
+function noLineHere(organizationId: string): Prisma.UserWhereInput {
+  return {
+    deletedAt: null,
+    OR: [
+      { organizationId, managerId: null },
+      { organizationId: { not: organizationId }, organizationMemberships: { some: { organizationId, removedAt: null, managerId: null } } },
     ],
   };
 }
@@ -317,7 +343,11 @@ const NO_REVIEW: Prisma.WeeklyReviewWhereInput = { id: { in: [] } };
  */
 export async function managerQueueWhereFor(managerId: string, organizationId: string): Promise<Prisma.WeeklyReviewWhereInput> {
   if (await managesNobody(managerId, organizationId)) return NO_REVIEW;
-  return { AND: [{ organizationId }, managerQueueWhere(managerId, await reportsThroughAgents(organizationId, managerId))] };
+  const [reports, lifted] = await Promise.all([
+    reportsHereOf(organizationId, [managerId]).then((rows) => rows.map((r) => r.id)),
+    reportsThroughAgents(organizationId, managerId),
+  ]);
+  return { AND: [{ organizationId }, managerQueueWhere(managerId, organizationId, reports, lifted)] };
 }
 
 /**

@@ -24,8 +24,10 @@
 // column only ever narrows.
 //
 // SOMEONE WHO WORKS HERE THROUGH A MEMBERSHIP (anchored in another
-// workspace) has a digest manager here too, read the same way: their stored
-// manager, walked at the tier each manager holds here, never themselves,
+// workspace) has a digest manager here too, read the same way: their manager
+// HERE, the line their membership holds (docs/plans/workspace-status-2.md
+// E1, step 2; never their account's, which is the anchored workspace's
+// line), walked at the seat each manager holds here, never themselves,
 // never someone who holds no level here, never an Agent (memberManagersOf).
 // Both read the seat HERE (docs/plans/workspace-status.md D12): a person
 // whose membership this workspace deactivated or removed has no digest
@@ -68,9 +70,8 @@
 
 import type { Prisma, PrismaClient } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { effectiveManagerFrom, type LineFacts } from "@/lib/people/reporting-lines";
-import { levelsHeldIn } from "./acting-workspace";
-import { effectiveManagersOf } from "./manager-lines";
+import { seatsHeldFor } from "./acting-workspace";
+import { effectiveManagersOf, managersPastAgents } from "./manager-lines";
 import { effectiveOrgRole, isAgentOf } from "./org-role";
 import { NodeEvaluator, nodeCtxFromLevel, roleAtLeast, type NodeViewer } from "./node-rules";
 import { grantsWithViewer, loadAllGrants, loadRows } from "./node-world";
@@ -78,9 +79,6 @@ import { RULE_1_DENIED_STATUSES } from "./resolve";
 import { liveSeatWhere } from "./workspace-seat";
 
 type Db = PrismaClient | Prisma.TransactionClient;
-
-/** How many rounds a walk through Agents reads (manager-lines.ts ROUNDS: a longer chain of Agents is a data fault). */
-const ROUNDS = 16;
 
 export interface DigestManager {
   id: string;
@@ -142,17 +140,25 @@ export async function digestManagersOf(organizationId: string, personIds: readon
 
 /**
  * The manager each of these people reports to here, for the ones who are
- * live members here and anchored in another workspace: their stored
- * manager, walked past an Agent to the next person up who is none, at the
- * tier each manager holds HERE (their row's level where anchored here, the
- * membership's role where they work here from elsewhere): the walk
- * effectiveManagersOf runs for the people anchored here. Never the person
- * themselves, and never someone who holds no level here. Anyone else (no
- * membership here, removed or deactivated here or where anchored) is absent.
+ * live members here and anchored in another workspace: their manager HERE
+ * (the line their membership holds, E1), walked past an Agent to the next
+ * person up who is none, at the seat each manager holds HERE (their line
+ * and tier here): the walk effectiveManagersOf runs (manager-lines.ts
+ * managersPastAgents). Never the person themselves, and never someone who
+ * holds no level here. Anyone else (no membership here, removed or
+ * deactivated here or where anchored) is absent.
+ *
+ * A GUARD ONLY (the step 2 review L7): effectiveManagersOf already answers
+ * everyone with a live membership here, so digestManagersOf hands this only
+ * the people it left out, whom the where below refuses; nothing reaches it
+ * in production today. It is kept because it is the one read here that
+ * also refuses an account ended where it is anchored (D12), which
+ * effectiveManagersOf does not check, and because removing it moves its
+ * tests onto the real effectiveManagersOf, the final review's call.
  */
 async function memberManagersOf(organizationId: string, ids: readonly string[], db: Db): Promise<Map<string, string | null>> {
   if (ids.length === 0) return new Map();
-  const people = await db.user.findMany({
+  const rows = await db.user.findMany({
     where: {
       id: { in: [...ids] },
       organizationId: { not: organizationId },
@@ -160,30 +166,15 @@ async function memberManagersOf(organizationId: string, ids: readonly string[], 
       status: { not: "INACTIVE" },
       organizationMemberships: { some: { organizationId, ...liveSeatWhere() } },
     },
-    select: { id: true, managerId: true },
+    select: { id: true, managerId: true, organizationId: true, accessLevel: true, status: true },
   });
-  const facts = new Map<string, LineFacts>();
-  const foreign = new Set<string>();
-  let frontier = [...new Set(people.map((p) => p.managerId).filter((m): m is string => !!m))];
-  for (let round = 0; round < ROUNDS && frontier.length; round += 1) {
-    const got = await db.user.findMany({ where: { id: { in: frontier }, deletedAt: null }, select: { id: true, managerId: true, status: true } });
-    const levels = await levelsHeldIn(organizationId, got.map((g) => g.id), db);
-    const walked: string[] = [];
-    for (const g of got) {
-      const level = levels.get(g.id);
-      if (level === undefined) {
-        foreign.add(g.id); // holds nothing here: never a manager here
-        continue;
-      }
-      facts.set(g.id, { managerId: g.managerId, agent: isAgentOf(level), inactive: g.status === "INACTIVE" });
-      walked.push(g.id);
-    }
-    frontier = [...new Set(walked.map((id) => facts.get(id)!).filter((f) => f.agent && f.managerId && !facts.has(f.managerId)).map((f) => f.managerId as string))];
-  }
-  return new Map(people.map((p) => {
-    const m = effectiveManagerFrom(p.managerId, facts, p.id);
-    return [p.id, m && foreign.has(m) ? null : m];
-  }));
+  // Their line here is their membership's (seatsHeldFor), never the account's.
+  const seats = await seatsHeldFor(organizationId, rows, db);
+  const people = rows.flatMap((r) => {
+    const seat = seats.get(r.id);
+    return seat ? [{ id: r.id, managerId: seat.managerId }] : [];
+  });
+  return managersPastAgents(organizationId, people, db);
 }
 
 /** One question for sopsEachManagerCanRead: may this digest manager open this SOP? */

@@ -180,11 +180,11 @@ describe("reportsHereOf: who reports to someone in this workspace, both halves (
   it("answers the people anchored here by their account's line and the people here through a membership by its line", async () => {
     // Before: no such read; directReports named every account whose own line names Dana, in any workspace.
     expect(await reportsHereOf("b", ["dana"])).toEqual([
-      { id: "dan", managerId: "dana", kind: "anchor", deactivated: false },
-      { id: "pat", managerId: "dana", kind: "membership", deactivated: false },
-      { id: "rex", managerId: "dana", kind: "membership", deactivated: true },
+      { id: "dan", managerId: "dana", kind: "anchor", level: "EMPLOYEE", deactivated: false },
+      { id: "pat", managerId: "dana", kind: "membership", level: "EMPLOYEE", deactivated: false },
+      { id: "rex", managerId: "dana", kind: "membership", level: "EMPLOYEE", deactivated: true },
     ]);
-    expect(await reportsHereOf("a", ["max"])).toEqual([{ id: "pat", managerId: "max", kind: "anchor", deactivated: false }]);
+    expect(await reportsHereOf("a", ["max"])).toEqual([{ id: "pat", managerId: "max", kind: "anchor", level: "EMPLOYEE", deactivated: false }]);
   });
 
   it("never answers another workspace's line: Pat's account names Max, but in B she reports to Dana", async () => {

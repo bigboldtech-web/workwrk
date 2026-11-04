@@ -24,6 +24,7 @@ import { getTeamAlignment } from "@/lib/team-alignment";
 import { kpiActorCtx } from "@/lib/kpi-review.server";
 import { SubTeamsView, type SubTeamRow } from "@/components/team/sub-teams-view";
 import { ownHere } from "@/lib/access/profile-here";
+import { workspacePeopleLines } from "@/lib/access/acting-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +41,14 @@ export default async function TeamRollupPage() {
   // Org-wide viewers see every top of the company AND their own direct
   // reports (who sit under them, so they are not roots): without the second
   // half an admin's own team fell out of the page.
+  // Each read at THIS workspace's line (docs/plans/workspace-status-2.md
+  // E1, step 2): the account's for people anchored here, the membership's
+  // for people here through one, live seats (workspacePeopleLines). Before,
+  // the people anchored here alone, by their account's line.
   const rootIds = orgWide
-    ? (await prisma.user.findMany({
-        where: { organizationId: u.organizationId, deletedAt: null, status: { not: "INACTIVE" }, id: { not: u.id }, OR: [{ managerId: null }, { managerId: u.id }] },
-        select: { id: true },
-      })).map((r) => r.id)
+    ? (await workspacePeopleLines(u.organizationId, { activeOnly: true }))
+        .filter((r) => r.id !== u.id && (r.managerId === null || r.managerId === u.id))
+        .map((r) => r.id)
     : undefined;
   const data = await getDirectorRollup({ directorId: u.id, organizationId: u.organizationId, rootIds });
 

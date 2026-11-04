@@ -29,6 +29,12 @@
 // here. The people below are kept as people anchored here are kept (not
 // removed; a deactivated one stays): a membership seat here that is not
 // removed (team.ts reads the same).
+//
+// THE LINE HERE (docs/plans/workspace-status-2.md E1, E2, step 2). Every walk
+// reads this workspace's lines: the solid walk joins each step to the two
+// halves (the account line of people anchored here, the membership line of
+// people here through one; team.ts says how and by which indexes), and the
+// dotted reads take this workspace's rows (UserDottedLine.organizationId).
 
 import { prisma } from "@/lib/prisma";
 import { effectiveDirectReportIds, liveHereAmong, managesNobody } from "@/lib/access/manager-lines";
@@ -69,10 +75,10 @@ export async function getDottedReports(managerId: string, organizationId: string
   return dottedRowsHere(managerId, organizationId);
 }
 
-/** The dotted lines to `managerId` from people of this workspace who are not removed (batch 5). */
+/** This workspace's dotted lines to `managerId` (E2), from people of this workspace who are not removed (batch 5). */
 async function dottedRowsHere(managerId: string, organizationId: string): Promise<Array<{ userId: string; weight: number | null }>> {
   const rows = await prisma.userDottedLine.findMany({
-    where: { managerId, user: { deletedAt: null } },
+    where: { organizationId, managerId, user: { deletedAt: null } },
     select: { userId: true, weight: true },
   });
   const here = await liveHereAmong(organizationId, rows.map((r) => r.userId));
@@ -111,6 +117,8 @@ export async function getSolidReportTree(
  * and is not removed. A person who holds none ends the walk there, as
  * effectiveManagersOf treats them: nobody's manager in this workspace. The
  * root's membership seat must be live, a report's kept (THE SEAT HERE).
+ * Each step reads the line THERE (THE LINE HERE): the recursive name joined
+ * to a LATERAL subquery of the two halves, as team.ts getTeamUserIds.
  */
 async function solidTreeRows(rootUserId: string, organizationId: string, opts: { maxDepth?: number; includeRoot?: boolean }): Promise<string[]> {
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
@@ -124,14 +132,18 @@ async function solidTreeRows(rootUserId: string, organizationId: string, opts: {
               OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
                           WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND ${liveSeatSql("m")}))
       UNION ALL
-      SELECT u."id", t.depth + 1
-        FROM "User" u
-        JOIN tree t ON u."managerId" = t."id"
-       WHERE u."deletedAt" IS NULL
-         AND t.depth < ${maxDepth}
-         AND (u."organizationId" = ${organizationId}
-              OR EXISTS (SELECT 1 FROM "OrganizationMembership" m
-                          WHERE m."userId" = u."id" AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}))
+      SELECT r."id", t.depth + 1
+        FROM tree t
+        CROSS JOIN LATERAL (
+          SELECT u."id" FROM "User" u
+           WHERE u."managerId" = t."id" AND u."organizationId" = ${organizationId} AND u."deletedAt" IS NULL
+          UNION ALL
+          SELECT m."userId" AS "id" FROM "OrganizationMembership" m
+            JOIN "User" u ON u."id" = m."userId"
+           WHERE m."managerId" = t."id" AND m."organizationId" = ${organizationId} AND ${keptSeatSql("m")}
+             AND u."organizationId" <> ${organizationId} AND u."deletedAt" IS NULL
+        ) r
+       WHERE t.depth < ${maxDepth}
     )
     SELECT DISTINCT "id", depth FROM tree
   `;
@@ -161,33 +173,6 @@ export async function getEffectiveReportTree(
   const set = new Set<string>(solid);
   for (const d of dotted) set.add(d.userId);
   return Array.from(set);
-}
-
-/**
- * Walk UP the solid reporting chain — every manager / grand-manager /
- * etc. above this user. Capped at `maxDepth`.
- */
-export async function getReportingChain(
-  userId: string,
-  opts: { maxDepth?: number } = {},
-): Promise<string[]> {
-  const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
-  const rows = await prisma.$queryRaw<Array<{ managerId: string; depth: number }>>`
-    WITH RECURSIVE chain AS (
-      SELECT u."managerId", 0 AS depth
-        FROM "User" u
-       WHERE u."id" = ${userId}
-         AND u."managerId" IS NOT NULL
-      UNION ALL
-      SELECT u."managerId", c.depth + 1
-        FROM "User" u
-        JOIN chain c ON u."id" = c."managerId"
-       WHERE u."managerId" IS NOT NULL
-         AND c.depth < ${maxDepth}
-    )
-    SELECT DISTINCT "managerId", depth FROM chain WHERE "managerId" IS NOT NULL
-  `;
-  return rows.map((r) => r.managerId);
 }
 
 /**

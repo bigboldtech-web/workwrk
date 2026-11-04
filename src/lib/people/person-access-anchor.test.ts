@@ -13,7 +13,8 @@ import { legacyLevelRow } from "@/lib/access/test-fixtures";
 type U = { id: string; organizationId: string; managerId: string | null; accessLevel: string; status: string; deletedAt: Date | null; firstName: string; lastName: string };
 const st = vi.hoisted(() => ({
   users: new Map<string, U>(),
-  memberships: [] as Array<{ userId: string; organizationId: string; role: string }>,
+  // A membership holds its person's line in its workspace (docs/plans/workspace-status-2.md E1).
+  memberships: [] as Array<{ userId: string; organizationId: string; role: string; managerId?: string | null }>,
   dotted: [] as Array<{ userId: string; managerId: string }>,
   /** Every user.findMany where, to see which reads narrow by an index (batch 6). */
   reads: [] as Array<Record<string, unknown>>,
@@ -59,9 +60,10 @@ vi.mock("@/lib/prisma", () => {
     const text = sql.join("?");
     if (!text.includes('FROM "OrganizationMembership" m')) throw new Error(`unexpected SQL: ${text}`);
     const org = values[0] as string;
+    // Each person's line HERE: the account's for someone anchored here, the membership's otherwise.
     return users()
       .filter((u) => !u.deletedAt && held(u, org) && (!text.includes("'INACTIVE'") || u.status !== "INACTIVE"))
-      .map((u) => ({ id: u.id, managerId: u.managerId }));
+      .map((u) => ({ id: u.id, managerId: u.organizationId === org ? u.managerId : st.memberships.find((m) => m.userId === u.id && m.organizationId === org)?.managerId ?? null }));
   };
   return { prisma: { user, organizationMembership, userDottedLine, $queryRaw } };
 });
@@ -110,12 +112,16 @@ describe("a manager who works here through a membership", () => {
 
   it("is on the line a loop check walks", async () => {
     // max > dana > mona. Making mona report to max closes a loop through dana.
-    st.users.get("dana")!.managerId = "max";
+    // Dana's line here is her membership's (workspace-status-2 E1); her
+    // account's is the client workspace's (fay), which no walk here reads.
+    st.users.get("dana")!.managerId = "fay";
+    st.memberships.find((m) => m.userId === "dana" && m.organizationId === ORG)!.managerId = "max";
     st.users.get("mona")!.managerId = "dana";
     st.users.get("max")!.managerId = null;
     // Before: the walk up from mona stopped at dana (anchored elsewhere).
     expect([...(await lineAbove(ORG, "mona"))]).toEqual(["mona", "dana", "max"]);
     expect(await wouldLoopIn(ORG, "max", "mona")).toBe(true);
+    // The check before the lock walks the same graph (the step 1 review M1).
     expect((await managerMapFor(ORG)).get("dana")).toBe("max");
     expect((await managerMapFor(ORG)).has("fay")).toBe(false);
   });

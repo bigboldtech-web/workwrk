@@ -308,6 +308,20 @@ export async function seatsHeldFor(
   return out;
 }
 
+/**
+ * The line each of these people holds HERE (E1, step 2): for everyone with
+ * a seat here not removed (seatsHeldFor's kept seats), the account's line
+ * for someone anchored here and the membership's otherwise. Someone with no
+ * seat here, or a removed one, is absent, so "no line here" is a null
+ * answer, never a missing one.
+ */
+export async function linesHereOf(organizationId: string, ids: readonly string[], db: Db = prisma): Promise<Map<string, string | null>> {
+  const want = [...new Set(ids)].filter(Boolean);
+  if (want.length === 0) return new Map();
+  const rows = await db.user.findMany({ where: { id: { in: want } }, select: { id: true, organizationId: true, accessLevel: true, status: true, managerId: true } });
+  return new Map([...(await seatsHeldFor(organizationId, rows, db))].map(([id, seat]) => [id, seat.managerId]));
+}
+
 /** Someone who reports to one of the managers asked about, in this workspace (reportsHereOf). */
 export interface ReportHere {
   id: string;
@@ -315,6 +329,8 @@ export interface ReportHere {
   managerId: string;
   /** Which row holds their line here: their account (anchored here) or their membership. */
   kind: "anchor" | "membership";
+  /** The level they hold here: their account's where anchored here, their membership's role otherwise (the Agent tier, for a walk). */
+  level: AccessLevel;
   /** Deactivated here: their account's status where anchored here, their membership's otherwise. */
   deactivated: boolean;
 }
@@ -351,15 +367,15 @@ export async function reportsHereOf(
   if (ids.length === 0) return [];
   const reach = opts.seats ?? "kept";
   const [anchored, members] = await Promise.all([
-    db.user.findMany({ where: { managerId: { in: ids }, ...anchoredHereWhere(organizationId, reach) }, select: { id: true, managerId: true, status: true } }),
-    db.organizationMembership.findMany({ where: { managerId: { in: ids }, ...membershipHereWhere(organizationId, reach) }, select: { userId: true, managerId: true, status: true } }),
+    db.user.findMany({ where: { managerId: { in: ids }, ...anchoredHereWhere(organizationId, reach) }, select: { id: true, managerId: true, status: true, accessLevel: true } }),
+    db.organizationMembership.findMany({ where: { managerId: { in: ids }, ...membershipHereWhere(organizationId, reach) }, select: { userId: true, managerId: true, status: true, role: true } }),
   ]);
   const out = new Map<string, ReportHere>();
   for (const u of anchored) {
-    if (u.managerId) out.set(u.id, { id: u.id, managerId: u.managerId, kind: "anchor", deactivated: String(u.status) === ENDED_STATUS });
+    if (u.managerId) out.set(u.id, { id: u.id, managerId: u.managerId, kind: "anchor", level: u.accessLevel, deactivated: String(u.status) === ENDED_STATUS });
   }
   for (const m of members) {
-    if (m.managerId && !out.has(m.userId)) out.set(m.userId, { id: m.userId, managerId: m.managerId, kind: "membership", deactivated: String(m.status) === ENDED_STATUS });
+    if (m.managerId && !out.has(m.userId)) out.set(m.userId, { id: m.userId, managerId: m.managerId, kind: "membership", level: m.role, deactivated: String(m.status) === ENDED_STATUS });
   }
   return [...out.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

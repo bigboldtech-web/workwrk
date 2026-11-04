@@ -14,6 +14,7 @@ import { cronJob } from "@/lib/cron-result";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
 import { HAS_ASSIGNEE, isSweepTask, liveInWorkspace, sweepBoards, sweepMembershipSelect, taskPeople } from "@/lib/reminder-sweep";
 import { digestManagersOf, listsEachCanRead, sopsEachManagerCanRead, type DigestManager } from "@/lib/access/digest-recipients";
+import { membershipHereWhere } from "@/lib/access/seated-here";
 import type { Prisma } from "@/generated/prisma";
 
 // WHO GETS THESE. Live workspaces only (TRIAL, ACTIVE): a suspended or
@@ -195,6 +196,20 @@ async function handle(req: NextRequest) {
     let reminders = 0;
     for (const organizationId of await liveWorkspaceIds()) {
       const byManager = new Map<string, { mgr: DigestManager; names: string[] }>();
+      const nameUnderManagers = async (people: ReadonlyArray<{ id: string; firstName: string; lastName: string }>) => {
+        const mgrOf = await digestManagersOf(organizationId, people.map((p) => p.id));
+        for (const p of people) {
+          const mgr = mgrOf.get(p.id);
+          if (!mgr) continue;
+          const e = byManager.get(mgr.id) ?? { mgr, names: [] };
+          e.names.push(`${p.firstName} ${p.lastName}`);
+          byManager.set(mgr.id, e);
+        }
+      };
+      // Everyone here with a line HERE, both halves
+      // (docs/plans/workspace-status-2.md E1, step 2): the people anchored
+      // here by their account's line, then the people here through a live
+      // membership by its line. Before, the people anchored here alone.
       await eachPage(
         ({ take, last }) => prisma.user.findMany({
           where: { organizationId, ...LIVE_PERSON, managerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
@@ -202,16 +217,16 @@ async function handle(req: NextRequest) {
           orderBy: { id: "asc" },
           take,
         }),
-        async (people) => {
-          const mgrOf = await digestManagersOf(organizationId, people.map((p) => p.id));
-          for (const p of people) {
-            const mgr = mgrOf.get(p.id);
-            if (!mgr) continue;
-            const e = byManager.get(mgr.id) ?? { mgr, names: [] };
-            e.names.push(`${p.firstName} ${p.lastName}`);
-            byManager.set(mgr.id, e);
-          }
-        },
+        nameUnderManagers,
+      );
+      await eachPage(
+        ({ take, last }) => prisma.organizationMembership.findMany({
+          where: { ...membershipHereWhere(organizationId, "live"), managerId: { not: null }, ...(last ? { id: { gt: last.id } } : {}) },
+          select: { id: true, user: { select: { id: true, firstName: true, lastName: true } } },
+          orderBy: { id: "asc" },
+          take,
+        }),
+        (rows) => nameUnderManagers(rows.map((r) => r.user)),
       );
       await Promise.all(
         [...byManager.values()].map(({ mgr, names }) => {

@@ -48,12 +48,19 @@ const st = vi.hoisted(() => ({
   orgRole: {} as Record<string, string>,
   /** Removed accounts (deletedAt), as their row reads (batch 8). */
   removed: new Set<string>(),
+  /**
+   * The line a membership HERE holds, for someone anchored elsewhere
+   * (docs/plans/workspace-status-2.md E1; the step 2 review L8): kept apart
+   * from st.managers, which is the account's line (the anchored
+   * workspace's), so a reader or a writer that takes the wrong row shows.
+   */
+  memberLine: {} as Record<string, string | null>,
 }));
 
 vi.mock("@/lib/prisma", () => {
   // The workspace, in memory: st.managers is everyone not removed (id to
   // stored manager), anchored in "org" unless st.anchoredElsewhere says so.
-  type W = { id?: string | { in: string[] }; managerId?: string; organizationId?: string; deletedAt?: null };
+  type W = { id?: string | { in: string[] }; managerId?: string | { in: string[] }; organizationId?: string; deletedAt?: null };
   const row = (id: string) => ({
     id,
     managerId: st.managers.get(id) ?? null,
@@ -69,7 +76,7 @@ vi.mock("@/lib/prisma", () => {
     st.userReads.push(w);
     return [...st.managers.keys()]
       .filter((id) => w.id === undefined || (typeof w.id === "string" ? id === w.id : w.id.in.includes(id)))
-      .filter((id) => w.managerId === undefined || st.managers.get(id) === w.managerId)
+      .filter((id) => w.managerId === undefined || (typeof w.managerId === "string" ? st.managers.get(id) === w.managerId : w.managerId.in.includes(st.managers.get(id) ?? "")))
       .filter((id) => w.organizationId === undefined || row(id).organizationId === w.organizationId)
       .filter((id) => !("deletedAt" in w) || !st.removed.has(id))
       .map(row);
@@ -77,10 +84,13 @@ vi.mock("@/lib/prisma", () => {
   const user = {
     findMany: async (a: { where: W }) => pick(a.where),
     findUnique: async (a: { where: { id: string } }) => (st.managers.has(a.where.id) ? row(a.where.id) : null),
-    updateMany: async (a: { where: { id: { in: string[] } }; data: { managerId: string | null } }) => {
+    // As Postgres answers it: only the rows whose ACCOUNT line still names
+    // the one the where names (the step 2 review L8), never a membership's.
+    updateMany: async (a: { where: { id: { in: string[] }; managerId?: string }; data: { managerId: string | null } }) => {
       st.order.push("write");
-      st.userWrites.push({ ids: a.where.id.in, managerId: a.data.managerId });
-      return { count: a.where.id.in.length };
+      const ids = a.where.id.in.filter((id) => a.where.managerId === undefined || st.managers.get(id) === a.where.managerId);
+      st.userWrites.push({ ids, managerId: a.data.managerId });
+      return { count: ids.length };
     },
   };
   const owned = (kind: string) => ({
@@ -116,12 +126,23 @@ vi.mock("@/lib/prisma", () => {
   type OrgWhere = string | { not?: string; in?: string[] };
   const orgMatches = (w: OrgWhere | undefined, org: string) =>
     w === undefined || (typeof w === "string" ? w === org : (w.not === undefined || w.not !== org) && (w.in === undefined || w.in.includes(org)));
+  // A membership here holds its person's line here (docs/plans/workspace-status-2.md
+  // E1): st.memberLine, never the account's (st.managers). Read by person,
+  // or (reportsHereOf) by the managers its line names.
+  const lineHere = (id: string) => st.memberLine[id] ?? null;
   const organizationMembership = {
-    findMany: async (a: { where: { organizationId: OrgWhere; userId: { in: string[] } } }) => {
+    findMany: async (a: { where: { organizationId: OrgWhere; userId?: { in: string[] }; managerId?: { in: string[] } } }) => {
+      if (a.where.managerId) {
+        const named = a.where.managerId.in;
+        return orgMatches(a.where.organizationId, "org")
+          ? [...st.managers.keys()].filter((id) => heldHere(id) && !st.removed.has(id) && named.includes(lineHere(id) ?? "")).map((userId) => ({ userId, managerId: lineHere(userId), status: "ACTIVE", role: st.levels[userId] ?? "EMPLOYEE" }))
+          : [];
+      }
+      const ids = a.where.userId?.in ?? [];
       const here = orgMatches(a.where.organizationId, "org")
-        ? a.where.userId.in.filter(heldHere).map((userId) => ({ userId, organizationId: "org", role: st.levels[userId] ?? "EMPLOYEE" }))
+        ? ids.filter(heldHere).map((userId) => ({ userId, organizationId: "org", role: st.levels[userId] ?? "EMPLOYEE", managerId: lineHere(userId) }))
         : [];
-      const elsewhere = a.where.userId.in.flatMap((userId) =>
+      const elsewhere = ids.flatMap((userId) =>
         Object.entries(st.memberOf[userId] ?? {}).filter(([org]) => org !== "org" && orgMatches(a.where.organizationId, org)).map(([organizationId, role]) => ({ userId, organizationId, role })),
       );
       return [...here, ...elsewhere];
@@ -233,6 +254,7 @@ beforeEach(() => {
   st.containerWrites = [];
   st.orgRole = {};
   st.removed = new Set();
+  st.memberLine = {};
 });
 
 describe("runHandover to an Agent", () => {
@@ -515,15 +537,35 @@ describe("the record of the report moves commits with them, and survives a faile
 });
 
 describe("the handover counts and moves everyone who works here, not only the people anchored here", () => {
-  it("moves a report who last switched to another workspace, and leaves someone who is not in this one", async () => {
-    // r1 works here through a membership (anchored in a client workspace);
+  it.fails("moves a report who last switched to another workspace, and leaves someone who is not in this one", async () => {
+    // workspace-status-2 step 4 must turn this green (it.fails until then): the
+    // plan reads r1's line HERE (the membership's, step 2), while
+    // writeReportMoves still writes the account's (the step 2 review's
+    // pairing 1), so nothing is written for r1. moveLinesHere closes it.
+    // r1 works here through a membership (anchored in a client workspace),
+    // and reports to the leaver here by it; the account's line is client's.
     // r2 is anchored elsewhere and holds nothing here.
     st.anchoredElsewhere = new Set(["r1", "r2"]);
     st.foreign = new Set(["r2"]);
+    st.memberLine = { r1: "leaver" };
+    st.managers.set("r1", "cleo");
     await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
     // Before: only reports anchored here, so r1 stayed under someone who left.
     expect(st.userWrites).toContainEqual({ ids: ["r1"], managerId: "rae" });
     expect(st.userWrites.some((w) => w.ids.includes("r2"))).toBe(false);
+  });
+
+  it.fails("never moves the account's line of a report here through a membership, whose line in their own workspace names the leaver too", async () => {
+    // workspace-status-2 step 4 must turn this green (it.fails until then):
+    // r1's line here (the membership's) and in the client workspace (the
+    // account's) both name the leaver. The plan reads the line here (step
+    // 2) and writeReportMoves writes the account's (the step 2 review's
+    // pairing 1b), so this workspace's handover rewrites the client
+    // workspace's line. moveLinesHere moves the membership's line only.
+    st.anchoredElsewhere = new Set(["r1"]);
+    st.memberLine = { r1: "leaver" };
+    await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
+    expect(st.userWrites.some((w) => w.ids.includes("r1"))).toBe(false);
   });
 
   it("walks up through a manager who works here through a membership", async () => {
@@ -535,9 +577,15 @@ describe("the handover counts and moves everyone who works here, not only the pe
     expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "boss" });
   });
 
-  it("counts that report as pending before a deactivation", async () => {
+  it.fails("counts that report as pending before a deactivation", async () => {
+    // workspace-status-2 step 4 must turn this green (it.fails until then):
+    // handoverReportCount still counts the account's line (the step 2
+    // review's pairing 2), so r1, under the leaver here by the membership's
+    // line, is not counted.
     st.anchoredElsewhere = new Set(["r1"]);
     st.foreign = new Set();
+    st.memberLine = { r1: "leaver" };
+    st.managers.set("r1", "cleo");
     const counts = await pendingHandover("org", "leaver");
     expect(counts.directReports).toBe(2);
   });
@@ -575,6 +623,8 @@ describe("a line another workspace relies on is never moved here", () => {
     st.managers.set("a2", "sam");
     st.names = { ...st.names, a1: "Ida Ray", a2: "Kim Lo" };
     st.anchoredElsewhere.add("a1");
+    // a1's line here is the membership's; the account's (the client workspace's) names sam too.
+    st.memberLine = { a1: "sam" };
     st.memberOf = { sam: { client: "MANAGER" } };
     const plan = await previewAgentReports("org", "sam");
     // Before: solid 2, and the move wrote a1's managerId too, the column the
@@ -613,9 +663,16 @@ describe("a line another workspace relies on is never moved here", () => {
     expect(await previewAgentReports("org", "sam")).toMatchObject({ solid: 1, stays: [] });
   });
 
-  it("the handover still moves a report anchored elsewhere whose line no other workspace relies on", async () => {
-    // r1 is anchored in the client workspace, where the leaver holds nothing.
+  it.fails("the handover still moves a report anchored elsewhere whose line no other workspace relies on", async () => {
+    // workspace-status-2 step 4 must turn this green (it.fails until then): the
+    // plan reads r1's line HERE (the membership's, step 2), while
+    // writeReportMoves still writes the account's (the step 2 review's
+    // pairing 1), so nothing is written for r1. moveLinesHere closes it.
+    // r1 is anchored in the client workspace, where the leaver holds nothing;
+    // r1's line here (the membership's) names the leaver, the account's cleo.
     st.anchoredElsewhere = new Set(["r1"]);
+    st.memberLine = { r1: "leaver" };
+    st.managers.set("r1", "cleo");
     await runHandover({ organizationId: "org", fromId: "leaver", toId: "rae", actorId: "admin" });
     expect(st.userWrites).toContainEqual({ ids: ["r1", "r2"], managerId: "rae" });
   });

@@ -34,6 +34,7 @@ import {
   type WeeklyScope,
 } from "./weekly-queue";
 import { ownHere } from "@/lib/access/profile-here";
+import { personSeatIn } from "@/lib/access/acting-workspace";
 
 export interface WeeklyQueueCtx {
   userId: string;
@@ -120,7 +121,6 @@ const SUBJECT_SELECT = {
   lastName: true,
   email: true,
   avatar: true,
-  managerId: true,
   presenceStatus: true,
   presenceUntil: true,
   // With its workspace: the job title named only when this one's (D18; the
@@ -354,7 +354,10 @@ export async function readWeeklyReview(ctx: WeeklyQueueCtx, id: string): Promise
 
   const st = weeklyStatusOf(row);
   const canDecide = !isSubject && canDecideFor(ctx, row, (await fallbackManagersOf(ctx, [row])).get(row.userId) ?? null);
-  const directManagerId = row.user.managerId ?? row.managerId;
+  // The subject's manager HERE (docs/plans/workspace-status-2.md E1): the
+  // line their seat here holds, never their account's for someone here
+  // through a membership; the recorded manager when they have none.
+  const directManagerId = (await personSeatIn(ctx.organizationId, row.userId))?.managerId ?? row.managerId;
   return {
     id: row.id,
     userId: row.userId,

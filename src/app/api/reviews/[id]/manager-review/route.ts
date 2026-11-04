@@ -60,7 +60,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         cycle: { select: { id: true, name: true, status: true, startDate: true, endDate: true } },
         subject: {
           select: {
-            id: true, firstName: true, lastName: true, email: true, avatar: true, managerId: true,
+            id: true, firstName: true, lastName: true, email: true, avatar: true,
             // With their workspace: named only when this one's (D18; the final review, security M1).
             department: { select: { name: true, organizationId: true } },
             role: { select: { title: true, organizationId: true } },
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? review.reviewer
         : await prisma.user.findUnique({ where: { id: writer }, select: { id: true, firstName: true, lastName: true } });
     return jsonSuccess({
-      review: { ...review, reviewerId: writer, reviewer, subject: { ...placedHere(review.subject, orgId), managerId: undefined }, peerFeedback: undefined },
+      review: { ...review, reviewerId: writer, reviewer, subject: placedHere(review.subject, orgId), peerFeedback: undefined },
       peerFeedback: submittedPeers.map((pf) => (pf.anonymous && !ctx.peopleTeamOrAdmin ? { ...pf, giver: null } : pf)),
       peersAsked: review.peerFeedback.length,
       kras: kras.map((k) => ({ id: k.kra.id, name: k.kra.name, weight: k.weightage || k.kra.weight || null })),
@@ -174,7 +174,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const found = await prisma.review.findFirst({
     where: { id: reviewId, cycleId, cycle: { organizationId: getOrgId(session) } },
-    include: { cycle: { select: { status: true, name: true } }, subject: { select: { managerId: true } } },
+    include: { cycle: { select: { status: true, name: true } } },
   });
   // Only the reviewer the reporting line names today writes it (review-cycle.ts
   // effectiveReviewerId); the stamp is healed to them on this write.

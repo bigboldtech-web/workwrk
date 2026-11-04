@@ -13,6 +13,7 @@ import { getOrgId, getUserId, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
 import { prisma } from "@/lib/prisma";
 import { isAgentOf, isSeededPeopleTeam } from "@/lib/access/org-role";
+import { reportsHereOf } from "@/lib/access/acting-workspace";
 import { parseAccessSettings } from "@/lib/access/settings";
 import {
   mayDeleteGoal,
@@ -119,9 +120,12 @@ export async function goalRightsActor(session: unknown, chainIds?: readonly stri
     // Someone with a report manages people even below the manager tier (the
     // link rule reads it); the tier itself already counts, so skip the query.
     // An Agent manages nobody, whatever lines still name them (AGENT_TIER_BLURB).
+    // A live report HERE (docs/plans/workspace-status-2.md E1, step 2): the
+    // line of someone anchored here or of a membership here, both halves.
+    // Before, only people anchored here counted.
     manager || isAgentOf(level)
       ? Promise.resolve(0)
-      : prisma.user.count({ where: { organizationId: getOrgId(session), managerId: callerId, deletedAt: null, status: { not: "INACTIVE" } } }),
+      : reportsHereOf(getOrgId(session), [callerId], prisma, { seats: "live" }).then((rows) => rows.filter((r) => r.id !== callerId).length),
   ]);
   return { callerId, admin, peopleTeam, manager, agent: isAgentOf(level), chain, leadsPeople: manager || directReports > 0 };
 }

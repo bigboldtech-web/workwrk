@@ -14,8 +14,8 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type U = { id: string; organizationId: string; managerId: string | null; accessLevel: string; status: string; deletedAt: Date | null };
-type M = { userId: string; organizationId: string; role: string; status: string; removedAt: Date | null };
-const st = vi.hoisted(() => ({ users: new Map<string, U>(), memberships: [] as M[], dotted: [] as Array<{ userId: string; managerId: string }> }));
+type M = { userId: string; organizationId: string; role: string; status: string; removedAt: Date | null; managerId?: string | null };
+const st = vi.hoisted(() => ({ users: new Map<string, U>(), memberships: [] as M[], dotted: [] as Array<{ userId: string; managerId: string; organizationId: string }> }));
 
 vi.mock("@/lib/prisma", () => {
   type W = Record<string, unknown>;
@@ -40,14 +40,25 @@ vi.mock("@/lib/prisma", () => {
         findUnique: async (a: { where: { id: string } }) => st.users.get(a.where.id) ?? null,
       },
       userDottedLine: {
-        findMany: async (a: { where: { managerId: string; user?: { deletedAt: null } } }) =>
-          st.dotted.filter((d) => d.managerId === a.where.managerId && !(a.where.user && st.users.get(d.userId)?.deletedAt)),
+        findMany: async (a: { where: { organizationId?: string; managerId: string; user?: { deletedAt: null } } }) =>
+          st.dotted.filter((d) => d.managerId === a.where.managerId && (a.where.organizationId === undefined || d.organizationId === a.where.organizationId) && !(a.where.user && st.users.get(d.userId)?.deletedAt)),
       },
       organizationMembership: {
         findUnique: async (a: { where: { userId_organizationId: { userId: string; organizationId: string } } }) =>
           st.memberships.find((m) => m.userId === a.where.userId_organizationId.userId && m.organizationId === a.where.userId_organizationId.organizationId) ?? null,
-        findMany: async (a: { where: { organizationId: string; userId: { in: string[] } } }) =>
-          st.memberships.filter((m) => m.organizationId === a.where.organizationId && a.where.userId.in.includes(m.userId)),
+        // By person, or (reportsHereOf) by the line it holds here, the person anchored elsewhere (workspace-status-2 E1).
+        findMany: async (a: { where: { organizationId: string; userId?: { in: string[] }; managerId?: { in: string[] }; removedAt?: null; status?: { not: string }; user?: { organizationId: { not: string }; deletedAt: null; status?: { not: string } } } }) =>
+          st.memberships.filter((m) => {
+            const w = a.where;
+            if (m.organizationId !== w.organizationId) return false;
+            if (w.userId) return w.userId.in.includes(m.userId);
+            const u = st.users.get(m.userId);
+            if (!u || !w.managerId || !w.managerId.in.includes(m.managerId ?? "")) return false;
+            if ("removedAt" in w && m.removedAt) return false;
+            if (w.status && m.status === w.status.not) return false;
+            if (w.user && (u.organizationId === w.user.organizationId.not || u.deletedAt || (w.user.status && u.status === w.user.status.not))) return false;
+            return true;
+          }),
       },
     },
   };
@@ -70,14 +81,17 @@ beforeEach(() => {
   st.dotted.length = 0;
   // Max manages, in workspace B: Lia (anchored in A, live in B), Rita
   // (anchored and live in A, deactivated in B), Ron (anchored in A, removed
-  // from B) and Dan (anchored in B, deactivated).
+  // from B) and Dan (anchored in B, deactivated). Each line to Max in B is
+  // on the B membership (workspace-status-2.md E1); the accounts of the
+  // people anchored in A hold A's line, to Amy.
   person("max", "B", { accessLevel: "MANAGER" });
-  person("lia", "A", { managerId: "max" });
-  seat("lia", "B");
-  person("rita", "A", { managerId: "max" });
-  seat("rita", "B", { status: "INACTIVE" });
-  person("ron", "A", { managerId: "max" });
-  seat("ron", "B", { status: "INACTIVE", removedAt: new Date("2026-10-01") });
+  person("amy", "A", { accessLevel: "MANAGER" });
+  person("lia", "A", { managerId: "amy" });
+  seat("lia", "B", { managerId: "max" });
+  person("rita", "A", { managerId: "amy" });
+  seat("rita", "B", { status: "INACTIVE", managerId: "max" });
+  person("ron", "A", { managerId: "amy" });
+  seat("ron", "B", { status: "INACTIVE", removedAt: new Date("2026-10-01"), managerId: "max" });
   person("dan", "B", { managerId: "max", status: "INACTIVE" });
 });
 
@@ -95,13 +109,13 @@ describe("the level helpers, live by default and kept on request", () => {
 
   it("seatsHeldFor says who is deactivated HERE: the membership's status, not the account's", async () => {
     const held = await seatsHeldFor("B", ["lia", "rita", "ron", "dan"].map((id) => st.users.get(id)!) as never[]);
-    // The line here rides on the seat (workspace-status-2.md E1): these
-    // memberships hold none of their own, so a membership person's line in B
-    // is none, never their account's (Max in A's column); Dan's is his account's.
+    // The line here rides on the seat (workspace-status-2.md E1): a
+    // membership person's line in B is their membership's (Max), never their
+    // account's (Amy, A's line); Dan's is his account's.
     expect(Object.fromEntries(held)).toEqual({
-      lia: { level: "EMPLOYEE", deactivated: false, managerId: null },
+      lia: { level: "EMPLOYEE", deactivated: false, managerId: "max" },
       // Live in A (her account is ACTIVE), deactivated in B.
-      rita: { level: "EMPLOYEE", deactivated: true, managerId: null },
+      rita: { level: "EMPLOYEE", deactivated: true, managerId: "max" },
       dan: { level: "EMPLOYEE", deactivated: true, managerId: "max" },
     });
   });
@@ -169,7 +183,10 @@ describe("every caller of the level helpers says which seats it means", () => {
     // check-in-access.server.ts no longer asks a level: reading someone's
     // check-ins asks for their seat here in any state (personSeatIn), as the
     // list reads every row written here (step 4).
-    "src/lib/access/manager-candidate.ts": { live: 2, kept: 2 }, // managerCandidateIn and staleLinesOf; agentIdsIn and lineAbove
+    // staleLinesOf live; agentIdsIn kept; managerCandidateIn and lineAbove at
+    // the seat (workspace-status-2 E4, E5: "inactive" is the seat's, and the
+    // loop walk climbs the line each seat here holds)
+    "src/lib/access/manager-candidate.ts": { live: 1, kept: 1, seats: 2 },
     "src/lib/oauth/eligibility.ts": { live: 2 }, // an AI app's access
     "src/lib/access/viewer.ts": { live: 1 }, // the viewer's own level
     "src/lib/access/self-facts.ts": { live: 1 },
@@ -177,12 +194,15 @@ describe("every caller of the level helpers says which seats it means", () => {
     "src/lib/agents/acting.ts": { live: 1, kept: 1 }, // the person a teammate acts for; kept only to say why not (deactivated here, or gone)
     "src/lib/agents/tools.ts": { live: 2 }, // a teammate's reads as the person
     "src/lib/people/person-access.server.ts": { live: 1 }, // the viewer's own level
-    "src/lib/access/digest-recipients.ts": { live: 1 }, // who gets a manager's digest
+    // a member's digest manager: their line here, the membership's (workspace-status-2 E1)
+    "src/lib/access/digest-recipients.ts": { seats: 1 },
     "src/lib/people/handover.server.ts": { kept: 1 }, // who another workspace's record names
-    // managesNobody, effectiveManagersOf (reach, twice), countedDottedManagerIds
-    // (reach), othersDottedLines, managerLineIsOthers and recordLinesOfOthers
-    // (whose a line is) live; liveHereAmong kept; factsHere seats.
-    "src/lib/access/manager-lines.ts": { live: 7, kept: 1, seats: 1 },
+    // managesNobody, countedDottedManagerIds (reach), othersDottedLines,
+    // managerLineIsOthers and recordLinesOfOthers (whose a line is) live;
+    // liveHereAmong kept; factsHere, effectiveManagersOf and
+    // managersPastAgents at the seat (the line each seat here holds,
+    // workspace-status-2 E1; a membership counted only while live, as before).
+    "src/lib/access/manager-lines.ts": { live: 5, kept: 1, seats: 3 },
   };
 
   function sources(dir: string, out: string[] = []): string[] {

@@ -48,7 +48,7 @@ export async function GET(
         include: {
           subject: {
             select: {
-              id: true, firstName: true, lastName: true, email: true, managerId: true,
+              id: true, firstName: true, lastName: true, email: true,
               // With their workspace: named only when this one's (below).
               department: { select: { id: true, name: true, organizationId: true } },
               role: { select: { id: true, title: true, organizationId: true } },
