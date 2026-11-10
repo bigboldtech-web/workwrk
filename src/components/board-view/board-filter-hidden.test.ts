@@ -37,6 +37,20 @@ describe("the List says so", () => {
 
   it("when a view opens with every task hidden, once per view", () => {
     expect(canvas).toMatch(/Every task in this view is hidden by a filter\./);
-    expect(canvas).toMatch(/toldEmptyFor\.current === opened/);
+    expect(canvas).toMatch(/toldEmptyFor\.current === openedView/);
+  });
+
+  it("Clear filter acts only on the view it spoke of, and can be undone", () => {
+    expect(canvas).toMatch(/if \(now\.view !== view\) return;/);
+    expect(canvas).toMatch(/onUndo: \(\) => \{\s+if \(filterNow\.current\.view === view\) filterNow\.current\.apply\(before\);/);
+  });
+
+  it("someone who may not save the view clears it for themselves only", () => {
+    expect(canvas).toMatch(/canSaveView \? setFilters\(next\) : setFiltersState\(next\)/);
+  });
+
+  it("a view type with no filter menu never says so", () => {
+    expect(canvas).toMatch(/everyTaskHidden = filterable &&/);
+    expect(canvas).toMatch(/now\.filterable && hiddenByFilters/);
   });
 });
