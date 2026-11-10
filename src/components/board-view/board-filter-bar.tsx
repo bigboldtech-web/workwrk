@@ -262,6 +262,16 @@ export function applyFilters(
   return items.filter((it) => keep.has(it.id));
 }
 
+/** Whether these filters keep this one task off the view. */
+export function hiddenByFilters(
+  item: BoardItemRow,
+  f: BoardFilters,
+  statuses: StatusOption[],
+  opts?: { statusOf?: (row: BoardItemRow) => string | null },
+): boolean {
+  return filtersActive(f) && applyFilters([item], f, statuses, opts).length === 0;
+}
+
 // ── FilterMenu — the toolbar chip + ClickUp-style rule panel ───────
 
 const selectCls = "h-7 rounded-md border border-zinc-200 bg-white text-sm px-1.5 focus:outline-none focus:border-zinc-400";

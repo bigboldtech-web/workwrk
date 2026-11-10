@@ -32,8 +32,11 @@ import { BoardPivotView } from "./board-pivot-view";
 import { BoardCardsView } from "./board-cards-view";
 import { BoardActivityView } from "./board-activity-view";
 import {
+  EMPTY_FILTERS,
   FilterMenu,
   applyFilters,
+  filtersActive,
+  hiddenByFilters,
   parseFilters,
   parseSavedFilters,
   serializeFilters,
@@ -189,7 +192,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   );
   const mayManage = canManage ?? canContribute;
   const router = useRouter();
-  const { toast } = useOsToast();
+  const { toast, dismiss } = useOsToast();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [trackedItemParam, setTrackedItemParam] = useState<string | null>(null);
@@ -480,6 +483,50 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     });
   }, [boardId]);
 
+  // A filter saved on a view hides tasks from everyone who opens it, and the
+  // chip was the only sign. Founder report 2026-11-10: a List with one filter
+  // showed 0 in every column, so its tasks read as gone and each new task as
+  // never added. Both moments now say so, with the way out on the message.
+  //
+  // `apply` saves only for someone who may save this view: anyone else clears
+  // it for themselves, as a refused save would only tell them off.
+  const openedView = viewId ?? boardId;
+  const filterable = FILTERABLE_VIEWS.has(viewType);
+  const filterState = () => ({
+    filters,
+    statuses,
+    statusOf,
+    filterable,
+    view: openedView,
+    apply: (next: BoardFilters) => (canSaveView ? setFilters(next) : setFiltersState(next)),
+  });
+  const filterNow = useRef(filterState());
+  useEffect(() => {
+    filterNow.current = filterState();
+  });
+  const hiddenSlot = `filter-hidden:${openedView}`;
+  // The message outlives a tab change by a few seconds, so it remembers which
+  // view it spoke of and does nothing anywhere else. Clearing a saved filter
+  // changes the view for everyone on it, so it can be taken back.
+  const clearFilterAction = useCallback(
+    (view: string) => ({
+      label: "Clear filter",
+      onClick: () => {
+        const now = filterNow.current;
+        if (now.view !== view) return;
+        const before = now.filters;
+        now.apply(EMPTY_FILTERS);
+        toast("Filter cleared.", {
+          key: `filter-cleared:${view}`,
+          onUndo: () => {
+            if (filterNow.current.view === view) filterNow.current.apply(before);
+          },
+        });
+      },
+    }),
+    [toast],
+  );
+
   // Item-state ownership (2026-08-12): the table/kanban renderers keep their
   // own optimistic copy of the list and re-seed it from `filteredItems`
   // whenever the canvas re-renders (drawer edit, filter change, …). These
@@ -488,7 +535,34 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // about (the "created task disappears after a drawer edit" bug).
   const handleItemCreated = useCallback((item: BoardItemRow) => {
     setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
-  }, []);
+    const now = filterNow.current;
+    if (now.filterable && hiddenByFilters(item, now.filters, now.statuses, { statusOf: now.statusOf })) {
+      toast("Task added, but a filter on this view is hiding it.", {
+        key: `filter-hidden:${now.view}`,
+        action: clearFilterAction(now.view),
+      });
+    }
+  }, [toast, clearFilterAction]);
+  // Said once per view as it opens, never while someone is narrowing a filter
+  // by hand and can see what they are doing.
+  const toldEmptyFor = useRef<string | null>(null);
+  useEffect(() => () => {
+    // Leaving the view takes its message down. The guard forgets with it, or
+    // React's development double mount would remove the toast and never redo it.
+    dismiss(hiddenSlot);
+    toldEmptyFor.current = null;
+  }, [hiddenSlot, dismiss]);
+  const everyTaskHidden = filterable && filtersActive(filters) && items.length > 0 && filteredItems.length === 0;
+  useEffect(() => {
+    if (!everyTaskHidden) dismiss(hiddenSlot);
+    if (toldEmptyFor.current === openedView) return;
+    toldEmptyFor.current = openedView;
+    if (!everyTaskHidden) return;
+    toast("Every task in this view is hidden by a filter.", {
+      key: hiddenSlot,
+      action: clearFilterAction(openedView),
+    });
+  }, [openedView, everyTaskHidden, hiddenSlot, toast, dismiss, clearFilterAction]);
   // The "+ Task" window reports what it made. Only the List view listened, so
   // on the Board, every List's default view, the window closed and no card
   // appeared until the next poll, up to twelve seconds later, and it looked
