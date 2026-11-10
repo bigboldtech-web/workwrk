@@ -42,6 +42,7 @@ import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
 import { publishItemChanged } from "@/lib/notify-realtime";
+import { announceAddedMentions } from "@/lib/items/item-mentions";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
 import { validateConnectWrites } from "@/lib/list-connect-server";
@@ -163,6 +164,9 @@ const patchSchema = z.object({
   // body goes through this; `metadata` stays for the callers that really do
   // own the whole blob (the create modal's snapshot).
   metadataPatch: z.record(z.string(), z.unknown()).optional(),
+  // People tagged in the description this save carries. Told only when the
+  // saved text names them and the text before it did not (item-mentions.ts).
+  mentionedUserIds: z.array(z.string()).max(50).optional(),
   // Phase 58, first-class date columns; ISO strings or null.
   startAt: z.string().datetime().nullable().optional(),
   dueAt: z.string().datetime().nullable().optional(),
@@ -484,6 +488,9 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
       throw err;
     }
   }
+  const savedDescription = parsed.data.metadataPatch?.description;
+  const taggedInDescription = parsed.data.mentionedUserIds ?? [];
+  delete (parsed.data as { mentionedUserIds?: unknown }).mentionedUserIds;
   delete (parsed.data as { metadataPatch?: unknown }).metadataPatch;
   delete (parsed.data as { metadata?: unknown }).metadata;
   delete (parsed.data as { watcherIds?: unknown }).watcherIds;
@@ -644,6 +651,19 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
         actorId: c.userId,
         // Phase 2: watchers hear about status too, and an unwatcher does not.
         metadata: updated.metadata,
+      });
+    }
+
+    if (typeof savedDescription === "string" && taggedInDescription.length > 0) {
+      const earlier = (gate.item.metadata as { description?: unknown } | null)?.description;
+      await announceAddedMentions({
+        organizationId: c.organizationId,
+        authorId: c.userId,
+        item: { id: updated.id, title: updated.title },
+        before: typeof earlier === "string" ? earlier : "",
+        after: savedDescription,
+        claimed: taggedInDescription,
+        where: "description",
       });
     }
 

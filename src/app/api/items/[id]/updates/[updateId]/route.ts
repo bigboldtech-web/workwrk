@@ -15,9 +15,13 @@ import { z } from "zod";
 import { deleteUpdate, editUpdate, getUpdate } from "@/lib/item-thread";
 import { gateItem, itemCtx } from "@/lib/item-gate";
 import { publishItemChanged } from "@/lib/notify-realtime";
+import { announceAddedMentions } from "@/lib/items/item-mentions";
 
 const patchSchema = z.object({
   body: z.string().min(1).max(10_000),
+  // People tagged while editing. Told only when the new words name them and
+  // the old ones did not (item-mentions.ts).
+  mentionedUserIds: z.array(z.string()).max(50).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; updateId: string }> }) {
@@ -44,6 +48,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   try {
     const edited = await editUpdate(updateId, parsed.data.body);
+    // Editing needs only authorship, but telling somebody and adding them as a
+    // watcher is what a new comment does, so it asks what a new comment asks.
+    if (parsed.data.mentionedUserIds?.length && !("error" in (await gateItem(id, c, "comment")))) {
+      await announceAddedMentions({
+        organizationId: c.organizationId,
+        authorId: c.userId,
+        item: { id, title: gate.item.title },
+        before: update.body,
+        after: parsed.data.body,
+        claimed: parsed.data.mentionedUserIds,
+        where: "comment",
+        updateId,
+      });
+    }
     void publishItemChanged({
       itemId: id,
       boardId: gate.item.boardId,

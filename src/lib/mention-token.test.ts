@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectMention, surviving, type MentionRef } from "./mention-token";
+import { detectMention, surviving, type MentionRef, afterClosedToken } from "./mention-token";
 
 describe("detectMention", () => {
   it("opens on @ at the start of the text", () => {
@@ -53,5 +53,34 @@ describe("surviving", () => {
 
   it("reports nobody for an empty draft", () => {
     expect(surviving([ada, bob], "")).toEqual([]);
+  });
+});
+
+// Founder report 2026-11-10: people could not be tagged. With the caret kept in
+// the text, a key coming back up re-reads the token, so the "@" just closed has
+// to stay closed.
+
+describe("afterClosedToken", () => {
+  it("opens a fresh @", () => {
+    expect(afterClosedToken(detectMention("Hi @ra", 6), null)).toEqual({ token: { start: 3, query: "ra" }, closedAt: null });
+  });
+
+  it("does not reopen over the name just picked", () => {
+    const value = "Hi @Ravi Kumar ";
+    expect(afterClosedToken(detectMention(value, value.length), 3)).toEqual({ token: null, closedAt: 3 });
+  });
+
+  it("stays closed after Esc while the name goes on being typed", () => {
+    expect(afterClosedToken(detectMention("Hi @rav", 7), 3).token).toBeNull();
+  });
+
+  it("a new @ later in the text opens again", () => {
+    const value = "Hi @Ravi Kumar and @a";
+    expect(afterClosedToken(detectMention(value, value.length), 3)).toEqual({ token: { start: 19, query: "a" }, closedAt: null });
+  });
+
+  it("removing the @ forgets it, so typing it again opens the list", () => {
+    expect(afterClosedToken(detectMention("Hi ", 3), 3)).toEqual({ token: null, closedAt: null });
+    expect(afterClosedToken(detectMention("Hi @", 4), null).token).toEqual({ start: 3, query: "" });
   });
 });

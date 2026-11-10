@@ -29,6 +29,22 @@ export function detectMention(value: string, caret: number): { start: number; qu
 }
 
 /**
+ * What a keystroke or caret move opens, given the "@" the list was last closed
+ * on (a person picked, or Esc): that "@" stays closed. A pick leaves "@First
+ * Last " right before the caret, which is a token by the rule above, so the
+ * key-up after Enter would open the list again over the name just chosen, and
+ * Esc would last only until the key came back up. Any other "@", or none, is
+ * a fresh start.
+ */
+export function afterClosedToken<T extends { start: number }>(
+  found: T | null,
+  closedAt: number | null,
+): { token: T | null; closedAt: number | null } {
+  if (found && found.start === closedAt) return { token: null, closedAt };
+  return { token: found, closedAt: null };
+}
+
+/**
  * The ids still named in a body, for the POST.
  *
  * Only mentions whose "@First Last" token survived editing are sent: taking a

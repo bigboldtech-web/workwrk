@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   gateRead: { description: "Old" } as Record<string, unknown>,
   writes: [] as Array<Record<string, unknown>>,
   options: [] as Array<Record<string, unknown>>,
+  announced: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -57,6 +58,11 @@ vi.mock("@/lib/list-connect-server", () => ({ validateConnectWrites: async () =>
 vi.mock("@/services/webhookDispatcher", () => ({ dispatchEvent: async () => undefined }));
 vi.mock("@/lib/notify-item", () => ({ notifyItemAssigned: async () => undefined, notifyItemStatusChanged: async () => undefined }));
 vi.mock("@/lib/notify-realtime", () => ({ publishItemChanged: async () => undefined }));
+vi.mock("@/lib/items/item-mentions", () => ({
+  announceAddedMentions: async (a: Record<string, unknown>) => {
+    h.announced.push({ before: a.before, after: a.after, claimed: a.claimed, where: a.where });
+  },
+}));
 vi.mock("@/lib/recurring-tasks", () => ({ advanceSeriesOnComplete: async () => ({ recurred: false }) }));
 
 import { legacyLevelRow } from "@/lib/access/test-fixtures";
@@ -125,5 +131,22 @@ describe("the review's fixes", () => {
   it("guard: a tag save never asks the write to remove archived tags, whatever the body says", async () => {
     await send({ tagIds: [], removeArchivedTags: true });
     expect(h.options).toEqual([{ removeArchivedTags: false }]);
+  });
+});
+
+// Founder report 2026-11-10: tagging someone in the description.
+describe("the people a description tags", () => {
+  it("are told with what the text said before, and the list never reaches the row", async () => {
+    h.announced = [];
+    const r = await send({ metadataPatch: { description: "Old @Ravi Kumar" }, mentionedUserIds: ["ravi"] });
+    expect(r.status).toBe(200);
+    expect(h.announced).toEqual([{ before: "Old", after: "Old @Ravi Kumar", claimed: ["ravi"], where: "description" }]);
+    expect(h.writes[0]).not.toHaveProperty("mentionedUserIds");
+  });
+
+  it("guard: a save that tags nobody announces nothing", async () => {
+    h.announced = [];
+    expect((await send({ metadataPatch: { description: "Mine" } })).status).toBe(200);
+    expect(h.announced).toEqual([]);
   });
 });
