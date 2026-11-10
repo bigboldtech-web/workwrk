@@ -28,20 +28,27 @@ export function detectMention(value: string, caret: number): { start: number; qu
   return { start: at, query: token };
 }
 
+/** The "@" the list was closed on, and how much followed it at that moment. */
+export interface ClosedToken {
+  start: number;
+  length: number;
+}
+
 /**
  * What a keystroke or caret move opens, given the "@" the list was last closed
- * on (a person picked, or Esc): that "@" stays closed. A pick leaves "@First
- * Last " right before the caret, which is a token by the rule above, so the
- * key-up after Enter would open the list again over the name just chosen, and
- * Esc would last only until the key came back up. Any other "@", or none, is
- * a fresh start.
+ * on (a person picked, or Esc): that "@" stays closed while the words after it
+ * are as long or longer. A pick leaves "@First Last " right before the caret,
+ * which is a token by the rule above, so the key-up after Enter would open the
+ * list again over the name just chosen, and Esc would last only until the key
+ * came back up. Deleting back into the name is asking again, as is any other
+ * "@", so those open.
  */
-export function afterClosedToken<T extends { start: number }>(
+export function afterClosedToken<T extends { start: number; query: string }>(
   found: T | null,
-  closedAt: number | null,
-): { token: T | null; closedAt: number | null } {
-  if (found && found.start === closedAt) return { token: null, closedAt };
-  return { token: found, closedAt: null };
+  closed: ClosedToken | null,
+): { token: T | null; closed: ClosedToken | null } {
+  if (found && closed && found.start === closed.start && found.query.length >= closed.length) return { token: null, closed };
+  return { token: found, closed: null };
 }
 
 /**

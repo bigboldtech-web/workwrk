@@ -23,6 +23,10 @@ describe("the @ list", () => {
   it("stays on screen", () => {
     expect(typeahead).toMatch(/\bautoPlace\b/);
   });
+
+  it("a fresh draft forgets the @ the last one closed on", () => {
+    expect(typeahead).toMatch(/reset: \(\) => \{\s+closedOn\.current = null;\s+close\(\);/);
+  });
 });
 
 describe("editing a comment", () => {

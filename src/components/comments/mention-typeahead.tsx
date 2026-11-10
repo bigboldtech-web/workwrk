@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Picker, type PickerSectionDef } from "@/components/ui/picker";
 import { Avatar, personLabel, type AvatarPerson } from "@/components/ui/avatar-stack";
-import { afterClosedToken, detectMention, type MentionRef } from "@/lib/mention-token";
+import { afterClosedToken, detectMention, type ClosedToken, type MentionRef } from "@/lib/mention-token";
 
 export { surviving } from "@/lib/mention-token";
 export type { MentionRef } from "@/lib/mention-token";
@@ -113,18 +113,21 @@ export function useMentionTypeahead({
 
   // The "@" a pick or Esc closed the list on (afterClosedToken). A blur is a
   // plain `close`: coming back to a half-typed name opens the list again.
-  const closedAt = useRef<number | null>(null);
-  const dismiss = useCallback(() => {
-    closedAt.current = token?.start ?? null;
-    close();
-  }, [token, close]);
+  const closedOn = useRef<ClosedToken | null>(null);
+  const dismiss = useCallback(
+    (length: number) => {
+      closedOn.current = token ? { start: token.start, length } : null;
+      close();
+    },
+    [token, close],
+  );
 
   const sync = useCallback(
     (next: string) => {
       if (!enabled) return;
       const caret = textareaRef.current?.selectionStart ?? next.length;
-      const after = afterClosedToken(detectMention(next, caret), closedAt.current);
-      closedAt.current = after.closedAt;
+      const after = afterClosedToken(detectMention(next, caret), closedOn.current);
+      closedOn.current = after.closed;
       setToken(after.token);
     },
     [enabled, textareaRef],
@@ -150,7 +153,7 @@ export function useMentionTypeahead({
       const next = `${current.slice(0, token.start)}@${name} ${current.slice(caret)}`;
       setValue(next);
       setMentions((prev) => (prev.some((m) => m.id === person.id && m.name === name) ? prev : [...prev, { id: person.id, name }]));
-      dismiss();
+      dismiss(name.length + 1); // the name and the space after it
       const pos = token.start + name.length + 2; // past "@Name "
       requestAnimationFrame(() => {
         el?.focus();
@@ -168,7 +171,7 @@ export function useMentionTypeahead({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        dismiss();
+        dismiss(query.length);
         return true;
       }
       if (e.key === "ArrowDown") {
@@ -188,7 +191,7 @@ export function useMentionTypeahead({
       }
       return false;
     },
-    [open, people, activeIdx, pick, dismiss],
+    [open, people, activeIdx, pick, dismiss, query],
   );
 
   const sections: PickerSectionDef[] = useMemo(
@@ -218,7 +221,7 @@ export function useMentionTypeahead({
     <div onMouseDown={(e) => e.preventDefault()}>
     <Picker
       open
-      onClose={dismiss}
+      onClose={() => dismiss(query.length)}
       sections={sections}
       onSelect={(id) => {
         const person = people.find((p) => p.id === id);
@@ -242,7 +245,14 @@ export function useMentionTypeahead({
     onKeyDown,
     onCaretMove,
     mentions,
-    reset: () => setMentions([]),
+    // A fresh draft: the box was emptied without a keystroke, so nothing else
+    // would forget the "@" the last draft closed on, and the next comment
+    // starting with one would get no list.
+    reset: () => {
+      closedOn.current = null;
+      close();
+      setMentions([]);
+    },
     open,
     close,
   };

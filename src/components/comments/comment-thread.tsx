@@ -641,7 +641,7 @@ function CommentRow({
 
   const save = async () => {
     const body = editDraft.trim();
-    if (!body) return;
+    if (!body || saving) return;
     setSaving(true);
     const ok = await onEditSave(update.id, body, surviving(editTypeahead.mentions, body));
     setSaving(false);

@@ -62,25 +62,35 @@ describe("surviving", () => {
 
 describe("afterClosedToken", () => {
   it("opens a fresh @", () => {
-    expect(afterClosedToken(detectMention("Hi @ra", 6), null)).toEqual({ token: { start: 3, query: "ra" }, closedAt: null });
+    expect(afterClosedToken(detectMention("Hi @ra", 6), null)).toEqual({ token: { start: 3, query: "ra" }, closed: null });
   });
 
   it("does not reopen over the name just picked", () => {
     const value = "Hi @Ravi Kumar ";
-    expect(afterClosedToken(detectMention(value, value.length), 3)).toEqual({ token: null, closedAt: 3 });
+    const closed = { start: 3, length: "Ravi Kumar ".length };
+    expect(afterClosedToken(detectMention(value, value.length), closed)).toEqual({ token: null, closed });
+  });
+
+  it("stays closed while more words follow the name", () => {
+    const value = "Hi @Ravi Kumar thanks";
+    expect(afterClosedToken(detectMention(value, value.length), { start: 3, length: 11 }).token).toBeNull();
   });
 
   it("stays closed after Esc while the name goes on being typed", () => {
-    expect(afterClosedToken(detectMention("Hi @rav", 7), 3).token).toBeNull();
+    expect(afterClosedToken(detectMention("Hi @rav", 7), { start: 3, length: 2 }).token).toBeNull();
+  });
+
+  it("deleting back into the name opens the list again", () => {
+    const value = "Hi @Ravi Kum";
+    expect(afterClosedToken(detectMention(value, value.length), { start: 3, length: 11 })).toEqual({ token: { start: 3, query: "Ravi Kum" }, closed: null });
   });
 
   it("a new @ later in the text opens again", () => {
     const value = "Hi @Ravi Kumar and @a";
-    expect(afterClosedToken(detectMention(value, value.length), 3)).toEqual({ token: { start: 19, query: "a" }, closedAt: null });
+    expect(afterClosedToken(detectMention(value, value.length), { start: 3, length: 11 })).toEqual({ token: { start: 19, query: "a" }, closed: null });
   });
 
-  it("removing the @ forgets it, so typing it again opens the list", () => {
-    expect(afterClosedToken(detectMention("Hi ", 3), 3)).toEqual({ token: null, closedAt: null });
-    expect(afterClosedToken(detectMention("Hi @", 4), null).token).toEqual({ start: 3, query: "" });
+  it("removing the @ forgets it", () => {
+    expect(afterClosedToken(detectMention("Hi ", 3), { start: 3, length: 11 })).toEqual({ token: null, closed: null });
   });
 });

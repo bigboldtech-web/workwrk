@@ -71,6 +71,21 @@ describe("announceAddedMentions", () => {
     expect(db.watcherWrites).toEqual([]);
   });
 
+  it("a half-typed name already autosaved does not count as the tag", async () => {
+    await announceAddedMentions({ ...base, before: "For @Ravi", after: "For @Ravi Kumar", claimed: ["ravi"] });
+    expect(db.notices.map((n) => n.userId)).toEqual(["ravi"]);
+  });
+
+  it("someone else with the same first name does not count as the tag", async () => {
+    await announceAddedMentions({ ...base, before: "For @Ravi Sharma", after: "For @Ravi Sharma and @Ravi Kumar", claimed: ["ravi"] });
+    expect(db.notices.map((n) => n.userId)).toEqual(["ravi"]);
+  });
+
+  it("a longer name that starts the same does not count as the tag", async () => {
+    await announceAddedMentions({ ...base, before: "For @Ravi Kumarswamy", after: "For @Ravi Kumarswamy and @Ravi Kumar", claimed: ["ravi"] });
+    expect(db.notices.map((n) => n.userId)).toEqual(["ravi"]);
+  });
+
   it("adding a second person tells only that person", async () => {
     await announceAddedMentions({ ...base, before: "For @Ravi Kumar", after: "For @Ravi Kumar and @Asha Rao", claimed: ["ravi", "asha"] });
     expect(db.notices.map((n) => n.userId)).toEqual(["asha"]);

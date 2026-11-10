@@ -101,6 +101,25 @@ export async function notifyMentions(args: {
 }
 
 /**
+ * Whether the text before this edit already held this person's whole tag.
+ * resolveMentions accepts a bare "@first", right for a body someone wrote, and
+ * wrong here: "@Ravi" autosaved halfway through typing, or "@Ravi Sharma"
+ * already in the text, would pass for "@Ravi Kumar", who would never be told.
+ * The whole name, ending where a word ends. After the first save that is
+ * exactly what the text holds, so a later autosave tells nobody again.
+ */
+function taggedIn(text: string, person: { firstName: string | null; lastName: string | null }): boolean {
+  const name = `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim().toLowerCase();
+  if (!name) return false;
+  const haystack = text.toLowerCase();
+  const tag = `@${name}`;
+  for (let at = haystack.indexOf(tag); at !== -1; at = haystack.indexOf(tag, at + 1)) {
+    if (!/[\p{L}\p{N}]/u.test(haystack.charAt(at + tag.length))) return true;
+  }
+  return false;
+}
+
+/**
  * Tell the people an edit newly tags, and have them watch the task, as a
  * mention in a new comment does. Best effort: the edit is already saved.
  */
@@ -117,12 +136,13 @@ export async function announceAddedMentions(args: {
   try {
     const { organizationId, authorId, item, claimed } = args;
     if (claimed.length === 0) return;
-    const [named, alreadyNamed] = await Promise.all([
-      resolveMentions({ organizationId, body: args.after, claimed }),
-      resolveMentions({ organizationId, body: args.before, claimed }),
-    ]);
-    const had = new Set(alreadyNamed);
-    const added = named.filter((id) => !had.has(id));
+    const named = await resolveMentions({ organizationId, body: args.after, claimed });
+    if (named.length === 0) return;
+    const people = await peopleHereAmong(organizationId, named, { anchored: "any", membership: "live" });
+    const added = named.filter((id) => {
+      const person = people.get(id);
+      return !person || !taggedIn(args.before, person);
+    });
     if (added.length === 0) return;
     await prisma
       .$transaction(async (tx) => {
