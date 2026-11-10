@@ -339,11 +339,11 @@ export function CommentThread({
   );
 
   const editComment = useCallback(
-    async (updateId: string, body: string): Promise<boolean> => {
+    async (updateId: string, body: string, mentionedUserIds: string[]): Promise<boolean> => {
       const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, ...(mentionedUserIds.length ? { mentionedUserIds } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -425,6 +425,7 @@ export function CommentThread({
                   onEditSave={editComment}
                   onReact={react}
                   entityId={entityId}
+                  boardId={boardId}
                 />
               ))}
             </ul>
@@ -610,6 +611,7 @@ function CommentRow({
   onEditSave,
   onReact,
   entityId,
+  boardId,
 }: {
   update: ThreadUpdate;
   currentUserId: string | null;
@@ -619,12 +621,15 @@ function CommentRow({
   pulsing: boolean;
   anchorRef?: React.RefObject<HTMLLIElement | null>;
   onDelete: (id: string) => void;
-  onEditSave: (id: string, body: string) => Promise<boolean>;
+  onEditSave: (id: string, body: string, mentionedUserIds: string[]) => Promise<boolean>;
   onReact: (id: string, emoji: string, on: boolean) => void;
   entityId: string;
+  boardId?: string | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(update.body);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+  const editTypeahead = useMentionTypeahead({ value: editDraft, setValue: setEditDraft, textareaRef: editRef, enabled: editing, boardId });
   const [saving, setSaving] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reactOpen, setReactOpen] = useState(false);
@@ -636,9 +641,9 @@ function CommentRow({
 
   const save = async () => {
     const body = editDraft.trim();
-    if (!body) return;
+    if (!body || saving) return;
     setSaving(true);
-    const ok = await onEditSave(update.id, body);
+    const ok = await onEditSave(update.id, body, surviving(editTypeahead.mentions, body));
     setSaving(false);
     if (ok) setEditing(false);
   };
@@ -699,6 +704,7 @@ function CommentRow({
                         label="Edit"
                         onClick={() => {
                           setEditDraft(update.body);
+                          editTypeahead.reset();
                           setEditing(true);
                           setMenuOpen(false);
                         }}
@@ -730,13 +736,19 @@ function CommentRow({
 
         {editing ? (
           <div className="mt-1">
+            <div className="relative">
+            {editTypeahead.popover}
             <textarea
+              ref={editRef}
               value={editDraft}
               autoFocus
               rows={2}
               aria-label="Edit comment"
-              onChange={(e) => setEditDraft(e.target.value)}
+              onChange={(e) => editTypeahead.onValueChange(e.target.value)}
+              onClick={editTypeahead.onCaretMove}
+              onKeyUp={editTypeahead.onCaretMove}
               onKeyDown={(e) => {
+                if (editTypeahead.onKeyDown(e)) return;
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   void save();
@@ -748,6 +760,7 @@ function CommentRow({
               }}
               className="w-full resize-y rounded-md border border-line bg-raised px-3 py-2 text-row text-ink outline-none focus:border-brand focus:shadow-[0_0_0_3px_var(--os-focus-halo)]"
             />
+            </div>
             <div className="mt-1.5 flex items-center gap-1.5">
               <button
                 type="button"

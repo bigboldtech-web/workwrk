@@ -17,10 +17,10 @@
 // /api/people/pick, which the access unit has not shipped yet; when it lands,
 // this is the one call site to move.
 
-import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Picker, type PickerSectionDef } from "@/components/ui/picker";
 import { Avatar, personLabel, type AvatarPerson } from "@/components/ui/avatar-stack";
-import { detectMention, type MentionRef } from "@/lib/mention-token";
+import { afterClosedToken, detectMention, type ClosedToken, type MentionRef } from "@/lib/mention-token";
 
 export { surviving } from "@/lib/mention-token";
 export type { MentionRef } from "@/lib/mention-token";
@@ -111,11 +111,24 @@ export function useMentionTypeahead({
     setPeople([]);
   }, []);
 
+  // The "@" a pick or Esc closed the list on (afterClosedToken). A blur is a
+  // plain `close`: coming back to a half-typed name opens the list again.
+  const closedOn = useRef<ClosedToken | null>(null);
+  const dismiss = useCallback(
+    (length: number) => {
+      closedOn.current = token ? { start: token.start, length } : null;
+      close();
+    },
+    [token, close],
+  );
+
   const sync = useCallback(
     (next: string) => {
       if (!enabled) return;
       const caret = textareaRef.current?.selectionStart ?? next.length;
-      setToken(detectMention(next, caret));
+      const after = afterClosedToken(detectMention(next, caret), closedOn.current);
+      closedOn.current = after.closed;
+      setToken(after.token);
     },
     [enabled, textareaRef],
   );
@@ -140,14 +153,14 @@ export function useMentionTypeahead({
       const next = `${current.slice(0, token.start)}@${name} ${current.slice(caret)}`;
       setValue(next);
       setMentions((prev) => (prev.some((m) => m.id === person.id && m.name === name) ? prev : [...prev, { id: person.id, name }]));
-      close();
+      dismiss(name.length + 1); // the name and the space after it
       const pos = token.start + name.length + 2; // past "@Name "
       requestAnimationFrame(() => {
         el?.focus();
         el?.setSelectionRange(pos, pos);
       });
     },
-    [token, textareaRef, setValue, close, value],
+    [token, textareaRef, setValue, dismiss, value],
   );
 
   const onKeyDown = useCallback(
@@ -158,7 +171,7 @@ export function useMentionTypeahead({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        close();
+        dismiss(query.length);
         return true;
       }
       if (e.key === "ArrowDown") {
@@ -178,7 +191,7 @@ export function useMentionTypeahead({
       }
       return false;
     },
-    [open, people, activeIdx, pick, close],
+    [open, people, activeIdx, pick, dismiss, query],
   );
 
   const sections: PickerSectionDef[] = useMemo(
@@ -195,23 +208,35 @@ export function useMentionTypeahead({
     [people],
   );
 
+  // The mousedown is refused so a click on a person never takes focus from the
+  // box: the description's editor closes this list and leaves editing on blur,
+  // so the row was gone before the click could land on it.
+  //
+  // noSearch: the list must never draw its own search field. From six rows up
+  // the field appeared and took the caret, so the rest of a name went into
+  // the field instead of the text. It only filtered the eight people already
+  // loaded, so nobody further down the workspace could be found, and in the
+  // description the lost focus closed the list on the spot.
   const popover = open && people.length > 0 ? (
+    <div onMouseDown={(e) => e.preventDefault()}>
     <Picker
       open
-      onClose={close}
+      onClose={() => dismiss(query.length)}
       sections={sections}
       onSelect={(id) => {
         const person = people.find((p) => p.id === id);
         if (person) pick(person);
       }}
       side={side}
+      autoPlace
       ariaLabel="Mention someone"
-      alwaysSearch={false}
+      noSearch
       autoFocusList={false}
       backdrop={false}
       activeValue={people[activeIdx]?.id ?? null}
       emptyLabel="Nobody matches"
     />
+    </div>
   ) : null;
 
   return {
@@ -220,7 +245,14 @@ export function useMentionTypeahead({
     onKeyDown,
     onCaretMove,
     mentions,
-    reset: () => setMentions([]),
+    // A fresh draft: the box was emptied without a keystroke, so nothing else
+    // would forget the "@" the last draft closed on, and the next comment
+    // starting with one would get no list.
+    reset: () => {
+      closedOn.current = null;
+      close();
+      setMentions([]);
+    },
     open,
     close,
   };

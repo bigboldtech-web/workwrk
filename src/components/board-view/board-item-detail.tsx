@@ -33,6 +33,7 @@
 // than resending a cached copy of the whole blob.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
+import { surviving, type MentionRef } from "@/lib/mention-token";
 import {
   Ban, CalendarDays, CalendarPlus, Check, ClipboardList, Clock, Eye, Flag, GitBranch,
   Hourglass, Link2, Paperclip, Play, Plus, Search, Square, Tag, Target, UserPlus,
@@ -92,6 +93,8 @@ export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   recurRule?: RecurrenceRule | null;
   /** Phase 2, the two-list watcher rule, applied by the server. */
   watcherIds?: string[];
+  /** Who this save's description tags; the server tells the newly named. */
+  mentionedUserIds?: string[];
   /** Phase 2, "Move to list…". */
   boardId?: string;
 };
@@ -445,7 +448,7 @@ export function BoardItemDetail({
           canEdit={canEdit}
           draft={descriptionDraft}
           onDraftChange={(v) => onDraftChange?.({ description: v })}
-          onSave={(desc) => onPatch({ metadataPatch: metadataPatch({ description: desc }) })}
+          onSave={(desc, tagged) => onPatch({ metadataPatch: metadataPatch({ description: desc }), ...(tagged.length ? { mentionedUserIds: tagged } : {}) })}
         />
       </section>
 
@@ -1516,7 +1519,7 @@ function DescriptionField({
   canEdit: boolean;
   draft: string | null;
   onDraftChange: (v: string) => void;
-  onSave: (description: string) => void;
+  onSave: (description: string, mentionedUserIds: string[]) => void;
 }) {
   const stored = typeof item.metadata?.description === "string" ? (item.metadata.description as string) : "";
   const [editing, setEditing] = useState(false);
@@ -1542,10 +1545,17 @@ function DescriptionField({
     if (confirmed) onDraftChange("");
   }, [confirmed, onDraftChange]);
 
+  // Who the typeahead has put in this text so far: every save sends the ones
+  // still named, and the server tells only those the saved text newly names.
+  const taggedRef = useRef<MentionRef[]>([]);
+  const rememberTagged = useCallback((m: MentionRef[]) => {
+    taggedRef.current = m;
+  }, []);
+
   const commit = useCallback(() => {
     if (!shouldCommit(reconciled, value, stored)) return;
     setSave((s) => onSent(s, value));
-    onSave(value);
+    onSave(value, surviving(taggedRef.current, value));
   }, [reconciled, value, stored, onSave]);
 
   // Autosave 2s after the last keystroke, and on blur (design-system 5.17),
@@ -1634,6 +1644,7 @@ function DescriptionField({
         value={value}
         mentions
         boardId={item.boardId ?? null}
+        onMentionsChange={rememberTagged}
         minRows={3}
         maxRows={12}
         autoFocus={editing}

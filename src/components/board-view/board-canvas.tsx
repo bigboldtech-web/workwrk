@@ -489,6 +489,18 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const handleItemCreated = useCallback((item: BoardItemRow) => {
     setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
   }, []);
+  // The "+ Task" window reports what it made. Only the List view listened, so
+  // on the Board, every List's default view, the window closed and no card
+  // appeared until the next poll, up to twelve seconds later, and it looked
+  // as if the task had never been added. Here every view gets it.
+  useEffect(() => {
+    const onCreated = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { boardId?: string; item?: BoardItemRow } | undefined;
+      if (detail?.item && detail.boardId === boardId) handleItemCreated(detail.item);
+    };
+    window.addEventListener("workwrk:item-created", onCreated);
+    return () => window.removeEventListener("workwrk:item-created", onCreated);
+  }, [boardId, handleItemCreated]);
   // `applyRowPatchReport`, not a spread: a custom-field edit arrives as
   // `metadataPatch` and merges into THIS copy's metadata. The renderer used
   // to report only row fields, so the copy here kept the old blob and the
