@@ -405,37 +405,41 @@ export interface UpdateUserPreferenceInput {
 }
 
 export async function setUserPreference(userId: string, patch: UpdateUserPreferenceInput) {
-  const existing = await prisma.userPreference.findUnique({ where: { userId } });
-  // Deep merge (src/lib/preferences-schema.ts): plain objects recurse, arrays
-  // and scalars replace. A PATCH of `home.notifications.inboxView` therefore
-  // keeps `home.notifications.inbox` and `.email`; the previous one-level
-  // spread replaced the whole `notifications` object and lost them.
-  const sidebar = patch.sidebar
-    ? deepMergePatch(existing?.sidebar as SidebarPref | null ?? DEFAULT_SIDEBAR, patch.sidebar as Record<string, unknown>)
-    : (existing?.sidebar ?? undefined);
-  const home = patch.home
-    ? deepMergePatch(existing?.home as HomePref | null ?? DEFAULT_HOME, patch.home as Record<string, unknown>)
-    : (existing?.home ?? undefined);
-  const theme = patch.theme
-    ? deepMergePatch(existing?.theme as ThemePref | null ?? DEFAULT_THEME, patch.theme as Record<string, unknown>)
-    : (existing?.theme ?? undefined);
-  const density = patch.density ?? existing?.density ?? undefined;
+  // Read, merge and write under the row's lock. Without it two saves at once
+  // each merged into the same old row and the later write dropped the
+  // earlier one's keys: reproduced 12 times in 12 with two settings saved
+  // together (2026-11-16, a person's own List filter lost to a sidebar save).
+  // The insert covers a person with no preference row yet.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO "UserPreference" ("userId", "updatedAt") VALUES (${userId}, now())
+      ON CONFLICT ("userId") DO NOTHING`;
+    const [existing] = await tx.$queryRaw<Array<{ sidebar: unknown; home: unknown; theme: unknown; density: string | null }>>`
+      SELECT "sidebar", "home", "theme", "density" FROM "UserPreference" WHERE "userId" = ${userId} FOR UPDATE`;
+    // Deep merge (src/lib/preferences-schema.ts): plain objects recurse, arrays
+    // and scalars replace. A PATCH of `home.notifications.inboxView` therefore
+    // keeps `home.notifications.inbox` and `.email`; the previous one-level
+    // spread replaced the whole `notifications` object and lost them.
+    const sidebar = patch.sidebar
+      ? deepMergePatch(existing?.sidebar as SidebarPref | null ?? DEFAULT_SIDEBAR, patch.sidebar as Record<string, unknown>)
+      : (existing?.sidebar ?? undefined);
+    const home = patch.home
+      ? deepMergePatch(existing?.home as HomePref | null ?? DEFAULT_HOME, patch.home as Record<string, unknown>)
+      : (existing?.home ?? undefined);
+    const theme = patch.theme
+      ? deepMergePatch(existing?.theme as ThemePref | null ?? DEFAULT_THEME, patch.theme as Record<string, unknown>)
+      : (existing?.theme ?? undefined);
+    const density = patch.density ?? existing?.density ?? undefined;
 
-  return prisma.userPreference.upsert({
-    where: { userId },
-    create: {
-      userId,
-      sidebar: asJson(sidebar),
-      home: asJson(home),
-      theme: asJson(theme),
-      density: density ?? null,
-    },
-    update: {
-      sidebar: asJson(sidebar),
-      home: asJson(home),
-      theme: asJson(theme),
-      density: density ?? null,
-    },
+    return tx.userPreference.update({
+      where: { userId },
+      data: {
+        sidebar: asJson(sidebar),
+        home: asJson(home),
+        theme: asJson(theme),
+        density: density ?? null,
+      },
+    });
   });
 }
 

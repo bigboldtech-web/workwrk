@@ -8,7 +8,7 @@
 // lives here.
 
 import type { AssigneeEdit } from "@/lib/list-link-rows";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -39,6 +39,7 @@ import {
   hiddenByFilters,
   parseFilters,
   parseSavedFilters,
+  sameFilters,
   serializeFilters,
   type BoardFilters,
   type SavedFilter,
@@ -48,6 +49,9 @@ import { BoardStatusEditor } from "./board-status-editor";
 import { SprintHeaderStrip } from "./sprint-header-strip";
 import type { SprintMeta } from "@/lib/sprint";
 import { useOsToast } from "@/components/layout/os/toast";
+import { BootContext } from "@/components/layout/os/boot-context";
+import { apiFetch } from "@/lib/api-fetch";
+import { personalFiltersPatch, personalFiltersRaw, rememberPersonalFilters } from "@/lib/work/personal-filters";
 import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
@@ -160,9 +164,14 @@ interface BoardCanvasProps {
    * so the row menu never offers Add to another List for them.
    */
   personalList?: boolean;
+  /**
+   * A view only its owner sees (not shared, theirs). Its filter is theirs
+   * already, so a filter change saves straight to it.
+   */
+  viewMineAlone?: boolean;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, assigneeEdit = null, addTaskSlot, moduleGating, sprint, initialRowColorRules, canSaveView = false, personalList = false }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, assigneeEdit = null, addTaskSlot, moduleGating, sprint, initialRowColorRules, canSaveView = false, personalList = false, viewMineAlone = false }: BoardCanvasProps) {
   // Below this line the renderers each take a `canEdit` prop, and at THAT
   // level the word is unambiguous: it is content write on a row, which is
   // exactly what `canContribute` answers. The board-level confusion the
@@ -416,7 +425,18 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // renderer. Live state seeded from the saved config; every change
   // persists back through the shared config PATCH. Saved filter sets
   // (View.config.savedFilters) ride the same path.
-  const [filters, setFiltersState] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
+  //
+  // On a shared view the filter is each person's own (founder report
+  // 2026-11-10, src/lib/work/personal-filters.ts): the view's saved filter is
+  // where everyone starts, and only "Save for everyone" changes it. A
+  // Personal List and a view only its owner sees save straight to the view.
+  const bootCtx = useContext(BootContext);
+  const bootPrefs = bootCtx?.boot.prefs;
+  const ownFilters = Boolean(viewId) && !personalList && !viewMineAlone;
+  const startingFilters = (id: string | null, config: Record<string, unknown> | null | undefined) =>
+    parseFilters((ownFilters && id ? personalFiltersRaw(bootPrefs, id) : null) ?? config?.filters);
+  const [viewFilters, setViewFilters] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
+  const [filters, setFiltersState] = useState<BoardFilters>(() => startingFilters(viewId, viewConfig));
   const [savedFilters, setSavedFiltersState] = useState<SavedFilter[]>(() => parseSavedFilters(viewConfig?.savedFilters));
 
   // A view tab is a client navigation: this canvas (the page renders it with
@@ -436,13 +456,52 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     setHiddenFields(Array.isArray(hidden) ? hidden.filter((x): x is string => typeof x === "string") : []);
     const extra = viewConfig?.extraColumns;
     setExtraColumns(Array.isArray(extra) ? extra.filter((x): x is string => typeof x === "string") : []);
-    setFiltersState(parseFilters(viewConfig?.filters));
+    setViewFilters(parseFilters(viewConfig?.filters));
+    setFiltersState(startingFilters(viewId, viewConfig));
     setSavedFiltersState(parseSavedFilters(viewConfig?.savedFilters));
   }
+  // A person's own filter is saved a moment after they stop changing it, and
+  // at once when they leave, so a quick run of edits is one write.
+  const pendingOwn = useRef<{ viewId: string; raw: Record<string, unknown> | null } | null>(null);
+  const ownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendOwnFilters = useCallback(() => {
+    if (ownTimer.current) clearTimeout(ownTimer.current);
+    ownTimer.current = null;
+    const pending = pendingOwn.current;
+    pendingOwn.current = null;
+    if (!pending) return;
+    void apiFetch("/api/preferences", { method: "PATCH", json: personalFiltersPatch(pending.viewId, pending.raw), keepalive: true }).then((res) => {
+      if (!res.ok) toast("Couldn't save your filter. It stays until you reload.", { tone: "danger", key: `own-filter:${pending.viewId}` });
+    });
+  }, [toast]);
+  useEffect(() => () => sendOwnFilters(), [sendOwnFilters]);
+  const saveOwnFilters = useCallback((id: string, next: BoardFilters, base: BoardFilters) => {
+    // The same as the view's is no override at all, so a later change to the
+    // view's filter reaches this person too.
+    const raw = sameFilters(next, base) ? null : serializeFilters(next);
+    rememberPersonalFilters(id, raw);
+    if (pendingOwn.current && pendingOwn.current.viewId !== id) sendOwnFilters();
+    pendingOwn.current = { viewId: id, raw };
+    if (ownTimer.current) clearTimeout(ownTimer.current);
+    ownTimer.current = setTimeout(sendOwnFilters, 400);
+  }, [sendOwnFilters]);
   const setFilters = useCallback((next: BoardFilters) => {
     setFiltersState(next);
-    persistViewConfig({ filters: serializeFilters(next) }, "filters");
-  }, [persistViewConfig]);
+    if (ownFilters && viewId) saveOwnFilters(viewId, next, viewFilters);
+    else persistViewConfig({ filters: serializeFilters(next) }, "filters");
+  }, [ownFilters, viewId, viewFilters, saveOwnFilters, persistViewConfig]);
+  const saveFiltersForEveryone = useCallback(() => {
+    if (!viewId) return;
+    persistViewConfig({ filters: serializeFilters(filters) }, "filters");
+    setViewFilters(filters);
+    saveOwnFilters(viewId, filters, filters);
+    toast("Filter saved for everyone on this view.", { tone: "success" });
+  }, [viewId, filters, persistViewConfig, saveOwnFilters, toast]);
+  const resetOwnFilters = useCallback(() => {
+    if (!viewId) return;
+    setFiltersState(viewFilters);
+    saveOwnFilters(viewId, viewFilters, viewFilters);
+  }, [viewId, viewFilters, saveOwnFilters]);
   const setSavedFilters = useCallback((next: SavedFilter[]) => {
     setSavedFiltersState(next);
     persistViewConfig({ savedFilters: next }, "saved filters");
@@ -460,6 +519,11 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       boardId={boardId}
       savedFilters={savedFilters}
       onSavedFiltersChange={viewId ? setSavedFilters : undefined}
+      personal={
+        ownFilters
+          ? { onlyYou: !sameFilters(filters, viewFilters), canSave: canSaveView, onSave: saveFiltersForEveryone, onReset: resetOwnFilters }
+          : undefined
+      }
     />
   ) : null;
 
@@ -488,8 +552,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   // showed 0 in every column, so its tasks read as gone and each new task as
   // never added. Both moments now say so, with the way out on the message.
   //
-  // `apply` saves only for someone who may save this view: anyone else clears
-  // it for themselves, as a refused save would only tell them off.
+  // On a shared view `apply` changes this person's own filter only.
   const openedView = viewId ?? boardId;
   const filterable = FILTERABLE_VIEWS.has(viewType);
   const filterState = () => ({
@@ -498,7 +561,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     statusOf,
     filterable,
     view: openedView,
-    apply: (next: BoardFilters) => (canSaveView ? setFilters(next) : setFiltersState(next)),
+    apply: (next: BoardFilters) => setFilters(next),
   });
   const filterNow = useRef(filterState());
   useEffect(() => {
@@ -506,8 +569,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   });
   const hiddenSlot = `filter-hidden:${openedView}`;
   // The message outlives a tab change by a few seconds, so it remembers which
-  // view it spoke of and does nothing anywhere else. Clearing a saved filter
-  // changes the view for everyone on it, so it can be taken back.
+  // view it spoke of and does nothing anywhere else. Clearing can be taken
+  // back.
   const clearFilterAction = useCallback(
     (view: string) => ({
       label: "Clear filter",
@@ -516,7 +579,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         if (now.view !== view) return;
         const before = now.filters;
         now.apply(EMPTY_FILTERS);
-        toast("Filter cleared.", {
+        toast(ownFilters ? "Filter cleared for you." : "Filter cleared.", {
           key: `filter-cleared:${view}`,
           onUndo: () => {
             if (filterNow.current.view === view) filterNow.current.apply(before);
@@ -524,7 +587,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         });
       },
     }),
-    [toast],
+    [toast, ownFilters],
   );
 
   // Item-state ownership (2026-08-12): the table/kanban renderers keep their

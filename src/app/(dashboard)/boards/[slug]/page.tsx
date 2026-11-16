@@ -346,6 +346,7 @@ export default async function BoardPage(props: {
           canManage={canManage}
           canDeleteTasks={canDeleteTasks}
           canSaveView={mayConfigureView}
+          viewMineAlone={Boolean(activeView && !activeView.isShared && activeView.ownerId === u.id)}
           currentUserId={u.id}
           assigneeEdit={assigneeEdit}
           sprint={sprint}

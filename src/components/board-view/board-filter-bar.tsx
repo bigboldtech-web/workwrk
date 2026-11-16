@@ -185,6 +185,11 @@ export function parseSavedFilters(raw: unknown): SavedFilter[] {
   return out;
 }
 
+/** Whether two filters say the same thing (rule ids aside). */
+export function sameFilters(a: BoardFilters, b: BoardFilters): boolean {
+  return JSON.stringify(serializeFilters(a)) === JSON.stringify(serializeFilters(b));
+}
+
 export function activeRuleCount(f: BoardFilters): number {
   return f.rules.filter(ruleActive).length;
 }
@@ -290,9 +295,15 @@ interface FilterMenuProps {
   savedFilters?: SavedFilter[];
   /** Absent → the Saved section is hidden (no view to persist into). */
   onSavedFiltersChange?: (next: SavedFilter[]) => void;
+  /**
+   * A shared view's filter is the view's; what this person picks is theirs
+   * (src/lib/work/personal-filters.ts). Present on such a view, and then the
+   * panel says when theirs differs, with the way to share it or go back.
+   */
+  personal?: { onlyYou: boolean; canSave: boolean; onSave: () => void; onReset: () => void };
 }
 
-export function FilterMenu({ filters, onChange, statuses, items, customFields = [], boardId, savedFilters = [], onSavedFiltersChange }: FilterMenuProps) {
+export function FilterMenu({ filters, onChange, statuses, items, customFields = [], boardId, savedFilters = [], onSavedFiltersChange, personal }: FilterMenuProps) {
   const [open, setOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -506,6 +517,24 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
             <span className="text-sm text-zinc-600">Hide closed tasks</span>
             <Switch checked={filters.hideDone} onChange={(v) => onChange({ ...filters, hideDone: v })} />
           </div>
+
+          {personal?.onlyYou ? (
+            <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-zinc-100">
+              <span className="min-w-0 flex-1 text-sm text-zinc-500">Only you see this filter.</span>
+              <button type="button" onClick={personal.onReset} title="Use the filter saved on this view" className="text-sm text-zinc-500 hover:text-zinc-800">
+                Reset
+              </button>
+              {personal.canSave ? (
+                <button
+                  type="button"
+                  onClick={personal.onSave}
+                  className="h-7 px-2.5 rounded-md text-sm font-medium bg-[var(--os-brand)] hover:bg-[var(--os-brand-deep)] text-white"
+                >
+                  Save for everyone
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {onSavedFiltersChange ? (
             <div className="mt-2.5 pt-2 border-t border-zinc-100">
