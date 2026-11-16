@@ -78,6 +78,9 @@ import { LinkedRowIndicator } from "./linked-row-indicator";
 
 // View types that render the (filterable) item list — only these get the
 // toolbar FilterMenu; content views (FORM / DOC / WHITEBOARD / …) don't.
+// One line for every tab's own-filter saves (BoardCanvas sendOwnFilters).
+let ownFilterSends: Promise<unknown> = Promise.resolve();
+
 const FILTERABLE_VIEWS = new Set<ViewType>([
   "TABLE", "KANBAN", "CALENDAR", "GANTT", "CHART", "DASHBOARD",
   "WORKLOAD", "TIMELINE", "MAP", "HIERARCHY", "PIVOT", "CARDS",
@@ -461,20 +464,37 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     setSavedFiltersState(parseSavedFilters(viewConfig?.savedFilters));
   }
   // A person's own filter is saved a moment after they stop changing it, and
-  // at once when they leave, so a quick run of edits is one write.
+  // at once when they leave the List or the tab, so a quick run of edits is
+  // one write. Saves go one after another (ownFilterSends), so a slow one can
+  // never land after the change that followed it.
   const pendingOwn = useRef<{ viewId: string; raw: Record<string, unknown> | null } | null>(null);
   const ownTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sendOwnFilters = useCallback(() => {
+  const sendOwnFilters = useCallback((leaving = false) => {
     if (ownTimer.current) clearTimeout(ownTimer.current);
     ownTimer.current = null;
     const pending = pendingOwn.current;
     pendingOwn.current = null;
     if (!pending) return;
-    void apiFetch("/api/preferences", { method: "PATCH", json: personalFiltersPatch(pending.viewId, pending.raw), keepalive: true }).then((res) => {
-      if (!res.ok) toast("Couldn't save your filter. It stays until you reload.", { tone: "danger", key: `own-filter:${pending.viewId}` });
-    });
+    const send = () =>
+      apiFetch("/api/preferences", { method: "PATCH", json: personalFiltersPatch(pending.viewId, pending.raw), keepalive: true }).then((res) => {
+        if (!res.ok) toast("Couldn't save your filter. It stays until you reload.", { tone: "danger", key: `own-filter:${pending.viewId}` });
+      });
+    // A tab being closed cannot wait its turn.
+    ownFilterSends = leaving ? send() : ownFilterSends.then(send, send);
   }, [toast]);
-  useEffect(() => () => sendOwnFilters(), [sendOwnFilters]);
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") sendOwnFilters(true);
+    };
+    const onPageHide = () => sendOwnFilters(true);
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+      sendOwnFilters();
+    };
+  }, [sendOwnFilters]);
   const saveOwnFilters = useCallback((id: string, next: BoardFilters, base: BoardFilters) => {
     // The same as the view's is no override at all, so a later change to the
     // view's filter reaches this person too.
@@ -483,7 +503,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     if (pendingOwn.current && pendingOwn.current.viewId !== id) sendOwnFilters();
     pendingOwn.current = { viewId: id, raw };
     if (ownTimer.current) clearTimeout(ownTimer.current);
-    ownTimer.current = setTimeout(sendOwnFilters, 400);
+    ownTimer.current = setTimeout(() => sendOwnFilters(), 400);
   }, [sendOwnFilters]);
   const setFilters = useCallback((next: BoardFilters) => {
     setFiltersState(next);
@@ -491,12 +511,17 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     else persistViewConfig({ filters: serializeFilters(next) }, "filters");
   }, [ownFilters, viewId, viewFilters, saveOwnFilters, persistViewConfig]);
   const saveFiltersForEveryone = useCallback(() => {
-    if (!viewId) return;
-    persistViewConfig({ filters: serializeFilters(filters) }, "filters");
-    setViewFilters(filters);
-    saveOwnFilters(viewId, filters, filters);
+    if (!viewId || !viewQueue) return;
+    const chosen = filters;
+    persistViewConfig({ filters: serializeFilters(chosen) }, "filters");
+    setViewFilters(chosen);
+    // Your own copy is let go only once the view holds it: a refused or
+    // failed save (the queue says so) leaves the filter you picked yours.
+    void viewQueue.flush().then((landed) => {
+      if (landed) saveOwnFilters(viewId, chosen, chosen);
+    });
     toast("Filter saved for everyone on this view.", { tone: "success" });
-  }, [viewId, filters, persistViewConfig, saveOwnFilters, toast]);
+  }, [viewId, viewQueue, filters, persistViewConfig, saveOwnFilters, toast]);
   const resetOwnFilters = useCallback(() => {
     if (!viewId) return;
     setFiltersState(viewFilters);

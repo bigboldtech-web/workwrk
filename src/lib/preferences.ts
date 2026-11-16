@@ -446,8 +446,9 @@ export async function setUserPreference(userId: string, patch: UpdateUserPrefere
 /**
  * Write ONE key of the user's `home` JSON atomically.
  *
- * `setUserPreference` is a read-modify-write of the whole row (findUnique,
- * merge, upsert) with no version check, so two concurrent writers to `home`
+ * `setUserPreference` was a read-modify-write of the whole row (findUnique,
+ * merge, upsert) with no version check (it now merges under the row's lock),
+ * so two concurrent writers to `home`
  * (a top pin and a favorite toggle, a recent-doc marker on every doc open,
  * the sidebar's collapsed sections) each wrote their own snapshot and one
  * lost the other's change (reproduced 5/5 in the review). This is a single
