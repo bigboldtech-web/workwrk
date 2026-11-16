@@ -45,8 +45,22 @@ describe("the List says so", () => {
     expect(canvas).toMatch(/onUndo: \(\) => \{\s+if \(filterNow\.current\.view === view\) filterNow\.current\.apply\(before\);/);
   });
 
-  it("someone who may not save the view clears it for themselves only", () => {
-    expect(canvas).toMatch(/canSaveView \? setFilters\(next\) : setFiltersState\(next\)/);
+  it("on a shared view, Clear filter clears the person's own filter only", () => {
+    expect(canvas).toMatch(/apply: \(next: BoardFilters\) => setFilters\(next\)/);
+    expect(canvas).toMatch(/if \(ownFilters && viewId\) saveOwnFilters\(viewId, next, viewFilters\);/);
+  });
+
+  it("only Save for everyone changes a shared view's filter", () => {
+    expect(canvas).toMatch(/const saveFiltersForEveryone = useCallback\(\(\) => \{\s+if \(!viewId \|\| !viewQueue\) return;\s+const chosen = filters;\s+persistViewConfig\(\{ filters: serializeFilters\(chosen\) \}, "filters"\);/);
+  });
+
+  it("a person's own filter is let go only once the view holds it", () => {
+    expect(canvas).toMatch(/void viewQueue\.flush\(\)\.then\(\(landed\) => \{\s+if \(landed\) saveOwnFilters\(viewId, chosen, chosen\);/);
+  });
+
+  it("own-filter saves go one after another, and a closing tab sends at once", () => {
+    expect(canvas).toMatch(/ownFilterSends = leaving \? send\(\) : ownFilterSends\.then\(send, send\);/);
+    expect(canvas).toMatch(/window\.addEventListener\("pagehide", onPageHide\)/);
   });
 
   it("a view type with no filter menu never says so", () => {

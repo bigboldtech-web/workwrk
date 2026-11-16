@@ -340,11 +340,20 @@ describe("L20: hints are tied to their controls", () => {
     expect(renderToStaticMarkup(h(SettingsRow, { label: "Name", children: h(PickerButton, { label: "x", ariaLabel: "x", sections: [], onSelect: () => {} }) }))).not.toContain("aria-describedby");
   });
   it("the Starts picker is described by its dates", () => {
-    const html = renderToStaticMarkup(h(CreateGoalModal, { open: true, level: "INDIVIDUAL", onClose: () => {}, onSaved: () => {}, recurring: { on: true, settings: IST }, initialRepeat: "MONTHLY" }));
-    const at = html.indexOf(">Starts</span>");
-    const id = html.slice(at).match(/<span id="[^"]+" hidden="">Starts<\/span><button [^>]*aria-describedby="([^"]+)"/)?.[1];
-    expect(id).toBeTruthy();
-    expect(html).toContain(`<span id="${id}" class="text-sm font-normal text-ink-2">1 Nov 2026 to 30 Nov 2026</span>`);
+    // On a fixed day: the picker starts in this period while half of it
+    // remains, else the next, so the real clock moved this test from November
+    // to December on 16 November 2026.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-03T06:00:00Z"));
+    try {
+      const html = renderToStaticMarkup(h(CreateGoalModal, { open: true, level: "INDIVIDUAL", onClose: () => {}, onSaved: () => {}, recurring: { on: true, settings: IST }, initialRepeat: "MONTHLY" }));
+      const at = html.indexOf(">Starts</span>");
+      const id = html.slice(at).match(/<span id="[^"]+" hidden="">Starts<\/span><button [^>]*aria-describedby="([^"]+)"/)?.[1];
+      expect(id).toBeTruthy();
+      expect(html).toContain(`<span id="${id}" class="text-sm font-normal text-ink-2">1 Nov 2026 to 30 Nov 2026</span>`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
