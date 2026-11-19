@@ -59,6 +59,7 @@ import { HUB_LABELS } from "@/lib/nav/labels";
 import { STALE_TAB_EVENT, TAB_OK_EVENT } from "@/lib/tab-workspace";
 import { leaveThen } from "@/lib/dirty-guard";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { tabTitleFor } from "@/lib/nav/tab-title";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -115,14 +116,23 @@ function NavigationAnnouncer() {
   // at a moment nothing here can schedule around: a setTimeout(0) loses that
   // race and the tab keeps the marketing tagline for the rest of the session.
   // So watch <head> and re-assert instead. Writing document.title mutates the
-  // same <title> node, which re-enters the observer once and then matches, so
-  // there is no loop.
-  const desiredTitle = label ? `${label} · WorkwrK` : null;
+  // same <title> node, which re-enters the observer once and then matches.
+  //
+  // It matches only because the title is written as the browser reads it back
+  // (tabTitleFor, nav/tab-title.ts): a name saved with a stray space read back
+  // collapsed, never matched, and every write woke the observer again, which
+  // froze the tab (founder report 2026-11-19). If a title ever still reads
+  // back differently, the watcher stops rather than loop.
+  const desiredTitle = tabTitleFor(label);
   useEffect(() => {
     if (!desiredTitle) return;
-    const apply = () => { if (document.title !== desiredTitle) document.title = desiredTitle; };
+    const observer = new MutationObserver(() => apply());
+    const apply = () => {
+      if (document.title === desiredTitle) return;
+      document.title = desiredTitle;
+      if (document.title !== desiredTitle) observer.disconnect();
+    };
     apply();
-    const observer = new MutationObserver(apply);
     observer.observe(document.head, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
   }, [desiredTitle]);
