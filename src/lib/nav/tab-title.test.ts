@@ -13,8 +13,9 @@ describe("the tab title", () => {
     expect(asReadTitle("  a\t\tb\nc\r\fd  ")).toBe("a b c d");
   });
 
-  it("keeps a no-break space, which the getter keeps too", () => {
-    expect(asReadTitle("a b")).toBe("a b");
+  it("keeps a no-break space, which the getter keeps too, at either end as well", () => {
+    expect(asReadTitle("a\u00a0b")).toBe("a\u00a0b");
+    expect(asReadTitle("\u00a0a\u00a0 ")).toBe("\u00a0a\u00a0");
   });
 
   it("has no title for a page with no name", () => {

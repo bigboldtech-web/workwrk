@@ -122,18 +122,26 @@ function NavigationAnnouncer() {
   // (tabTitleFor, nav/tab-title.ts): a name saved with a stray space read back
   // collapsed, never matched, and every write woke the observer again, which
   // froze the tab (founder report 2026-11-19). If a title ever still reads
-  // back differently, the watcher stops rather than loop.
+  // back differently, or something else keeps writing its own (a browser
+  // extension that renames tabs), the watcher stops rather than loop: Next
+  // re-applies its title once per navigation, never twenty times a second.
   const desiredTitle = tabTitleFor(label);
   useEffect(() => {
     if (!desiredTitle) return;
+    let stopped = false;
+    let writes = 0;
+    let since = Date.now();
     const observer = new MutationObserver(() => apply());
+    const stop = () => { stopped = true; observer.disconnect(); };
     const apply = () => {
-      if (document.title === desiredTitle) return;
+      if (stopped || document.title === desiredTitle) return;
+      if (Date.now() - since > 1000) { since = Date.now(); writes = 0; }
+      if (++writes > 20) { stop(); return; }
       document.title = desiredTitle;
-      if (document.title !== desiredTitle) observer.disconnect();
+      if (document.title !== desiredTitle) stop();
     };
     apply();
-    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    if (!stopped) observer.observe(document.head, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
   }, [desiredTitle]);
   useEffect(() => {

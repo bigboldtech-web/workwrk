@@ -12,7 +12,8 @@
 
 /** Strip and collapse ASCII whitespace, exactly as `document.title` reads. */
 export function asReadTitle(text: string): string {
-  return text.replace(/[\t\n\f\r ]+/g, " ").trim();
+  // ASCII whitespace only: the getter keeps a no-break space at either end.
+  return text.replace(/[\t\n\f\r ]+/g, " ").replace(/^ | $/g, "");
 }
 
 /** The tab title for a page named `label`, or null when there is no name. */
