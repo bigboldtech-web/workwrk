@@ -39,6 +39,7 @@ import { describeItemActivity } from "@/lib/item-activity-describe";
 import { ITEM_ACTIVITY_KINDS, isItemActivityKind, type ItemActivityKind } from "@/lib/item-activity-kinds";
 import { relativeTime, formatTaskDate, type LocalePrefs } from "@/lib/item-date";
 import { surviving, type MentionRef } from "@/lib/mention-token";
+import { createThreadReads, FIRST_READ_ATTEMPTS } from "@/lib/comments/thread-reads";
 import { useMentionTypeahead } from "./mention-typeahead";
 import { DEFAULT_STATUS_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
@@ -165,29 +166,55 @@ export function CommentThread({
     [entityId],
   );
 
+  // Only a task's FIRST read shows the skeleton; a re-read (the 30 s poll, a
+  // realtime event) swaps the rows in place, so an edit in progress, its "@"
+  // list and an open comment menu survive it. See lib/comments/thread-reads.
+  const [reads] = useState(createThreadReads);
+
   const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const data = await loadUpdates({ around: deepLinkId });
-      if (data.can) setCan({ comment: !!data.can.comment, moderate: !!data.can.moderate });
-      const missing = Boolean(deepLinkId && data.missing);
-      setAnchorMissing(missing);
-      if (missing) {
+    for (let attempt = 1; ; attempt++) {
+      const ticket = reads.start(entityId);
+      if (ticket.first) {
+        setLoading(true);
+        setLoadError(null);
+      }
+      let got: { can?: { comment: boolean; moderate: boolean }; missing: boolean; list: ThreadUpdate[] };
+      try {
+        const data = await loadUpdates({ around: deepLinkId });
+        const missing = Boolean(deepLinkId && data.missing);
         // Failure path 1: the comment was deleted, or is not on this task.
         // The task still renders, on the Comments tab, with the whole thread.
-        const all = await loadUpdates();
-        setUpdates(all.updates ?? []);
-      } else {
-        setUpdates(data.updates ?? []);
+        const list = missing ? ((await loadUpdates()).updates ?? []) : (data.updates ?? []);
+        got = { can: data.can, missing, list };
+      } catch {
+        if (reads.finish(ticket) === "superseded") return;
+        // Failure path 2: the thread itself failed. One row, with Retry. A
+        // re-read that fails keeps the comments on screen; the next one tries
+        // again.
+        if (ticket.first) {
+          setLoadError("Couldn't load comments");
+          setLoading(false);
+        }
+        return;
       }
-    } catch {
-      // Failure path 2: the thread itself failed. One row, with Retry.
-      setLoadError("Couldn't load comments");
-    } finally {
+      const verdict = reads.finish(ticket);
+      if (verdict === "superseded") return;
+      if (verdict === "stale") {
+        // A post, edit, delete or reaction here overlapped this read, so the
+        // read may not hold it. The rows on screen do: drop a re-read. A first
+        // read has nothing on screen yet, so it reads again.
+        if (!ticket.first) return;
+        if (attempt < FIRST_READ_ATTEMPTS) continue;
+      }
+      if (got.can) setCan({ comment: !!got.can.comment, moderate: !!got.can.moderate });
+      setAnchorMissing(got.missing);
+      setUpdates(got.list);
+      setLoadError(null);
+      reads.shown(entityId);
       setLoading(false);
+      return;
     }
-  }, [loadUpdates, deepLinkId]);
+  }, [reads, entityId, loadUpdates, deepLinkId]);
 
   const loadActivity = useCallback(async () => {
     setActivityError(null);
@@ -252,6 +279,7 @@ export function CommentThread({
     if (!body && staged.length === 0) return;
     setPosting(true);
     setPostError(null);
+    reads.changed();
     try {
       const res = await fetch(`/api/items/${entityId}/updates`, {
         method: "POST",
@@ -277,9 +305,10 @@ export function CommentThread({
     } catch {
       setPostError("Couldn't post that comment.");
     } finally {
+      reads.changed();
       setPosting(false);
     }
-  }, [draft, staged, mentions, entityId, setDraft, typeahead, loadActivity]);
+  }, [draft, staged, mentions, entityId, setDraft, typeahead, loadActivity, reads]);
 
   const uploadFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -327,51 +356,72 @@ export function CommentThread({
         confirmLabel: "Delete",
       });
       if (!ok) return;
-      const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setPostError(accessMessage(data, "Couldn't delete that comment."));
-        return;
+      reads.changed();
+      try {
+        const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setPostError(accessMessage(data, "Couldn't delete that comment."));
+          return;
+        }
+        setUpdates((prev) => prev.filter((u) => u.id !== updateId));
+      } finally {
+        reads.changed();
       }
-      setUpdates((prev) => prev.filter((u) => u.id !== updateId));
     },
-    [entityId, confirm],
+    [entityId, confirm, reads],
   );
 
   const editComment = useCallback(
     async (updateId: string, body: string, mentionedUserIds: string[]): Promise<boolean> => {
-      const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body, ...(mentionedUserIds.length ? { mentionedUserIds } : {}) }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPostError(accessMessage(data, "Couldn't save that edit."));
+      reads.changed();
+      try {
+        const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ body, ...(mentionedUserIds.length ? { mentionedUserIds } : {}) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setPostError(accessMessage(data, "Couldn't save that edit."));
+          return false;
+        }
+        setUpdates((prev) => prev.map((u) => (u.id === updateId ? (data.update as ThreadUpdate) : u)));
+        return true;
+      } catch {
+        // The edit box stays open with every character, as on a refusal.
+        setPostError("Couldn't save that edit.");
         return false;
+      } finally {
+        reads.changed();
       }
-      setUpdates((prev) => prev.map((u) => (u.id === updateId ? (data.update as ThreadUpdate) : u)));
-      return true;
     },
-    [entityId],
+    [entityId, reads],
   );
 
   const react = useCallback(
     async (updateId: string, emoji: string, on: boolean) => {
-      const res = await fetch(`/api/items/${entityId}/updates/${updateId}/reactions`, {
-        method: on ? "POST" : "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ emoji }),
-      });
-      if (!res.ok) return;
-      const data = await res.json().catch(() => ({}));
-      // The server answers with the whole set, so the chips show truth rather
-      // than an optimistic guess that a second tab has already invalidated.
-      if (Array.isArray(data.reactions)) {
-        setUpdates((prev) => prev.map((u) => (u.id === updateId ? { ...u, reactions: data.reactions } : u)));
+      reads.changed();
+      try {
+        const res = await fetch(`/api/items/${entityId}/updates/${updateId}/reactions`, {
+          method: on ? "POST" : "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ emoji }),
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        // The server answers with the whole set, so the chips show truth rather
+        // than an optimistic guess that a second tab has already invalidated.
+        if (Array.isArray(data.reactions)) {
+          setUpdates((prev) => prev.map((u) => (u.id === updateId ? { ...u, reactions: data.reactions } : u)));
+        }
+      } catch {
+        // A reaction that did not reach the server changes nothing on screen.
+      } finally {
+        reads.changed();
       }
     },
-    [entityId],
+    [entityId, reads],
   );
 
   const statusList = statuses?.length ? statuses : [...DEFAULT_STATUS_OPTIONS];
