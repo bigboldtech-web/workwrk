@@ -43,13 +43,20 @@ export function groupCardsByStatus<T extends KanbanRow>(
    * means the same thing here.
    */
   statusOf?: (row: T) => string | null,
+  /**
+   * The person picked "Separate" in the Board's Subtasks control: every
+   * subtask is a card of its own, in the column of its own status, and the
+   * card says whose subtask it is (lib/work/subtask-display.ts). Rule 1 is
+   * theirs to turn off; rule 2 always holds.
+   */
+  opts: { separate?: boolean } = {},
 ): Map<string, T[]> {
   const map = new Map<string, T[]>();
   for (const s of statusOrder) map.set(s, []);
   const present = new Set(items.map((r) => r.id));
   for (const row of items) {
     // Rule 1: a child of a card on this board belongs to that card.
-    if (row.parentItemId && present.has(row.parentItemId)) continue;
+    if (!opts.separate && row.parentItemId && present.has(row.parentItemId)) continue;
     // Rule 2 plus the unknown-status fallback: never lose a row.
     const status = statusOf ? statusOf(row) : row.status;
     const bucket = status && map.has(status) ? status : statusOrder[0];
@@ -69,4 +76,63 @@ export function countSubtasksByParent(items: readonly KanbanRow[]): Map<string, 
     if (it.parentItemId) m.set(it.parentItemId, (m.get(it.parentItemId) ?? 0) + 1);
   }
   return m;
+}
+
+/**
+ * Each card's subtasks, for the list a card opens in place. Built over the
+ * same set as the count, so the list always holds exactly the number the
+ * card says, in the order `order` gives (the List's one order).
+ */
+export function subtasksByParent<T extends KanbanRow>(
+  items: readonly T[],
+  order: (a: T, b: T) => number,
+): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const it of items) {
+    if (!it.parentItemId) continue;
+    const list = m.get(it.parentItemId);
+    if (list) list.push(it);
+    else m.set(it.parentItemId, [it]);
+  }
+  for (const list of m.values()) list.sort(order);
+  return m;
+}
+
+/**
+ * The order inside a column under "Separate": every card at the place of its
+ * top-most ancestor on the board, a subtask straight after the task it hangs
+ * under, so the cards a person arranges keep their order and a subtask reads
+ * next to its parent. A parent that is not on the board leaves the subtask at
+ * its own place. A loop in the data (never written, but never trusted) stops
+ * the walk instead of spinning.
+ */
+export function treeOrder<T extends KanbanRow>(
+  items: readonly T[],
+  order: (a: T, b: T) => number,
+): (a: T, b: T) => number {
+  const byId = new Map(items.map((r) => [r.id, r] as const));
+  const chains = new Map<string, T[]>();
+  const chainOf = (row: T): T[] => {
+    const known = chains.get(row.id);
+    if (known) return known;
+    const out: T[] = [];
+    const seen = new Set<string>();
+    let cur: T | undefined = row;
+    while (cur && !seen.has(cur.id)) {
+      out.unshift(cur);
+      seen.add(cur.id);
+      cur = cur.parentItemId ? byId.get(cur.parentItemId) : undefined;
+    }
+    chains.set(row.id, out);
+    return out;
+  };
+  return (a, b) => {
+    const ca = chainOf(a);
+    const cb = chainOf(b);
+    for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+      if (ca[i].id !== cb[i].id) return order(ca[i], cb[i]);
+    }
+    // One holds the other: the task before what hangs under it.
+    return ca.length - cb.length;
+  };
 }

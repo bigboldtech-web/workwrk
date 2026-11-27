@@ -61,7 +61,13 @@ describe("PUT /api/boards/[id]/order", () => {
 describe("the Board drops a card at a place", () => {
   it("plans every drop with the one planner and keeps columns in the List's order", () => {
     expect(KANBAN).toMatch(/const plan = planDrop\(column, id, index\);/);
-    expect(KANBAN).toMatch(/for \(const \[k, arr\] of g\) g\.set\(k, \[\.\.\.arr\]\.sort\(byPosition\)\);/);
+    // The List's order; under the Subtasks control's Separate, the same order
+    // with each subtask card after the task it hangs under (kanban-columns treeOrder).
+    expect(KANBAN).toMatch(/const order = separate \? treeOrder\(items, byPosition\) : byPosition;/);
+    expect(KANBAN).toMatch(/for \(const \[k, arr\] of g\) g\.set\(k, \[\.\.\.arr\]\.sort\(order\)\);/);
+    // A drop is planned against the plain board's columns, so a subtask card
+    // shown under Separate never becomes a neighbour a position is taken from.
+    expect(KANBAN).toMatch(/const now = groupCardsByStatus\(itemsRef\.current, statusOrder, statusOf\);/);
   });
 
   it("moves a linked card's LINK place and checks its home status first", () => {

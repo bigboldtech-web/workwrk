@@ -9,10 +9,11 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Columns3, Network, Pencil, Plus, Repeat, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, Columns3, CornerDownRight, Network, Pencil, Plus, Repeat, X } from "lucide-react";
 import { PRIORITY_OPTIONS, buildSubtaskBody, isDoneStatus, splitBulkResults, bulkFailureMessage, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { ItemRole } from "@/lib/item-role";
-import { countSubtasksByParent, groupCardsByStatus } from "@/lib/kanban-columns";
+import { countSubtasksByParent, groupCardsByStatus, subtasksByParent, treeOrder } from "@/lib/kanban-columns";
+import { cardSubtasksOpen, type SubtaskDisplay } from "@/lib/work/subtask-display";
 import { byPosition, indexAtPointer, planDrop } from "@/lib/work/reorder";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -89,12 +90,14 @@ interface BoardKanbanViewProps {
   statusOf?: (row: BoardItemRow) => string | null;
   /** The owner's Personal List: its tasks are never added to other Lists. */
   personalList?: boolean;
+  /** The Subtasks control at the top of the Board (lib/work/subtask-display.ts). */
+  subtaskDisplay?: SubtaskDisplay;
 }
 
 // What a bulk refusal of a card shown here THROUGH A LINK means.
 const LINKED_ARCHIVE_REFUSED = "Tasks shown here from other Lists can't be archived or deleted from this List. Remove them from this List instead, or open their home List.";
 
-export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, assigneeEdit = null, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true, loadedSettings = null, statusOf: statusOfProp, personalList = false }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, assigneeEdit = null, canDeleteTasks, currentUserId, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true, loadedSettings = null, statusOf: statusOfProp, personalList = false, subtaskDisplay = "collapsed" }: BoardKanbanViewProps) {
   const confirm = useConfirm();
   // The column a card belongs to HERE: a card shown through a link stores its
   // home status, remapped into this board's set (Done stays Done).
@@ -164,11 +167,25 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   // than hidden. See lib/kanban-columns.ts for both rules and their tests.
   // Each column top to bottom in the List's one order (position, then id), so
   // a card dragged up or down stays exactly where it was dropped.
+  //
+  // Under the Subtasks control's "Separate" (founder report 2026-11-27) every
+  // subtask is a card too, right after the task it hangs under and labelled
+  // with its name. Those cards are only shown: a drop is placed among the
+  // cards of the plain board (`separateOnly` below), the same columns
+  // dropCard plans against.
+  const separate = subtaskDisplay === "separate";
   const grouped = useMemo(() => {
-    const g = groupCardsByStatus(items, statusOrder, statusOf);
-    for (const [k, arr] of g) g.set(k, [...arr].sort(byPosition));
+    const g = groupCardsByStatus(items, statusOrder, statusOf, { separate });
+    const order = separate ? treeOrder(items, byPosition) : byPosition;
+    for (const [k, arr] of g) g.set(k, [...arr].sort(order));
     return g;
-  }, [items, statusOrder, statusOf]);
+  }, [items, statusOrder, statusOf, separate]);
+  const separateOnly = useMemo(() => {
+    if (!separate) return null;
+    const present = new Set(items.map((r) => r.id));
+    return new Set(items.filter((r) => r.parentItemId && present.has(r.parentItemId)).map((r) => r.id));
+  }, [items, separate]);
+  const titleById = useMemo(() => new Map(items.map((r) => [r.id, r.title] as const)), [items]);
 
   // Visible card order (column order, top→bottom) — the axis shift-select
   // ranges over.
@@ -365,6 +382,36 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
 
   // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
   const subtaskCountByParent = useMemo(() => countSubtasksByParent(items), [items]);
+  // The list a card's count opens in place, over the same set as the count.
+  const childrenOf = useMemo(() => subtasksByParent(items, byPosition), [items]);
+  const subtaskRowsOf = useCallback(
+    (parentId: string): CardSubtask[] =>
+      (childrenOf.get(parentId) ?? []).map((c) => {
+        const s = statusOf(c);
+        const meta = statuses.find((o) => o.value === s);
+        return { id: c.id, title: c.title, statusLabel: meta?.label ?? s ?? "", color: meta?.color ?? "#a1a1aa", done: isDoneStatus(statuses, s) };
+      }),
+    [childrenOf, statusOf, statuses],
+  );
+  // The cards whose count was clicked since the display was last picked.
+  const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
+  const [flippedUnder, setFlippedUnder] = useState(subtaskDisplay);
+  if (flippedUnder !== subtaskDisplay) {
+    setFlippedUnder(subtaskDisplay);
+    setFlipped(new Set());
+    // Leaving Separate takes subtask cards off the board: a selection made
+    // among them must not stay in the bulk bar and act on tasks no longer
+    // on screen.
+    setSelected(new Set());
+  }
+  const flipSubtasks = useCallback((id: string) => {
+    setFlipped((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const refetch = useCallback(async () => {
     try {
@@ -480,6 +527,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const dropCard = useCallback(async (id: string, status: string, index: number) => {
     const card = itemsRef.current.find((r) => r.id === id);
     if (!card || !canEdit || !linkedRowEditable(card, canEdit)) return;
+    // A subtask keeps its place under its task and is never dragged among the
+    // cards (its card is not draggable); this holds even for a drag that began
+    // on something inside it, such as an avatar or selected text.
+    if (card.parentItemId) return;
     const kind = linkedRowKind(card, boardId);
     const statusChange = statusOf(card) !== status;
     let homeStatus: string | null = null;
@@ -675,9 +726,14 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           // Where the drop line shows: above the card at that place among the
           // column's other cards, or under the last one; never where the card
           // already sits (that drop changes nothing).
-          const others = dragId ? cards.filter((c) => c.id !== dragId) : cards;
+          const arranged = separateOnly ? cards.filter((c) => !separateOnly.has(c.id)) : cards;
+          const others = dragId ? arranged.filter((c) => c.id !== dragId) : arranged;
           const placeOf = new Map(others.map((c, i) => [c.id, i] as const));
-          const wasAt = dragId ? cards.findIndex((c) => c.id === dragId) : -1;
+          const wasAt = dragId ? arranged.findIndex((c) => c.id === dragId) : -1;
+          // The bottom line goes under the last card SHOWN: under Separate a
+          // card dropped at the end lands after the subtasks that follow the
+          // last arranged card, so a line above them would point elsewhere.
+          const lastShownId = (dragId ? cards.filter((c) => c.id !== dragId) : cards).at(-1)?.id ?? null;
           const lineAt = dragId && !refusesDrag && dropAt && dropAt.status === status && !(wasAt !== -1 && wasAt === dropAt.index) ? dropAt.index : null;
           return (
             <div
@@ -693,7 +749,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 e.preventDefault();
                 setHoverColumn(status);
                 // Past the cards (the column's empty space): the bottom.
-                showDrop(status, cards.filter((c) => c.id !== dragId).length);
+                showDrop(status, others.length);
               }}
               onDragLeave={(e) => {
                 if (e.currentTarget === e.target) setHoverColumn(null);
@@ -702,7 +758,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                 e.preventDefault();
                 setHoverColumn(null);
                 if (!dragId || !canEdit) return;
-                const index = dropAt && dropAt.status === status ? dropAt.index : cards.filter((c) => c.id !== dragId).length;
+                const index = dropAt && dropAt.status === status ? dropAt.index : others.length;
                 void dropCard(dragId, status, index);
                 setDragId(null);
                 setDropAt(null);
@@ -790,12 +846,16 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   return (
                   <div key={card.id} className="relative" data-place={place}>
                   {lineAt !== null && place !== undefined && place === lineAt ? <DropLine edge="top" /> : null}
-                  {lineAt !== null && place !== undefined && place === others.length - 1 && lineAt === others.length ? <DropLine edge="bottom" /> : null}
+                  {lineAt !== null && card.id === lastShownId && lineAt === others.length ? <DropLine edge="bottom" /> : null}
                   <KanbanCard
                     boardId={boardId}
                     card={card}
                     chipFields={chipFields}
                     subtaskCount={subtaskCountByParent.get(card.id) ?? 0}
+                    subtasks={cardSubtasksOpen(subtaskDisplay, flipped, card.id) ? subtaskRowsOf(card.id) : null}
+                    onToggleSubtasks={() => flipSubtasks(card.id)}
+                    onOpenSubtask={onOpenItem}
+                    parentTitle={separate && card.parentItemId ? titleById.get(card.parentItemId) ?? null : null}
                     // A linked card's status is a value of its HOME set: its
                     // done state and date planner read that set, or at least
                     // its own home status when the set is not shared.
@@ -883,6 +943,15 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   );
 }
 
+/** One subtask in the list a card opens in place. */
+interface CardSubtask {
+  id: string;
+  title: string;
+  statusLabel: string;
+  color: string;
+  done: boolean;
+}
+
 /** The stored watcher list on a card, so Watch reads "Unwatch" when it should. */
 function cardWatcherIds(card: BoardItemRow): string[] {
   const md = (card.metadata as Record<string, unknown> | undefined) ?? {};
@@ -903,6 +972,10 @@ function KanbanCard({
   card,
   chipFields,
   subtaskCount,
+  subtasks = null,
+  onToggleSubtasks,
+  onOpenSubtask,
+  parentTitle = null,
   statuses,
   canEdit,
   canArrange,
@@ -938,6 +1011,13 @@ function KanbanCard({
   card: BoardItemRow;
   chipFields: FieldDef[];
   subtaskCount: number;
+  /** The card's subtasks, shown in place; null while its list is closed. */
+  subtasks?: CardSubtask[] | null;
+  /** The count was clicked: open or close this card's list. */
+  onToggleSubtasks?: () => void;
+  onOpenSubtask?: (id: string) => void;
+  /** Under "Separate", the task this subtask card hangs under. */
+  parentTitle?: string | null;
   statuses: StatusOption[];
   canEdit: boolean;
   /**
@@ -1042,7 +1122,9 @@ function KanbanCard({
   return (
     <div
       draggable={draggableCard && !editing && !subtaskOpen}
-      onDragStart={onDragStart}
+      // A drag that starts on something inside a card that may not move (an
+      // avatar image, selected text) is never a move of the card.
+      onDragStart={() => { if (draggableCard && !editing && !subtaskOpen) onDragStart(); }}
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing && !subtaskOpen) onOpen?.(); }}
       onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
@@ -1052,6 +1134,13 @@ function KanbanCard({
         draggableCard && !editing && !subtaskOpen ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-[box-shadow,border-color] duration-150`}
     >
+      {/* Under "Separate": whose subtask this card is. */}
+      {parentTitle ? (
+        <div className="mb-1 flex min-w-0 items-center gap-1 text-xs text-ink-3" title={`Subtask of ${parentTitle}`}>
+          <CornerDownRight className="w-3 h-3 shrink-0" aria-hidden />
+          <span className="truncate">{parentTitle}</span>
+        </div>
+      ) : null}
       {/* Title + action rail */}
       <div className="flex items-start gap-1.5">
         {canArrange ? (
@@ -1237,8 +1326,9 @@ function KanbanCard({
       </div>
 
       {/* Inline subtask composer — type the name, Enter saves it under this
-          card. The child does not become a card of its own; the count below
-          is what moves. */}
+          card. The child does not become a card of its own (unless the
+          Subtasks control says Separate); the count below moves and, when
+          this card's list is open, the subtask shows in it. */}
       {subtaskOpen ? (
         <div className="mt-2" onClick={stop}>
           <div className="flex items-center gap-1.5 rounded-md border border-[var(--os-brand)] bg-white px-1.5 py-1">
@@ -1263,13 +1353,51 @@ function KanbanCard({
         </div>
       ) : null}
 
-      {/* Footer — subtask count only (ClickUp cards carry no created date). */}
+      {/* Footer — the subtask count (ClickUp cards carry no created date).
+          Clicking it opens this card's subtasks in place (founder report
+          2026-11-27: they could only be seen by opening the task). */}
       {subtaskCount > 0 ? (
-        <div className="mt-2 flex items-center text-xs text-zinc-400">
-          <span className="inline-flex items-center gap-1">
-            <Network className="w-3 h-3" />
+        <div className="mt-2 text-xs text-ink-3" onClick={stop}>
+          <button
+            type="button"
+            onClick={(e) => { stop(e); onToggleSubtasks?.(); }}
+            aria-expanded={Boolean(subtasks)}
+            className="-mx-1 inline-flex h-6 items-center gap-1 rounded px-1 hover:bg-hover hover:text-ink"
+          >
+            <ChevronRight className={`w-3 h-3 transition-transform ${subtasks ? "rotate-90" : ""}`} aria-hidden />
+            <Network className="w-3 h-3" aria-hidden />
             {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}
-          </span>
+          </button>
+          {subtasks ? (
+            <ul className="mt-1 space-y-0.5" aria-label={`Subtasks of ${card.title}`}>
+              {subtasks.map((sub) => {
+                const row = (
+                  <>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: sub.color }} aria-hidden />
+                    <span className={`min-w-0 flex-1 truncate text-sm ${sub.done ? "text-ink-3 line-through" : "text-ink"}`}>{sub.title}</span>
+                  </>
+                );
+                const label = sub.statusLabel ? `${sub.title}, ${sub.statusLabel}` : sub.title;
+                return (
+                  <li key={sub.id}>
+                    {onOpenSubtask ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { stop(e); onOpenSubtask(sub.id); }}
+                        title={sub.statusLabel || undefined}
+                        aria-label={label}
+                        className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-hover"
+                      >
+                        {row}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-1 py-1" title={sub.statusLabel || undefined}>{row}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { countSubtasksByParent, groupCardsByStatus, type KanbanRow } from "./kanban-columns";
+import { countSubtasksByParent, groupCardsByStatus, subtasksByParent, treeOrder, type KanbanRow } from "./kanban-columns";
 
 const ORDER = ["TO_DO", "IN_PROGRESS", "DONE"];
 
@@ -107,5 +107,58 @@ describe("countSubtasksByParent", () => {
     const after = [...items, row("new", "TO_DO", "p")];
     expect(countSubtasksByParent(after).get("p")).toBe(1);
     expect(allIds(groupCardsByStatus(after, ORDER))).toEqual(["p"]);
+  });
+});
+
+// Founder report 2026-11-27: "sub task not visible on top of board". The
+// Board's Subtasks control (lib/work/subtask-display.ts) opens a card's
+// subtasks in place, or shows each as a card of its own under "Separate".
+describe("the Board's Subtasks control", () => {
+  type P = KanbanRow & { position: number };
+  const p = (id: string, status: string, position: number, parentItemId: string | null = null): P => ({ id, status, position, parentItemId });
+  const byPos = (a: P, b: P) => a.position - b.position || (a.id < b.id ? -1 : 1);
+
+  it("Separate puts every subtask in the column of its own status", () => {
+    const items = [p("parent", "TO_DO", 1), p("kid", "IN_PROGRESS", 1, "parent"), p("kid2", "TO_DO", 2, "parent")];
+    const out = groupCardsByStatus(items, ORDER, undefined, { separate: true });
+    expect(idsIn(out, "TO_DO").sort()).toEqual(["kid2", "parent"]);
+    expect(idsIn(out, "IN_PROGRESS")).toEqual(["kid"]);
+  });
+
+  it("guard: without Separate a subtask still folds under its card", () => {
+    const items = [p("parent", "TO_DO", 1), p("kid", "IN_PROGRESS", 1, "parent")];
+    expect(allIds(groupCardsByStatus(items, ORDER))).toEqual(["parent"]);
+  });
+
+  it("a card's open list holds exactly the subtasks its count says, in the List's order", () => {
+    const items = [p("a", "TO_DO", 1), p("a2", "DONE", 5, "a"), p("a1", "TO_DO", 2, "a"), p("b", "TO_DO", 2), p("b1", "TO_DO", 1, "b")];
+    const lists = subtasksByParent(items, byPos);
+    const counts = countSubtasksByParent(items);
+    expect(lists.get("a")!.map((r) => r.id)).toEqual(["a1", "a2"]);
+    expect(lists.get("b")!.map((r) => r.id)).toEqual(["b1"]);
+    for (const [parent, n] of counts) expect(lists.get(parent)!.length).toBe(n);
+  });
+
+  it("Separate orders a column with each subtask straight after the task it hangs under", () => {
+    // Cards a, b, c by place; a subtask's own place is in its parent's list.
+    const items = [p("a", "TO_DO", 10), p("b", "TO_DO", 20), p("c", "TO_DO", 30), p("b1", "TO_DO", 1, "b"), p("b1x", "TO_DO", 1, "b1"), p("a1", "TO_DO", 99, "a")];
+    const order = treeOrder(items, byPos);
+    expect([...items].sort(order).map((r) => r.id)).toEqual(["a", "a1", "b", "b1", "b1x", "c"]);
+  });
+
+  it("the cards a person arranges keep their own order under Separate", () => {
+    const items = [p("a", "TO_DO", 30), p("b", "TO_DO", 10), p("a1", "TO_DO", 1, "a")];
+    const top = [...items].sort(treeOrder(items, byPos)).filter((r) => !r.parentItemId).map((r) => r.id);
+    expect(top).toEqual([...items].filter((r) => !r.parentItemId).sort(byPos).map((r) => r.id));
+  });
+
+  it("a subtask whose parent is not on the board sits at its own place", () => {
+    const items = [p("a", "TO_DO", 10), p("orphan", "TO_DO", 15, "elsewhere"), p("b", "TO_DO", 20)];
+    expect([...items].sort(treeOrder(items, byPos)).map((r) => r.id)).toEqual(["a", "orphan", "b"]);
+  });
+
+  it("a loop in the data never spins", () => {
+    const items = [p("x", "TO_DO", 1, "y"), p("y", "TO_DO", 2, "x")];
+    expect([...items].sort(treeOrder(items, byPos)).map((r) => r.id).sort()).toEqual(["x", "y"]);
   });
 });

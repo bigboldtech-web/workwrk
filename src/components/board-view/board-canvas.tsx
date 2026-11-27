@@ -52,6 +52,8 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { BootContext } from "@/components/layout/os/boot-context";
 import { apiFetch } from "@/lib/api-fetch";
 import { personalFiltersPatch, personalFiltersRaw, rememberPersonalFilters } from "@/lib/work/personal-filters";
+import { rememberSubtaskDisplay, subtaskDisplayFor, subtaskDisplayPatch, type SubtaskDisplay } from "@/lib/work/subtask-display";
+import { SubtaskModeMenu } from "./subtask-mode-menu";
 import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
 import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 import {
@@ -80,6 +82,8 @@ import { LinkedRowIndicator } from "./linked-row-indicator";
 // toolbar FilterMenu; content views (FORM / DOC / WHITEBOARD / …) don't.
 // One line for every tab's own-filter saves (BoardCanvas sendOwnFilters).
 let ownFilterSends: Promise<unknown> = Promise.resolve();
+// The Board's Subtasks choice, saved one after another for the same reason.
+let subtaskDisplaySends: Promise<unknown> = Promise.resolve();
 
 const FILTERABLE_VIEWS = new Set<ViewType>([
   "TABLE", "KANBAN", "CALENDAR", "GANTT", "CHART", "DASHBOARD",
@@ -441,6 +445,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const [viewFilters, setViewFilters] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
   const [filters, setFiltersState] = useState<BoardFilters>(() => startingFilters(viewId, viewConfig));
   const [savedFilters, setSavedFiltersState] = useState<SavedFilter[]>(() => parseSavedFilters(viewConfig?.savedFilters));
+  // How the Board shows subtasks: each person's own, per view
+  // (lib/work/subtask-display.ts).
+  const [subtaskDisplay, setSubtaskDisplayState] = useState<SubtaskDisplay>(() => subtaskDisplayFor(bootPrefs, viewId));
 
   // A view tab is a client navigation: this canvas (the page renders it with
   // no key) stays mounted and only its props change, so every state seeded
@@ -462,6 +469,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     setViewFilters(parseFilters(viewConfig?.filters));
     setFiltersState(startingFilters(viewId, viewConfig));
     setSavedFiltersState(parseSavedFilters(viewConfig?.savedFilters));
+    setSubtaskDisplayState(subtaskDisplayFor(bootPrefs, viewId));
   }
   // A person's own filter is saved a moment after they stop changing it, and
   // at once when they leave the List or the tab, so a quick run of edits is
@@ -505,6 +513,18 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     if (ownTimer.current) clearTimeout(ownTimer.current);
     ownTimer.current = setTimeout(() => sendOwnFilters(), 400);
   }, [sendOwnFilters]);
+  const setSubtaskDisplay = useCallback((next: SubtaskDisplay) => {
+    setSubtaskDisplayState(next);
+    // The default view of a List has no id to keep it under: it holds for
+    // this visit only.
+    if (!viewId) return;
+    rememberSubtaskDisplay(viewId, next);
+    const send = () =>
+      apiFetch("/api/preferences", { method: "PATCH", json: subtaskDisplayPatch(viewId, next) }).then((res) => {
+        if (!res.ok) toast("Couldn't save how subtasks show. It stays until you reload.", { tone: "danger", key: `subtasks:${viewId}` });
+      });
+    subtaskDisplaySends = subtaskDisplaySends.then(send, send);
+  }, [viewId, toast]);
   const setFilters = useCallback((next: BoardFilters) => {
     setFiltersState(next);
     if (ownFilters && viewId) saveOwnFilters(viewId, next, viewFilters);
@@ -844,6 +864,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : null}
       {viewType !== "TABLE" ? (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
+          {viewType === "KANBAN" ? <SubtaskModeMenu value={subtaskDisplay} onChange={setSubtaskDisplay} /> : null}
           <div className="flex-1" />
           {filterMenu}
           {toolbarActions}
@@ -914,6 +935,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           loadedSettings={loadedSettings}
           statusOf={statusOf}
           personalList={personalList}
+          subtaskDisplay={subtaskDisplay}
         />
       ) : viewType === "CALENDAR" ? (
         <BoardCalendarView

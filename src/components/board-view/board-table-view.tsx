@@ -15,8 +15,10 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat, Pin, PinOff, Sparkles } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat, Pin, PinOff, Sparkles } from "lucide-react";
 import { Dots } from "@/components/ui/dots";
+import { SubtaskModeMenu } from "./subtask-mode-menu";
+import type { SubtaskDisplay } from "@/lib/work/subtask-display";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
   PRIORITY_OPTIONS,
@@ -599,6 +601,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const [dragOver, setDragOver] = useState<{ id: string; side: "before" | "after" } | null>(null);
   // Phase 73 — expanded subtask sets per parent. Closed by default.
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+  // What the Subtasks control shows as picked (the rows can still be opened one by one).
+  const [subtaskMode, setSubtaskMode] = useState<SubtaskDisplay>("collapsed");
   // Quick search (toolbar magnifier) — filters rows by title.
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -2001,9 +2005,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           onDirection={setGroupDirection}
         />
         {/* 2 — Subtasks display mode */}
+        {/* Separate is a Board mode for now: the List draws subtasks under
+            their task, so it offers the two modes it can draw. */}
         <SubtaskModeMenu
-          onCollapseAll={() => setExpandedParents(new Set())}
-          onExpandAll={() => setExpandedParents(new Set(Array.from(childrenByParent.keys())))}
+          value={subtaskMode}
+          modes={["collapsed", "expanded"]}
+          onChange={(next) => {
+            setSubtaskMode(next);
+            setExpandedParents(next === "expanded" ? new Set(Array.from(childrenByParent.keys())) : new Set());
+          }}
         />
         {/* 3 — Columns / Fields */}
         {onOpenFields ? (
@@ -2783,69 +2793,6 @@ function DueDateCell({ row, canEdit, statuses, onUpdate }: { row: BoardItemRow; 
       compact
       onPatch={(body) => onUpdate(row.id, body as unknown as RowPatch)}
     />
-  );
-}
-
-// Subtasks display-mode menu (ClickUp's "Show subtasks"): Collapsed / Expanded /
-// Separate. Collapsed/Expanded drive the per-row expand state in one shot.
-function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => void; onExpandAll: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"collapsed" | "expanded" | "separate">("collapsed");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const opts: { k: "collapsed" | "expanded" | "separate"; label: string; note?: string; hint?: string }[] = [
-    { k: "collapsed", label: "Collapsed", note: "(default)" },
-    { k: "expanded", label: "Expanded" },
-    { k: "separate", label: "Separate", hint: "Use this to filter subtasks" },
-  ];
-
-  function pick(k: "collapsed" | "expanded" | "separate") {
-    setMode(k);
-    setOpen(false);
-    if (k === "collapsed") onCollapseAll();
-    else if (k === "expanded") onExpandAll();
-    // "separate" — show subtasks as their own rows; lands in a later pass.
-  }
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title="Subtasks"
-        aria-label="Subtasks display"
-        className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
-      >
-        <Network className="w-3.5 h-3.5" />
-        <span className="font-medium">Subtasks</span>
-      </button>
-      {open ? (
-        <div className="absolute z-20 mt-1 left-0 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1.5">
-          <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Show subtasks</div>
-          {opts.map((o) => (
-            <button
-              key={o.k}
-              type="button"
-              onClick={() => pick(o.k)}
-              className="flex items-start gap-2 w-full px-3 py-1.5 text-left hover:bg-zinc-50"
-            >
-              <span className="flex-1 min-w-0">
-                <span className={mode === o.k ? "text-base font-semibold text-zinc-900" : "text-base text-zinc-700"}>{o.label}</span>
-                {o.note ? <span className="ml-1 text-xs text-zinc-400">{o.note}</span> : null}
-                {o.hint ? <span className="block text-xs text-zinc-400">{o.hint}</span> : null}
-              </span>
-              {mode === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0 mt-0.5" /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
