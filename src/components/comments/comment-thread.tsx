@@ -39,7 +39,7 @@ import { describeItemActivity } from "@/lib/item-activity-describe";
 import { ITEM_ACTIVITY_KINDS, isItemActivityKind, type ItemActivityKind } from "@/lib/item-activity-kinds";
 import { relativeTime, formatTaskDate, type LocalePrefs } from "@/lib/item-date";
 import { surviving, type MentionRef } from "@/lib/mention-token";
-import { createThreadReads, FIRST_READ_ATTEMPTS } from "@/lib/comments/thread-reads";
+import { appendOnce, createThreadReads, readThread } from "@/lib/comments/thread-reads";
 import { useMentionTypeahead } from "./mention-typeahead";
 import { DEFAULT_STATUS_OPTIONS, type StatusOption } from "@/lib/board-items-shared";
 import type { ThreadActivity, ThreadUpdate } from "@/lib/item-thread";
@@ -171,50 +171,40 @@ export function CommentThread({
   // list and an open comment menu survive it. See lib/comments/thread-reads.
   const [reads] = useState(createThreadReads);
 
-  const load = useCallback(async () => {
-    for (let attempt = 1; ; attempt++) {
-      const ticket = reads.start(entityId);
-      if (ticket.first) {
-        setLoading(true);
-        setLoadError(null);
-      }
-      let got: { can?: { comment: boolean; moderate: boolean }; missing: boolean; list: ThreadUpdate[] };
-      try {
-        const data = await loadUpdates({ around: deepLinkId });
-        const missing = Boolean(deepLinkId && data.missing);
-        // Failure path 1: the comment was deleted, or is not on this task.
-        // The task still renders, on the Comments tab, with the whole thread.
-        const list = missing ? ((await loadUpdates()).updates ?? []) : (data.updates ?? []);
-        got = { can: data.can, missing, list };
-      } catch {
-        if (reads.finish(ticket) === "superseded") return;
-        // Failure path 2: the thread itself failed. One row, with Retry. A
-        // re-read that fails keeps the comments on screen; the next one tries
-        // again.
-        if (ticket.first) {
-          setLoadError("Couldn't load comments");
-          setLoading(false);
-        }
-        return;
-      }
-      const verdict = reads.finish(ticket);
-      if (verdict === "superseded") return;
-      if (verdict === "stale") {
-        // A post, edit, delete or reaction here overlapped this read, so the
-        // read may not hold it. The rows on screen do: drop a re-read. A first
-        // read has nothing on screen yet, so it reads again.
-        if (!ticket.first) return;
-        if (attempt < FIRST_READ_ATTEMPTS) continue;
-      }
-      if (got.can) setCan({ comment: !!got.can.comment, moderate: !!got.can.moderate });
-      setAnchorMissing(got.missing);
-      setUpdates(got.list);
-      setLoadError(null);
-      reads.shown(entityId);
-      setLoading(false);
-      return;
-    }
-  }, [reads, entityId, loadUpdates, deepLinkId]);
+  const load = useCallback(
+    () =>
+      readThread(
+        reads,
+        entityId,
+        async () => {
+          const data = await loadUpdates({ around: deepLinkId });
+          const missing = Boolean(deepLinkId && data.missing);
+          // Failure path 1: the comment was deleted, or is not on this task.
+          // The task still renders, on the Comments tab, with the whole thread.
+          const list = missing ? ((await loadUpdates()).updates ?? []) : (data.updates ?? []);
+          return { can: data.can, missing, list };
+        },
+        {
+          showSkeleton: () => {
+            setLoading(true);
+            setLoadError(null);
+          },
+          apply: (got) => {
+            if (got.can) setCan({ comment: !!got.can.comment, moderate: !!got.can.moderate });
+            setAnchorMissing(got.missing);
+            setUpdates(got.list);
+            setLoadError(null);
+            setLoading(false);
+          },
+          // Failure path 2: the thread itself failed. One row, with Retry.
+          failFirst: () => {
+            setLoadError("Couldn't load comments");
+            setLoading(false);
+          },
+        },
+      ),
+    [reads, entityId, loadUpdates, deepLinkId],
+  );
 
   const loadActivity = useCallback(async () => {
     setActivityError(null);
@@ -264,7 +254,10 @@ export function CommentThread({
       onDeepLinkResolved?.();
     }, 1200);
     return () => clearTimeout(t);
-  }, [deepLinkId, loading, anchorMissing, updates.length, onDeepLinkResolved]);
+    // `tab`: a reader who went to Activity before the comment arrived gets
+    // the pulse when they come back to Comments; re-reads no longer re-run
+    // this effect, so nothing else would.
+  }, [deepLinkId, loading, anchorMissing, updates.length, onDeepLinkResolved, tab]);
 
   // ── composer ───────────────────────────────────────────────────────
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -279,7 +272,7 @@ export function CommentThread({
     if (!body && staged.length === 0) return;
     setPosting(true);
     setPostError(null);
-    reads.changed();
+    reads.begin();
     try {
       const res = await fetch(`/api/items/${entityId}/updates`, {
         method: "POST",
@@ -300,12 +293,12 @@ export function CommentThread({
       setStaged([]);
       setMentions([]);
       typeahead.reset();
-      if (data.update) setUpdates((prev) => [...prev, data.update as ThreadUpdate]);
+      if (data.update) setUpdates((prev) => appendOnce(prev, data.update as ThreadUpdate));
       void loadActivity();
     } catch {
       setPostError("Couldn't post that comment.");
     } finally {
-      reads.changed();
+      reads.end();
       setPosting(false);
     }
   }, [draft, staged, mentions, entityId, setDraft, typeahead, loadActivity, reads]);
@@ -356,7 +349,7 @@ export function CommentThread({
         confirmLabel: "Delete",
       });
       if (!ok) return;
-      reads.changed();
+      reads.begin();
       try {
         const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, { method: "DELETE" });
         if (!res.ok) {
@@ -366,7 +359,7 @@ export function CommentThread({
         }
         setUpdates((prev) => prev.filter((u) => u.id !== updateId));
       } finally {
-        reads.changed();
+        reads.end();
       }
     },
     [entityId, confirm, reads],
@@ -374,7 +367,7 @@ export function CommentThread({
 
   const editComment = useCallback(
     async (updateId: string, body: string, mentionedUserIds: string[]): Promise<boolean> => {
-      reads.changed();
+      reads.begin();
       try {
         const res = await fetch(`/api/items/${entityId}/updates/${updateId}`, {
           method: "PATCH",
@@ -393,7 +386,7 @@ export function CommentThread({
         setPostError("Couldn't save that edit.");
         return false;
       } finally {
-        reads.changed();
+        reads.end();
       }
     },
     [entityId, reads],
@@ -401,7 +394,7 @@ export function CommentThread({
 
   const react = useCallback(
     async (updateId: string, emoji: string, on: boolean) => {
-      reads.changed();
+      reads.begin();
       try {
         const res = await fetch(`/api/items/${entityId}/updates/${updateId}/reactions`, {
           method: on ? "POST" : "DELETE",
@@ -418,7 +411,7 @@ export function CommentThread({
       } catch {
         // A reaction that did not reach the server changes nothing on screen.
       } finally {
-        reads.changed();
+        reads.end();
       }
     },
     [entityId, reads],
