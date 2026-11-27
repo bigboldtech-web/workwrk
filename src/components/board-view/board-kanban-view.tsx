@@ -739,7 +739,9 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
             <div
               key={status}
               title={refusal ?? undefined}
-              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 p-2 transition-[opacity,background-color] ${
+              // Dark: the faint lift light mode has, never a grey slab on the
+              // black page (founder 2026-11-28); the cards keep their border.
+              className={`group/col flex flex-col w-[300px] flex-shrink-0 rounded-xl bg-zinc-100/60 dark:bg-subtle p-2 transition-[opacity,background-color] ${
                 refusesDrag
                   ? `opacity-50 ${isHover ? "cursor-not-allowed outline-2 outline-dashed -outline-offset-2 outline-zinc-400" : ""}`
                   : isHover ? "outline-2 outline-dashed -outline-offset-2 outline-[var(--os-brand)]" : ""
@@ -1150,8 +1152,9 @@ function KanbanCard({
             aria-checked={selected}
             aria-label={selected ? "Deselect card" : "Select card"}
             onClick={(e) => { stop(e); onToggleSelect(card.id, e.shiftKey); }}
-            className={`mt-[3px] inline-flex items-center justify-center w-3.5 h-3.5 rounded-[4px] shrink-0 transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-            style={{ backgroundColor: selected ? "var(--os-brand)" : "#fff", border: selected ? "1px solid var(--os-brand)" : "1px solid #d4d4d8" }}
+            // Classes, not inline colours: an inline white stayed a white
+            // square on the dark card.
+            className={`mt-[3px] inline-flex items-center justify-center w-3.5 h-3.5 rounded-[4px] shrink-0 border transition-opacity ${selected ? "opacity-100 border-[var(--os-brand)] bg-[var(--os-brand)]" : "opacity-0 group-hover:opacity-100 border-[#d4d4d8] bg-raised dark:border-control-edge"}`}
           >
             {selected ? <Check className="w-2.5 h-2.5 text-white" /> : null}
           </button>
