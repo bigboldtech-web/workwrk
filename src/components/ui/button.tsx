@@ -20,7 +20,11 @@ const buttonVariants = cva(
         destructive:
           "text-white bg-[#E2445C] hover:bg-[#CF3D53] shadow-sm",
         outline:
-          "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 dark:bg-transparent dark:text-foreground dark:border-border dark:hover:bg-surface-2",
+          // dark:hover:text + border: the light hover's slate-900 text and
+          // slate-300 edge used to win in dark, and a hovered Cancel vanished
+          // on the dark dialog (founder 2026-11-28). The hover fill in the
+          // dashboard is in os.css, past its !important bg-white repaints.
+          "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 dark:bg-transparent dark:text-foreground dark:border-border dark:hover:bg-surface-2 dark:hover:text-foreground dark:hover:border-white/15",
         secondary:
           "bg-slate-100 text-slate-900 hover:bg-slate-200 dark:bg-surface-2 dark:text-foreground dark:hover:bg-surface-3",
         ghost:
@@ -53,6 +57,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     return (
       <Comp
+        data-variant={variant ?? "default"}
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}

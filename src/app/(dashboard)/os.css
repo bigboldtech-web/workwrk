@@ -21904,6 +21904,13 @@ table.os-tbl {
 :root.dark [role="dialog"] .hover\:bg-zinc-100:hover { background: var(--os-surface-2) !important; }
 :root.dark [role="dialog"] .hover\:bg-zinc-200:hover { background: var(--os-line-strong) !important; }
 
+/* The outline Button's hover fill in dark. The bg-white repaints above
+   (in a dialog, and button.bg-white in the app) are !important, so its
+   own dark:hover fill never showed and a hover changed nothing but the
+   text. One step lighter than both resting fills (surface, surface-2).
+   Founder 2026-11-28: a hovered Cancel vanished on the dark dialog. */
+:root.dark :is(button, a)[data-variant="outline"]:hover:not(:disabled) { background: var(--os-line-strong) !important; }
+
 /* Borders */
 :root.dark [role="dialog"] .border-zinc-100 { border-color: var(--os-line) !important; }
 :root.dark [role="dialog"] .border-zinc-200 { border-color: var(--os-line-strong) !important; }
