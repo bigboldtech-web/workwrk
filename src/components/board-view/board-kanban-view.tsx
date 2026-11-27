@@ -399,6 +399,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   if (flippedUnder !== subtaskDisplay) {
     setFlippedUnder(subtaskDisplay);
     setFlipped(new Set());
+    // Leaving Separate takes subtask cards off the board: a selection made
+    // among them must not stay in the bulk bar and act on tasks no longer
+    // on screen.
+    setSelected(new Set());
   }
   const flipSubtasks = useCallback((id: string) => {
     setFlipped((prev) => {
@@ -523,6 +527,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const dropCard = useCallback(async (id: string, status: string, index: number) => {
     const card = itemsRef.current.find((r) => r.id === id);
     if (!card || !canEdit || !linkedRowEditable(card, canEdit)) return;
+    // A subtask keeps its place under its task and is never dragged among the
+    // cards (its card is not draggable); this holds even for a drag that began
+    // on something inside it, such as an avatar or selected text.
+    if (card.parentItemId) return;
     const kind = linkedRowKind(card, boardId);
     const statusChange = statusOf(card) !== status;
     let homeStatus: string | null = null;
@@ -722,6 +730,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           const others = dragId ? arranged.filter((c) => c.id !== dragId) : arranged;
           const placeOf = new Map(others.map((c, i) => [c.id, i] as const));
           const wasAt = dragId ? arranged.findIndex((c) => c.id === dragId) : -1;
+          // The bottom line goes under the last card SHOWN: under Separate a
+          // card dropped at the end lands after the subtasks that follow the
+          // last arranged card, so a line above them would point elsewhere.
+          const lastShownId = (dragId ? cards.filter((c) => c.id !== dragId) : cards).at(-1)?.id ?? null;
           const lineAt = dragId && !refusesDrag && dropAt && dropAt.status === status && !(wasAt !== -1 && wasAt === dropAt.index) ? dropAt.index : null;
           return (
             <div
@@ -834,7 +846,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                   return (
                   <div key={card.id} className="relative" data-place={place}>
                   {lineAt !== null && place !== undefined && place === lineAt ? <DropLine edge="top" /> : null}
-                  {lineAt !== null && place !== undefined && place === others.length - 1 && lineAt === others.length ? <DropLine edge="bottom" /> : null}
+                  {lineAt !== null && card.id === lastShownId && lineAt === others.length ? <DropLine edge="bottom" /> : null}
                   <KanbanCard
                     boardId={boardId}
                     card={card}
@@ -1110,7 +1122,9 @@ function KanbanCard({
   return (
     <div
       draggable={draggableCard && !editing && !subtaskOpen}
-      onDragStart={onDragStart}
+      // A drag that starts on something inside a card that may not move (an
+      // avatar image, selected text) is never a move of the card.
+      onDragStart={() => { if (draggableCard && !editing && !subtaskOpen) onDragStart(); }}
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing && !subtaskOpen) onOpen?.(); }}
       onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}

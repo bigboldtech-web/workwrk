@@ -87,3 +87,16 @@ describe("the Board uses it", () => {
     expect(table).toMatch(/modes=\{\["collapsed", "expanded"\]\}/);
   });
 });
+
+describe("the Board review's fixes", () => {
+  const kanban = readFileSync("src/components/board-view/board-kanban-view.tsx", "utf8");
+
+  it("a subtask is never dropped among the cards, even from a drag that began inside it", () => {
+    expect(kanban).toMatch(/if \(card\.parentItemId\) return;/);
+    expect(kanban).toMatch(/onDragStart=\{\(\) => \{ if \(draggableCard && !editing && !subtaskOpen\) onDragStart\(\); \}\}/);
+  });
+
+  it("changing the Subtasks control lets go of the selection", () => {
+    expect(kanban).toMatch(/setFlipped\(new Set\(\)\);[\s\S]{0,300}setSelected\(new Set\(\)\);/);
+  });
+});
