@@ -34,3 +34,18 @@ export function wallClockIn(d: Date, zone: string): { day: string; midnight: boo
   const hour = p.hour === "24" ? "00" : p.hour;
   return { day: `${p.year}-${p.month}-${p.day}`, midnight: hour === "00" && p.minute === "00" && p.second === "00" && d.getUTCMilliseconds() === 0 };
 }
+
+/**
+ * The all-day reading of a task date for a grid drawn in `zone`: midnight in
+ * that zone (the app's own rule, V-41), or exactly midnight UTC, the shape
+ * every Gantt write before V-41 and a date-only API create still have, on its
+ * UTC day (the final review: those had become one-hour blocks). Null when the
+ * date carries a time.
+ */
+export function allDayKey(d: Date, zone: string): string | null {
+  const wall = wallClockIn(d, zone);
+  if (wall.midnight) return wall.day;
+  const utcMidnight = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+  return utcMidnight ? d.toISOString().slice(0, 10) : null;
+}
+

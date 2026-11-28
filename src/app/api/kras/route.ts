@@ -284,7 +284,9 @@ export async function DELETE(req: NextRequest) {
   // first, where they can be seen; then the KRA goes.
   if (existing._count.kpis > 0) {
     const n = existing._count.kpis;
-    const message = `This KRA has ${n} KPI${n === 1 ? "" : "s"}. Move ${n === 1 ? "it" : "them"} to another KRA or delete ${n === 1 ? "it" : "them"} first.`;
+    // Detaching it from its job title keeps it and its KPIs, visible under
+    // Needs a job title (the final review: there is no screen that moves a KPI).
+    const message = `This KRA has ${n} KPI${n === 1 ? "" : "s"}, and deleting it would leave ${n === 1 ? "it" : "them"} and every reading on no screen. Detach it from its job title instead, or delete its KPIs first.`;
     return NextResponse.json({ error: message, code: "kra_has_kpis", message }, { status: 409 });
   }
 

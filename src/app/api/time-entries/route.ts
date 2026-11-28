@@ -15,6 +15,7 @@
 // "reopen" }), which is the transition spec-planner section 2 /timesheets
 // adds for T-2.
 
+import { taskTimerRefusal } from "@/lib/timer-stop";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -185,7 +186,10 @@ export async function POST(req: NextRequest) {
       where: { id: itemId, organizationId: orgId },
       select: { id: true },
     });
-    validatedItemId = item?.id ?? null;
+    // Only a task this person can open (V-24, the final review): time logged
+    // on a private task here showed its title on the timesheet. Same soft
+    // rule as an unknown id: the entry is kept, unlinked.
+    validatedItemId = item && !(await taskTimerRefusal("BOARD_ITEM", item.id)) ? item.id : null;
   }
 
   const dayStart = dayStartUTC(day);

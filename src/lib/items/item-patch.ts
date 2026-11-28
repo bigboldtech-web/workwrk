@@ -40,7 +40,7 @@ import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watcher
 import { gateItem, type ItemCtx } from "@/lib/item-gate";
 import { mergeText } from "@/lib/text-merge";
 import { fieldValuesRefusal } from "@/lib/field-value-check";
-import { applyChecklistOp, checklistOpSchema, type ChecklistOp } from "@/lib/items/checklist-op";
+import { applyChecklistOp, CHECKLIST_MAX_ITEMS, checklistOpSchema, type ChecklistOp } from "@/lib/items/checklist-op";
 import { allowsItemAction } from "@/lib/item-role";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence, validZone } from "@/lib/recurrence";
 import { getEffectivePreferences } from "@/lib/preferences";
@@ -210,7 +210,9 @@ const patchSchema = z.object({
   // description this edit was typed over: the saved text is the merge of the
   // editor's text and whatever is stored now (src/lib/text-merge.ts), on the
   // locked row, so a paragraph somebody saved meanwhile is kept, never erased.
-  descriptionBase: z.string().max(1_000_000).optional(),
+  // No length cap: a description the editor typed is never refused for its
+  // base's size (the final review); the body limit bounds it.
+  descriptionBase: z.string().optional(),
   // One checklist change, applied to the list as stored (checklist-op.ts);
   // it decides `checklist`, whatever metadataPatch carries for the optimistic
   // render, so two people ticking, adding and dragging never erase each other.
@@ -341,7 +343,15 @@ function mergedOnStored(placeOf: (key: string) => Json, patch: Json | undefined,
       next = { ...next, description: merged === "" ? null : merged };
     }
   }
-  if (op) next = { ...(next ?? {}), checklist: applyChecklistOp(placeOf("checklist").checklist, op) };
+  if (op) {
+    const held = placeOf("checklist").checklist;
+    // A full checklist says so (the final review: the add was dropped on the
+    // server and vanished from the drawer at the next refresh).
+    if (op.kind === "add" && Array.isArray(held) && held.length >= CHECKLIST_MAX_ITEMS) {
+      throw new Refusal(409, { error: `A checklist holds at most ${CHECKLIST_MAX_ITEMS} items.`, code: "checklist_full", message: `A checklist holds at most ${CHECKLIST_MAX_ITEMS} items.` });
+    }
+    next = { ...(next ?? {}), checklist: applyChecklistOp(held, op) };
+  }
   return next;
 }
 

@@ -2,6 +2,7 @@
 // task on a DRAFT timesheet. Submitted/approved timesheets are locked
 // The owner has to retract first.
 
+import { taskTimerRefusal } from "@/lib/timer-stop";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -87,7 +88,8 @@ export async function PATCH(
         where: { id: body.itemId, organizationId: orgId },
         select: { id: true },
       });
-      if (!item) return jsonError("That task is not in this organization", 404);
+      // Only a task this person can open (V-24, the final review).
+      if (!item || (await taskTimerRefusal("BOARD_ITEM", item.id))) return jsonError("That task is not in this organization", 404);
       data.itemId = item.id;
     }
   }

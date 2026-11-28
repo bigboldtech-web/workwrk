@@ -200,7 +200,8 @@ export function ManageAlignmentDialog({
     setBusy(`del-kra-${id}`);
     try {
       const res = await fetch(`/api/kra-assignments/${id}`, { method: "DELETE" });
-      if (!res.ok) { error("Couldn't remove KRA"); return; }
+      // The reason, when the server gives one (only people who report to you, never your own).
+      if (!res.ok) { const d = await res.json().catch(() => null); error(d?.error ?? d?.message ?? "Couldn't remove KRA"); return; }
       await load(); fireChanged();
     } finally { setBusy(null); }
   };

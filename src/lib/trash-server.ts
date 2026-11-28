@@ -32,7 +32,7 @@ import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type 
 import { loadWorld } from "./access/node-world";
 import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
-import { freeTrashStorage, NO_LONGER_IN_TRASH, PARENT_TASK_IN_TRASH, restoreFromTrash, tasksHeldInTrash } from "./trash";
+import { detachCrossListChildren, freeTrashStorage, NO_LONGER_IN_TRASH, PARENT_TASK_IN_TRASH, restoreFromTrash, tasksHeldInTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
   TRASH_TYPE_BY_KEY,
@@ -1251,6 +1251,17 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
     if (type === "space" || type === "folder" || type === "list") {
       const blocked = await liveChildrenOf(type, id, orgId);
       if (blocked) return { ok: false, status: 409, message: blocked };
+    }
+    // A subtask that was moved to a List this delete does not take stays there
+    // as a task of its own (V-40, the final review): the database cascade took
+    // it with its parent, from a List its people could still open.
+    // (A Folder or Space delete leaves its Lists, onDelete SetNull: only a
+    // task's and a List's delete cascade into tasks.)
+    if (type === "task" || type === "list") {
+      const roots = type === "task"
+        ? await prisma.item.findMany({ where: { id, organizationId: orgId }, select: { id: true, boardId: true } })
+        : await prisma.item.findMany({ where: { boardId: id }, select: { id: true, boardId: true } });
+      if (roots.length) await detachCrossListChildren(prisma, roots, type === "list" ? new Set([id]) : undefined);
     }
     switch (type) {
       case "space": await prisma.space.deleteMany({ where: { id, organizationId: orgId } }); return { ok: true };

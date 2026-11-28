@@ -8,6 +8,7 @@
 // policy, `period` the acknowledgement window.
 
 import { prisma } from "@/lib/prisma";
+import { csvExportCell } from "@/lib/csv";
 import { summarizeUserAcks, ackStatusFor, daysOverdue, type AckRecord } from "@/lib/policy-evidence";
 import { matchesGap, matchesPerson, matchesPolicy, periodStart, type Period } from "@/lib/policy-compliance-view";
 import { AUDIENCE_REACH, peoplePlacedHere, placementsHere } from "@/lib/access/profile-here";
@@ -146,6 +147,8 @@ export async function buildPolicyCompliance(orgId: string, scopeUserIds: Set<str
 }
 
 export function csvEscape(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v);
+  // Formula-safe in the helper itself (pen test V-29, the final review): the
+  // policy and SOP compliance exports wrote people's names and titles as is.
+  const s = csvExportCell(v === null || v === undefined ? "" : String(v));
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

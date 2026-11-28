@@ -224,6 +224,14 @@ export function PublicLinkSection({
           ) : null}
           <code className="block overflow-x-auto whitespace-pre rounded-md border border-line bg-subtle px-3 py-2 font-mono text-xs text-ink-2">{embedSnippet(kind, tableRef ?? id, title)}</code>
         </div>
+      ) : on ? (
+        // The public address is for the people who manage the link; everyone
+        // else still copies the internal one (the final review).
+        <div className="flex flex-wrap gap-1 pt-1">
+          <button type="button" onClick={() => copy(copyObjectLink(kind, id), "Internal link copied")} title={`Opens it for people signed in to ${orgName}`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+            <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy internal link
+          </button>
+        </div>
       ) : null}
       {formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null}
     </div>

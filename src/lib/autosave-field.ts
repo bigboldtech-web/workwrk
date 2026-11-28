@@ -137,3 +137,69 @@ export function retryDelayMs(attempt: number, maxAttempts = 4, baseMs = 2000): n
 export function draftValue(state: AutosaveState): string {
   return state.dirty ? state.local : "";
 }
+
+/**
+ * ONE DESCRIPTION SAVE AT A TIME (the final review of pen test 2026-11-28).
+ *
+ * A save carries the text it was typed over (its base), and the server merges
+ * when the stored text has moved past that base (V-33). Two saves of the SAME
+ * person in flight at once (an autosave still out when they press Esc, or a
+ * retry) both carried the old base, so the server took the first as somebody
+ * else's and stored the edited line twice. The queue sends one save at a time:
+ * a commit while one is out waits, and goes when the answer comes, typed over
+ * the text the server answered with, with what was typed since carried onto
+ * it (mergeText), even after the field has unmounted.
+ *
+ * `send` resolves with the text the server stored, or null when the save did
+ * not land (the base then stays, and the next commit tries again).
+ */
+export interface SaveQueue {
+  /** Send `text` now, or once the save in flight has answered. */
+  commit(text: string): void;
+  /** A server value arrived while nothing is out or waiting: it is the new base. */
+  follow(serverText: string): void;
+  readonly base: string;
+  readonly busy: boolean;
+}
+
+export function createSaveQueue(initialBase: string, send: (text: string, base: string) => Promise<string | null>): SaveQueue {
+  let base = initialBase;
+  let inFlight = false;
+  let waiting: string | null = null;
+  const go = (text: string) => {
+    if (text === base) return;
+    inFlight = true;
+    void send(text, base)
+      .catch(() => null)
+      .then((saved) => {
+        inFlight = false;
+        if (saved !== null) {
+          base = saved;
+          if (waiting !== null) waiting = mergeText(text, waiting, saved);
+        }
+        if (waiting !== null) {
+          const next = waiting;
+          waiting = null;
+          go(next);
+        }
+      });
+  };
+  return {
+    commit(text) {
+      if (inFlight) {
+        waiting = text;
+        return;
+      }
+      go(text);
+    },
+    follow(serverText) {
+      if (!inFlight && waiting === null) base = serverText;
+    },
+    get base() {
+      return base;
+    },
+    get busy() {
+      return inFlight || waiting !== null;
+    },
+  };
+}

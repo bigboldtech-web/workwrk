@@ -3,6 +3,7 @@
 // every existing list with no query changes. restoreFromTrash() re-creates it
 // from the snapshot. Items are purged 60 days after deletion.
 
+import { isSealedLogin, sealLogin, type ToolLogin } from "@/lib/tools/tool-credentials";
 import { deleteUpload } from "@/lib/local-uploads";
 import { prisma } from "@/lib/prisma";
 import { completionsOf, restoreCompletions } from "@/lib/item-completions";
@@ -357,7 +358,7 @@ async function captureDriveFolderSubtree(rootId: string): Promise<Row[]> {
  * parent. `deletedBoards`, for a List, Folder or Space delete, counts every
  * List going away as the same List.
  */
-async function detachCrossListChildren(db: TrashDb, roots: Array<{ id: string; boardId: string }>, deletedBoards?: ReadonlySet<string>): Promise<Row[]> {
+export async function detachCrossListChildren(db: TrashDb, roots: Array<{ id: string; boardId: string }>, deletedBoards?: ReadonlySet<string>): Promise<Row[]> {
   const detached: Row[] = [];
   const sameList = (a: string, b: string) => a === b || (!!deletedBoards && deletedBoards.has(a) && deletedBoards.has(b));
   // Every task walked once: a parent loop in the data (which relinkDetached
@@ -615,8 +616,11 @@ const REGISTRY: Record<TrashType, Entry> = {
   // back whole; the snapshot is never sent to the client.
   tool: {
     capture: async (id) => {
-      const row = await prisma.tool.findUnique({ where: { id } });
-      if (!row) return null;
+      const found = await prisma.tool.findUnique({ where: { id } });
+      if (!found) return null;
+      // A login saved before the seal is sealed in the snapshot too (V-27,
+      // the final review): Trash kept it readable in the database.
+      const row = found.credentials && !isSealedLogin(found.credentials) ? { ...found, credentials: sealLogin(found.credentials as ToolLogin) } : found;
       const shares = await prisma.toolShare.findMany({ where: { toolId: id } });
       return { label: row.name || "Untitled tool", snapshot: { row: row as unknown as Row, children: { shares: shares as unknown as Row[] } } };
     },

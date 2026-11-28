@@ -15,6 +15,7 @@
 // { autoStopped: true } so the page can say what happened. The row is
 // never deleted and never silently dropped.
 
+import { taskTimerRefusal } from "@/lib/timer-stop";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -133,7 +134,11 @@ export async function POST(req: NextRequest) {
   }
   const action = typeof body.action === "string" ? body.action : "";
   const taskId = typeof body.taskId === "string" ? body.taskId : null;
-  const itemId = typeof body.itemId === "string" ? body.itemId : null;
+  const askedItemId = typeof body.itemId === "string" ? body.itemId : null;
+  // Only a task this person can open (V-24, the final review), decided here,
+  // before the transaction below (the gate reads on the global pool). A task
+  // they cannot open is treated as no task, as an unknown id already is.
+  const itemId = askedItemId && !(await taskTimerRefusal("BOARD_ITEM", askedItemId)) ? askedItemId : null;
   const description = typeof body.description === "string" ? body.description.trim() || null : null;
 
   if (!["start", "stop"].includes(action)) {

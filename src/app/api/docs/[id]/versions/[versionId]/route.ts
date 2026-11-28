@@ -73,31 +73,39 @@ export async function POST(
   });
   if (!source) return NextResponse.json({ error: "version not found" }, { status: 404 });
 
-  const last = await prisma.docVersion.findFirst({
-    where: { docId: id },
-    orderBy: { version: "desc" },
-    select: { version: true },
-  });
-  const nextVersion = (last?.version ?? 0) + 1;
-
-  // Create a new live version snapshotting the old content. Old
-  // version row stays exactly where it is — auditable trail intact.
-  const [, doc2] = await prisma.$transaction([
-    prisma.docVersion.create({
-      data: {
-        docId: id,
-        version: nextVersion,
-        title: source.title,
-        content: source.content as object,
-        authorId: ctx.userId,
-      },
-    }),
-    prisma.doc.update({
+  // Under a lock on the doc (the final review of pen test 2026-11-28): the
+  // live text is kept as a version FIRST when no version holds it yet, then
+  // the old version becomes live. A restore used to overwrite whatever was
+  // typed since the last version with no copy anywhere, and a save landing in
+  // the middle could interleave with it.
+  const { doc2, nextVersion } = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Doc" WHERE id = ${id} FOR UPDATE`;
+    const live = await tx.doc.findUnique({ where: { id }, select: { title: true, content: true } });
+    const last = await tx.docVersion.findFirst({
+      where: { docId: id },
+      orderBy: { version: "desc" },
+      select: { version: true, title: true, content: true },
+    });
+    let next = (last?.version ?? 0) + 1;
+    const liveKept = !!last && last.title === live?.title && JSON.stringify(last.content) === JSON.stringify(live?.content);
+    if (live && !liveKept) {
+      await tx.docVersion.create({
+        data: { docId: id, version: next, title: live.title, content: (live.content ?? {}) as object, authorId: ctx.userId },
+      });
+      next += 1;
+    }
+    // A new live version snapshotting the old content. The old version row
+    // stays exactly where it is: the auditable trail is intact.
+    await tx.docVersion.create({
+      data: { docId: id, version: next, title: source.title, content: source.content as object, authorId: ctx.userId },
+    });
+    const updated = await tx.doc.update({
       where: { id },
       data: { title: source.title, content: source.content as object },
       select: { id: true, title: true, content: true, updatedAt: true },
-    }),
-  ]);
+    });
+    return { doc2: updated, nextVersion: next };
+  }, { timeout: 30_000, maxWait: 10_000 });
 
   return NextResponse.json({ doc: doc2, restoredFromVersion: source.version, newVersion: nextVersion });
 }

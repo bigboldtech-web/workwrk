@@ -44,7 +44,8 @@ describe("the description", () => {
     const detail = src("src/components/board-view/board-item-detail.tsx");
     expect(detail).toMatch(/onMentionsChange=\{rememberTagged\}/);
     // With the text it was typed over, so a save made meanwhile is merged (pen test V-33).
-    expect(detail).toMatch(/onSave\(sent, surviving\(taggedRef\.current, sent\), reconciled\.synced\)/);
+    // One save at a time, typed over the text the server last answered with (the final review).
+    expect(detail).toMatch(/onSaveRef\.current\(sent, surviving\(taggedRef\.current, sent\), base\)/);
   });
 });
 
