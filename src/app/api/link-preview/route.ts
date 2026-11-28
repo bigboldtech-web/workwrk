@@ -71,6 +71,10 @@ export async function GET(req: NextRequest) {
       html = new TextDecoder().decode(bytes);
     } finally {
       clearTimeout(timeout);
+      // Every way out drops the connection: an error answer left unread kept
+      // its socket open, and an endless one kept filling memory (the step 2
+      // review).
+      controller.abort();
     }
 
     const head = parseHeadMeta(html);

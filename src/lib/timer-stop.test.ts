@@ -81,7 +81,11 @@ describe("the routes", () => {
   });
 
   it("a task's timer starts only on a task the person can open (V-24, V-59)", () => {
-    expect(read("src/app/api/timers/start/route.ts")).toMatch(/if \(parsed\.data\.entityType === "BOARD_ITEM"\) \{[\s\S]{0,300}gateItem\(parsed\.data\.entityId, c, "view"\)/);
+    expect(read("src/lib/timer-stop.ts")).toMatch(/if \(entityType !== "BOARD_ITEM"\) return null;[\s\S]{0,300}gateItem\(entityId, c, "view"\)/);
+    expect(read("src/app/api/timers/start/route.ts")).toMatch(/const refused = await taskTimerRefusal\(parsed\.data\.entityType, parsed\.data\.entityId\);/);
+    const timers = read("src/app/api/timers/route.ts");
+    expect(timers).toMatch(/const refusedRead = await taskTimerRefusal\(entityType, entityId\);/);
+    expect(timers).toMatch(/const refused = await taskTimerRefusal\(parsed\.data\.entityType, parsed\.data\.entityId\);/);
   });
 
   it("the drawer says when a switch could not log the earlier task's hours", () => {
@@ -93,14 +97,20 @@ describe("Notepad never loses a big note in silence (V-19)", () => {
   const panel = readFileSync("src/components/layout/os/notepad-panel.tsx", "utf8");
 
   it("saves through fetchWithRetry (keepalive only while the body fits), never a bare keepalive fetch", () => {
-    expect(panel.match(/fetchWithRetry\(`\/api\/docs\/\$\{/g)).toHaveLength(2);
+    expect(panel.match(/fetchWithRetry\(`\/api\/docs\/\$\{/g)).toHaveLength(1);
     expect(panel).not.toMatch(/keepalive: true/);
   });
 
-  it("says when a save failed, and keeps retrying until it lands", () => {
-    expect(panel).toMatch(/\.catch\(\(\) => setSaveFailed\(true\)\)/);
+  it("says when a save failed, and keeps retrying a retryable failure until it lands", () => {
+    expect(panel).toMatch(/setSaveFailed\(r\.status >= 400 && r\.status < 500 \? "refused" : "retrying"\)/);
     expect(panel).toMatch(/Not saved\. Retrying…/);
-    expect(panel).toMatch(/if \(!saveFailed\) return;\s+const t = window\.setInterval\(flushPending, 10_000\);/);
+    expect(panel).toMatch(/if \(saveFailed !== "retrying"\) return;\s+const t = window\.setInterval\(\(\) => flushPending\(\), 10_000\);/);
+    expect(panel).toMatch(/Couldn&apos;t save this note\. Copy your text before closing\./);
+  });
+
+  it("saves go one at a time, and an older save never lands after a newer one (the step 2 review)", () => {
+    expect(panel).toMatch(/const run = saveQueueRef\.current\.then\(async \(\) => \{\s+const latest = pendingRef\.current;\s+if \(latest && latest\.id === id && latest\.body !== body\) return;/);
+    expect(panel).toMatch(/void sendNote\(id, body\)\.finally/);
   });
 });
 

@@ -124,7 +124,7 @@ describe("the routes use them", () => {
 
   it("a canvas save checks and writes in one step, so of two saves at once one gets the 409 (V-34)", () => {
     const route = read("src/app/api/whiteboards/[id]/route.ts");
-    expect(route).toMatch(/updateMany\(\{ where: \{ id, updatedAt: existing\.updatedAt \}, data \}\)/);
-    expect(route).toMatch(/if \(count === 0\) \{[\s\S]{0,500}status: 409/);
+    expect(route).toMatch(/updateManyAndReturn\(\{ where: \{ id, updatedAt: existing\.updatedAt \}, data, select \}\)/);
+    expect(route).toMatch(/if \(rows\.length === 0\) \{[\s\S]{0,500}status: 409/);
   });
 });

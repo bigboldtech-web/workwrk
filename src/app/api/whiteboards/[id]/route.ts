@@ -138,15 +138,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     // and both wrote, and one scene was lost with no conflict and no history.
     // Only the save that still finds the updatedAt it checked writes; the
     // other gets the same 409 a stale tab gets.
-    const { count } = await prisma.whiteboard.updateMany({ where: { id, updatedAt: existing.updatedAt }, data });
-    if (count === 0) {
+    // The row comes back from the same statement, so the updatedAt handed to
+    // the editor is the one THIS save wrote, never a later save's.
+    const rows = await prisma.whiteboard.updateManyAndReturn({ where: { id, updatedAt: existing.updatedAt }, data, select });
+    if (rows.length === 0) {
       const live = await prisma.whiteboard.findUnique({ where: { id }, select: { updatedAt: true } });
       return NextResponse.json(
         { error: "conflict", message: "This canvas was edited elsewhere. Reload to see the latest version before saving again.", liveUpdatedAt: live?.updatedAt ?? null },
         { status: 409 },
       );
     }
-    whiteboard = await prisma.whiteboard.findUniqueOrThrow({ where: { id }, select });
+    whiteboard = rows[0];
   } else {
     whiteboard = await prisma.whiteboard.update({ where: { id }, data, select });
   }

@@ -98,14 +98,16 @@ export async function fetchPublic(
 }
 
 /** Read a body up to `maxBytes`; the rest is never downloaded. */
-export async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number, stopAt?: (soFar: string) => boolean): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+export async function readCapped(body: ReadableStream<Uint8Array> | null, maxBytes: number, stopAt?: (recentText: string) => boolean): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   if (!body) return { bytes: new Uint8Array(), truncated: false };
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
   let truncated = false;
   const decoder = stopAt ? new TextDecoder() : null;
-  let text = "";
+  // stopAt sees the recent text only: a growing whole re-scanned on every
+  // chunk was quadratic for a server trickling tiny chunks.
+  let recent = "";
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -120,8 +122,8 @@ export async function readCapped(body: ReadableStream<Uint8Array> | null, maxByt
       chunks.push(value);
       received += value.length;
       if (decoder && stopAt) {
-        text += decoder.decode(value, { stream: true });
-        if (stopAt(text)) break;
+        recent = (recent + decoder.decode(value, { stream: true })).slice(-16_384);
+        if (stopAt(recent)) break;
       }
     }
   } finally {

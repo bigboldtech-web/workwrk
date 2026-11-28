@@ -252,6 +252,8 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   const firstChangeRef = useRef(true);
   // The updatedAt this tab last observed, for the 409 precondition.
   const knownUpdatedAtRef = useRef<string | null>(null);
+  /** The canvas write now out (a scene save or a rename); the next one waits for it. */
+  const writeInFlightRef = useRef<Promise<void> | null>(null);
 
   // Full access on this canvas: Share, Save as template and Trash. The
   // server's word, else myRole full on an older server.
@@ -368,13 +370,31 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
   // rejects a keepalive body over ~64KB, so routine autosaves send a normal
   // request; keepalive is used only on unload and only when the payload
   // actually fits under the cap. (Unchanged.)
+  //
+  // ONE WRITE AT A TIME (pen test 2026-11-28, the step 2 review). A save sent
+  // while another was still uploading carried the same expectedUpdatedAt, so
+  // one of the two got a 409 and autosave stopped behind a false conflict;
+  // and a save that landed marked the canvas clean even when newer strokes had
+  // arrived during it, so they were never saved. Every write now waits for
+  // the one before it (the unload save excepted: it cannot wait, and the
+  // draft keeps the scene), and only the scene that was sent is marked saved.
   const flushSave = useCallback(async (opts?: { keepalive?: boolean }) => {
+    if (!opts?.keepalive) {
+      while (writeInFlightRef.current) await writeInFlightRef.current.catch(() => undefined);
+    }
     if (!params?.id || !dirtyRef.current || !pendingSceneRef.current) return;
-    const payload = JSON.stringify({ scene: pendingSceneRef.current, expectedUpdatedAt: knownUpdatedAtRef.current ?? undefined });
+    const scene = pendingSceneRef.current;
+    const run = sendScene(params.id, scene, opts);
+    if (!opts?.keepalive) writeInFlightRef.current = run;
+    try { await run; } finally { if (writeInFlightRef.current === run) writeInFlightRef.current = null; }
+  }, [params?.id]);
+
+  async function sendScene(id: string, scene: unknown, opts?: { keepalive?: boolean }) {
+    const payload = JSON.stringify({ scene, expectedUpdatedAt: knownUpdatedAtRef.current ?? undefined });
     const useKeepalive = !!opts?.keepalive && payload.length < 60000;
     setSaving(true);
     try {
-      const res = await fetch(`/api/whiteboards/${params.id}`, {
+      const res = await fetch(`/api/whiteboards/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: payload,
@@ -383,12 +403,16 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
       if (res.ok) {
         const data = await res.json().catch(() => null);
         if (data?.whiteboard?.updatedAt) knownUpdatedAtRef.current = data.whiteboard.updatedAt;
-        dirtyRef.current = false;
-        setDirty(false);
+        // Clean only when nothing newer arrived while this one was out: a
+        // newer scene stays dirty, in the draft, and its own save follows.
+        if (pendingSceneRef.current === scene) {
+          dirtyRef.current = false;
+          setDirty(false);
+          draftRef.current.clear();
+        }
         setSaveError(false);
         setConflict(false);
         setLastSavedAt(new Date());
-        draftRef.current.clear();
         dispatchCanvasesChanged();
       } else if (res.status === 409) {
         // Someone else saved. Keep the local scene (it is in the draft) and
@@ -405,7 +429,7 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
     } finally {
       setSaving(false);
     }
-  }, [params?.id]);
+  }
 
   const queueSave = useCallback((scene: unknown) => {
     pendingSceneRef.current = scene;
@@ -495,7 +519,13 @@ export function CanvasEditor({ canvasId }: { canvasId: string }) {
     const next = renameValue.trim();
     if (!next) { setRenameValue(board.name); return; }
     if (next === board.name) return;
-    const r = await apiFetch<{ whiteboard: { updatedAt: string } }>(`/api/whiteboards/${board.id}`, { method: "PATCH", json: { name: next } });
+    // A rename is a canvas write too: after any save that is out, and the
+    // next save waits for it (its updatedAt is the next save's precondition).
+    while (writeInFlightRef.current) await writeInFlightRef.current.catch(() => undefined);
+    const sending = apiFetch<{ whiteboard: { updatedAt: string } }>(`/api/whiteboards/${board.id}`, { method: "PATCH", json: { name: next } });
+    const done = sending.then(() => undefined, () => undefined);
+    writeInFlightRef.current = done;
+    const r = await sending.finally(() => { if (writeInFlightRef.current === done) writeInFlightRef.current = null; });
     if (r.ok) {
       setBoard({ ...board, name: next });
       if (r.data.whiteboard?.updatedAt) knownUpdatedAtRef.current = r.data.whiteboard.updatedAt;

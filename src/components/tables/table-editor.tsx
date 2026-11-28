@@ -128,6 +128,7 @@ import { createSerialQueue } from "@/lib/sheet-serial-queue";
 // Row INSERTS keep a plain fetch: a repeat after a lost response would add
 // the rows twice.
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { sameJson } from "@/lib/json-same";
 import { ledgerFail, ledgerRowId, ledgerSettle, overlayLedger, overlayTableEntry, rowLedgerKey, TABLE_LEDGER_KEY, type SaveLedger } from "@/lib/sheet-save-ledger";
 import { jsonEqual } from "@/lib/sheet-conflict";
 import { streamRows } from "@/lib/sheet-stream";
@@ -1420,6 +1421,14 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       const t: ApiTable = td.data ?? td;
       t.columns = Array.isArray(t.columns) ? t.columns : [];
       if (gen !== loadGenRef.current) return;
+      // The structure as the SERVER has it, taken before the unsaved ledger is
+      // laid over it below: the base every structure save sends as `expect`
+      // (the step 2 review: the overlaid copy made a retry its own conflict).
+      const serverStructure = {
+        columns: t.columns,
+        ...(t.views !== undefined ? { views: t.views } : {}),
+        ...(t.settings !== undefined && t.settings !== null ? { settings: t.settings } : {}),
+      };
       // A table field the server has not accepted yet (a column rename, a
       // column config, the name) stays on screen through the reload: server
       // truth plus the unsaved ledger, never server truth alone, or the
@@ -1538,11 +1547,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       // saved on a bigger sheet must not freeze everything that's left.
       setFreeze(clampFreeze(savedViews[0]?.config?.freeze, (rowsRef.current ?? []).length, t.columns.length));
       savedColumnsRef.current = t.columns;
-      serverStructRef.current = {
-        columns: t.columns,
-        ...(t.views !== undefined ? { views: t.views } : {}),
-        ...(t.settings !== undefined && t.settings !== null ? { settings: t.settings } : {}),
-      };
+      serverStructRef.current = serverStructure;
     } catch (e) {
       // A stale stream that failed (or was deliberately aborted by the
       // generation check) must not touch the newer load's UI.
@@ -2069,6 +2074,13 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       } else if (res.status === 409) {
         const d = await res.clone().json().catch(() => null);
         const live = d?.table ?? d?.data?.table;
+        // A retry whose first attempt landed (its answer was lost) finds its
+        // own change already there: that is this save succeeding, not someone
+        // else's change (the step 2 review).
+        if (live && keys.every((k) => sameJson(live[k], patch[k]))) {
+          for (const k of keys) serverStructRef.current[k] = live[k];
+          return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+        }
         if (live) adoptServerStructure(live, typeof d?.message === "string" ? d.message : undefined);
       }
       return res;
@@ -2088,6 +2100,9 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       // The title row's AutosaveIndicator and the status bar's last-saved
       // time read these; a failure stays visible until a save lands.
       if (res.ok) { setLastSavedAt(new Date()); noteWriteSettled(TABLE_LEDGER_KEY, Object.keys(patch)); }
+      // Refused because someone else changed the table: the change is dropped
+      // (said, and their table shown), never kept to be laid back over theirs.
+      else if (res.status === 409) noteWriteSettled(TABLE_LEDGER_KEY, Object.keys(patch));
       else noteWriteFailed(TABLE_LEDGER_KEY, patch as Record<string, unknown>);
       return res.ok;
     } catch { noteWriteFailed(TABLE_LEDGER_KEY, patch as Record<string, unknown>); return false; }

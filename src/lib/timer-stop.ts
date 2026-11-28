@@ -53,3 +53,19 @@ export async function stopTimerSession(active: TimerSession, ctx: { orgId: strin
   }
   return { session, timesheet: bridge ? { logged: bridge.logged, message: timerBridgeMessage(bridge) } : null };
 }
+
+/**
+ * A task's timer (start, a manual entry, the list of sessions) only on a task
+ * this person can open (pen test 2026-11-28, V-24 and V-59): a timer or an
+ * entry on any id, another company's or a private task's, was accepted, and
+ * the person's timesheet then showed that task's title. Null when allowed;
+ * other entity kinds are not tasks and pass.
+ */
+export async function taskTimerRefusal(entityType: string, entityId: string): Promise<Response | null> {
+  if (entityType !== "BOARD_ITEM") return null;
+  const { gateItem, itemCtx } = await import("@/lib/item-gate");
+  const c = await itemCtx();
+  if ("error" in c) return c.error;
+  const gate = await gateItem(entityId, c, "view");
+  return "error" in gate ? Response.json({ error: "not found" }, { status: 404 }) : null;
+}

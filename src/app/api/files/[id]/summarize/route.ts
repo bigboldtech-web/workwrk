@@ -18,6 +18,7 @@ import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { canReadFile } from "@/lib/file-access";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
 import { readUpload } from "@/lib/local-uploads";
+import { presignGetUrl } from "@/lib/s3";
 import { fetchPublic, readCapped } from "@/lib/net/public-fetch";
 
 const MAX_INPUT_CHARS = 200_000;
@@ -101,17 +102,34 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
  * stored address reached this server's own API, internal services and the
  * cloud metadata address, redirects followed.
  */
-async function fileBytes(file: { url: string; s3Key?: string | null }): Promise<Uint8Array> {
-  // Our S3 object: the address was signed here from the stored key.
+async function fileBytes(file: { url: string; s3Key?: string | null; organizationId: string }): Promise<Uint8Array> {
+  // Our S3 object: the address is signed HERE from the stored key, and only a
+  // key of this file's own workspace. Never the row's stored url: when signing
+  // failed, the stored url came back unchanged, and a row could carry any url
+  // beside its key (the step 2 review).
   if (file.s3Key) {
-    const res = await fetch(file.url, { redirect: "error" });
-    if (!res.ok) throw new Unreadable("Couldn't read this file.");
-    const { bytes, truncated } = await readCapped(res.body, MAX_FILE_BYTES);
-    if (truncated) throw new Unreadable("This file is too large to summarize.");
-    return bytes;
+    if (!file.s3Key.startsWith(`orgs/${file.organizationId}/`)) throw new Unreadable("Couldn't read this file.");
+    let signed: string;
+    try {
+      signed = await presignGetUrl(file.s3Key, 300);
+    } catch {
+      throw new Unreadable("Couldn't read this file.");
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(signed, { redirect: "error", signal: controller.signal });
+      if (!res.ok) throw new Unreadable("Couldn't read this file.");
+      const { bytes, truncated } = await readCapped(res.body, MAX_FILE_BYTES);
+      if (truncated) throw new Unreadable("This file is too large to summarize.");
+      return bytes;
+    } finally {
+      clearTimeout(timer);
+      controller.abort(); // whatever is left of the answer is dropped, never left open
+    }
   }
   // Our local disk: read it there, never over HTTP to ourselves.
-  const local = /^\/api\/uploads\/([^/?#]+)$/.exec(file.url);
+  const local = /^\/(?:api\/)?uploads\/([^/?#]+)(?:[?#].*)?$/.exec(file.url);
   if (local) {
     const buf = await readUpload(decodeURIComponent(local[1]));
     if (!buf) throw new Unreadable("Couldn't read this file.");
@@ -129,6 +147,9 @@ async function fileBytes(file: { url: string; s3Key?: string | null }): Promise<
     return bytes;
   } finally {
     clearTimeout(timer);
+    // Every way out (an error answer, a cap, a throw) drops the connection:
+    // an answer left unread kept its socket open (the step 2 review).
+    controller.abort();
   }
 }
 

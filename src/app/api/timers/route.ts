@@ -19,6 +19,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logTimerToTimesheet, timerBridgeMessage, type TimerBridgeResult } from "@/lib/timesheet";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { taskTimerRefusal } from "@/lib/timer-stop";
 import { z } from "zod";
 
 export async function GET(req: Request) {
@@ -31,6 +32,9 @@ export async function GET(req: Request) {
   if (!entityType || !entityId) {
     return NextResponse.json({ error: "entityType + entityId required" }, { status: 400 });
   }
+  // Whose time is on a task is the task's: only for someone who can open it.
+  const refusedRead = await taskTimerRefusal(entityType, entityId);
+  if (refusedRead) return refusedRead;
 
   const sessions = await prisma.timerSession.findMany({
     where: { organizationId: ctx.orgId, entityType, entityId },
@@ -76,6 +80,8 @@ export async function POST(req: Request) {
 
   const parsed = manualSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  const refused = await taskTimerRefusal(parsed.data.entityType, parsed.data.entityId);
+  if (refused) return refused;
 
   const startedAt = parsed.data.startedAt
     ? new Date(parsed.data.startedAt)

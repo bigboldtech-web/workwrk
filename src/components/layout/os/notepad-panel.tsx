@@ -84,7 +84,14 @@ export function NotepadPanel() {
   // A save that failed every retry: said on screen, kept for the next retry
   // (pen test 2026-11-28, V-19: a note over 64 KB was refused by the browser
   // as a keepalive request, the error was swallowed, and the note was lost).
-  const [saveFailed, setSaveFailed] = useState(false);
+  // "retrying": a network failure or a server error, tried again every 10 s.
+  // "refused": the server said no (too large, no access), so a retry cannot
+  // help and the person is told to keep their text.
+  const [saveFailed, setSaveFailed] = useState<null | "retrying" | "refused">(null);
+  // One save at a time, in order (the step 2 review): each retried on its own
+  // backoff, an older save could land after a newer one and the note ended up
+  // older on the server, with nothing left to send the newer one again.
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   // Guards a slow note fetch racing a note switch: a stale response must
   // never seed (and then silently save into) the newer note's editor.
   const loadTokenRef = useRef(0);
@@ -98,19 +105,45 @@ export function NotepadPanel() {
   // Re-fire the last unconfirmed save (if any). Called before switching
   // notes / closing the panel and on pagehide/hidden — a failed PATCH would
   // otherwise silently lose the edit.
-  const flushPending = useCallback(() => {
+  // One PATCH of a note. fetchWithRetry: keepalive only while the body fits
+  // the browser's 64 KB keepalive limit (a bigger note goes out as a plain
+  // request), and a network failure or a 5xx is retried.
+  const sendNow = useCallback(async (id: string, body: string) => {
+    try {
+      const r = await fetchWithRetry(`/api/docs/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body,
+      });
+      if (r.ok) {
+        // Only clear our own payload: a newer edit may have replaced it.
+        if (pendingRef.current?.id === id && pendingRef.current.body === body) { pendingRef.current = null; setSaveFailed(null); }
+      } else {
+        setSaveFailed(r.status >= 400 && r.status < 500 ? "refused" : "retrying");
+      }
+    } catch {
+      setSaveFailed("retrying"); // kept in pendingRef: the 10 s retry sends it
+    }
+  }, []);
+
+  // The same, in the save queue: after every save before it, and skipped when
+  // a newer body for the same note is waiting (that one carries everything).
+  const sendNote = useCallback((id: string, body: string): Promise<void> => {
+    const run = saveQueueRef.current.then(async () => {
+      const latest = pendingRef.current;
+      if (latest && latest.id === id && latest.body !== body) return;
+      await sendNow(id, body);
+    });
+    saveQueueRef.current = run.catch(() => undefined);
+    return run;
+  }, [sendNow]);
+
+  // Re-fire the last unconfirmed save (if any). Called before switching
+  // notes / closing the panel, and on pagehide/hidden (`now`: the page may
+  // be going, so it goes out at once rather than waiting its turn).
+  const flushPending = useCallback((opts?: { now?: boolean }) => {
     const p = pendingRef.current;
     if (!p) return;
-    // fetchWithRetry: keepalive only while the body fits the browser's 64 KB
-    // keepalive limit (a bigger note goes out as a plain request), and a
-    // network failure or a 5xx is retried.
-    void fetchWithRetry(`/api/docs/${p.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: p.body,
-    }).then((r) => {
-      if (r.ok && pendingRef.current?.body === p.body) { pendingRef.current = null; setSaveFailed(false); }
-      else if (!r.ok) setSaveFailed(true);
-    }).catch(() => setSaveFailed(true));
-  }, []);
+    void (opts?.now ? sendNow(p.id, p.body) : sendNote(p.id, p.body));
+  }, [sendNow, sendNote]);
 
   const loadList = useCallback(() => {
     if (!meId) return; // session still resolving — the catch-up effect below re-runs
@@ -179,21 +212,14 @@ export function NotepadPanel() {
     });
     pendingRef.current = { id, body };
     setSaving(true);
-    void fetchWithRetry(`/api/docs/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body,
-    }).then((r) => {
-      // Only clear our own payload: a newer edit may have replaced it.
-      if (r.ok && pendingRef.current?.body === body) { pendingRef.current = null; setSaveFailed(false); }
-      else if (!r.ok) setSaveFailed(true);
-    }).catch(() => setSaveFailed(true)) // kept in pendingRef: flushPending retries
-      .finally(() => { setSaving(false); loadList(); });
-  }, [loadList]);
+    void sendNote(id, body).finally(() => { setSaving(false); loadList(); });
+  }, [loadList, sendNote]);
 
   // A save that failed every retry is tried again every 10 s until it lands,
   // so "Retrying…" is true and the note is never left unsaved in silence.
   useEffect(() => {
-    if (!saveFailed) return;
-    const t = window.setInterval(flushPending, 10_000);
+    if (saveFailed !== "retrying") return;
+    const t = window.setInterval(() => flushPending(), 10_000);
     return () => window.clearInterval(t);
   }, [saveFailed, flushPending]);
 
@@ -201,11 +227,12 @@ export function NotepadPanel() {
   // flushes its own not-yet-emitted edit through onChange on pagehide, which
   // lands in persistNote above with keepalive.
   useEffect(() => {
-    const onHide = () => { if (document.visibilityState === "hidden") flushPending(); };
-    window.addEventListener("pagehide", flushPending);
+    const onPageHide = () => flushPending({ now: true });
+    const onHide = () => { if (document.visibilityState === "hidden") flushPending({ now: true }); };
+    window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onHide);
     return () => {
-      window.removeEventListener("pagehide", flushPending);
+      window.removeEventListener("pagehide", onPageHide);
       document.removeEventListener("visibilitychange", onHide);
     };
   }, [flushPending]);
@@ -235,8 +262,10 @@ export function NotepadPanel() {
             </button>
           ) : null}
           <div className="text-base font-semibold text-ink flex-1">Notepad</div>
-          {saving ? <span className="text-xs text-ink-2">Saving…</span> : saveFailed ? (
+          {saving ? <span className="text-xs text-ink-2">Saving…</span> : saveFailed === "retrying" ? (
             <span role="alert" className="text-xs text-danger-text">Not saved. Retrying…</span>
+          ) : saveFailed === "refused" ? (
+            <span role="alert" className="text-xs text-danger-text">Couldn&apos;t save this note. Copy your text before closing.</span>
           ) : null}
           <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-hover flex items-center justify-center text-ink-2" aria-label="Close">
             <X className="w-4 h-4" />

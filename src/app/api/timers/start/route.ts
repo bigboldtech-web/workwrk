@@ -10,8 +10,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
-import { gateItem, itemCtx } from "@/lib/item-gate";
-import { stopTimerSession } from "@/lib/timer-stop";
+import { stopTimerSession, taskTimerRefusal } from "@/lib/timer-stop";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -29,12 +28,8 @@ export async function POST(req: Request) {
   // A task's timer only on a task this person can open (pen test 2026-11-28,
   // V-24 and V-59): a timer on any id, another company's or a private task's,
   // was accepted, and the timesheet then showed that task's title.
-  if (parsed.data.entityType === "BOARD_ITEM") {
-    const c = await itemCtx();
-    if ("error" in c) return c.error;
-    const gate = await gateItem(parsed.data.entityId, c, "view");
-    if ("error" in gate) return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const refused = await taskTimerRefusal(parsed.data.entityType, parsed.data.entityId);
+  if (refused) return refused;
 
   // Already running on this entity? Return it.
   const existing = await prisma.timerSession.findFirst({
