@@ -262,7 +262,9 @@ export async function DELETE(req: NextRequest) {
 
   const existing = await prisma.kRA.findFirst({
     where: { id, organizationId: getOrgId(session) },
-    select: { id: true, _count: { select: { assignments: true, kpis: true } } },
+    // This company's KPIs only (the company wall, V-03): a KPI another
+    // company left on it shows on no screen here (the step 9 review).
+    select: { id: true, _count: { select: { assignments: true, kpis: { where: { organizationId: getOrgId(session) } } } } },
   });
   if (!existing) return jsonError("KRA not found", 404);
   // A delete removes every person's assignment of it and leaves its KPIs
@@ -282,6 +284,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   await prisma.$transaction([
+    prisma.kPI.updateMany({ where: { kraId: id, organizationId: { not: getOrgId(session) } }, data: { kraId: null } }),
     prisma.kRA.delete({ where: { id } }),
     // The links that named it (a goal's "aligned to" KRA) and the tasks
     // tagged with it go with it, instead of pointing at nothing.

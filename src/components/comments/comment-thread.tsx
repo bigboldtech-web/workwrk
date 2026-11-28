@@ -135,6 +135,7 @@ export function CommentThread({
   const [postError, setPostError] = useState<string | null>(null);
   // People a comment @mentioned who cannot open the task, so were not told (pen test V-57).
   const [unreachableNote, setUnreachableNote] = useState<string | null>(null);
+  useEffect(() => { setUnreachableNote(null); }, [entityId]);
   const [posting, setPosting] = useState(false);
 
   // The draft: controlled by the host when it wants to flush it on expiry,

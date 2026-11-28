@@ -637,6 +637,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // newer args overwrite a single "pending" slot; the in-flight
   // completion fires the latest pending with the now-fresh ref.
   const saveInFlightRef = useRef(false);
+  // Said once while the doc stays too large to save (the step 9 review: every edit said it again).
+  const tooLargeToldRef = useRef(false);
   const pendingPersistRef = useRef<
     null | { bnDoc: PartialBlock[] | null; blocks: Block[] | null; meta: DocMeta; excerpt?: string }
   >(null);
@@ -739,7 +741,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       if (docTooLargeToSave(wire)) {
         setSaveStatus("error");
         setSaveStuck(() => () => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0); });
-        toast(DOC_TOO_LARGE_COPY, { tone: "danger" });
+        if (!tooLargeToldRef.current) toast(DOC_TOO_LARGE_COPY, { tone: "danger" });
+        tooLargeToldRef.current = true;
         return;
       }
       const res = await fetch(`/api/docs/${docId}`, {
@@ -811,6 +814,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       setSaveStatus("saved");
       setLastSavedAt(new Date());
       setSaveStuck(null);
+      tooLargeToldRef.current = false;
       draftRef.current.clear();
       const savedTitle = titleRef.current.trim() || "Untitled doc";
       if (savedTitle !== lastSyncedTitleRef.current) {

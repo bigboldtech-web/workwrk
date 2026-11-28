@@ -476,7 +476,7 @@ export async function POST(req: NextRequest) {
   // manager's INDIVIDUAL goal with no ownerId was stored owned by nobody and
   // reached no one's Home. It is the creator's unless they name someone.
   const effectiveOwnerId = isManager(session)
-    ? (ownerId || ((normalizeGoalLevel(level) ?? "INDIVIDUAL") === "INDIVIDUAL" ? getUserId(session) : null))
+    ? (ownerId || ((normalizeGoalLevel(level) ?? "INDIVIDUAL") === "INDIVIDUAL" && !(Array.isArray(assignees) && assignees.length > 0) ? getUserId(session) : null))
     : getUserId(session);
   if (effectiveOwnerId) {
     // A seat here: anchored here as before, or here through a membership

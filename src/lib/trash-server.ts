@@ -32,7 +32,7 @@ import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type 
 import { loadWorld } from "./access/node-world";
 import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
-import { freeTrashStorage, NO_LONGER_IN_TRASH, PARENT_TASK_IN_TRASH, restoreFromTrash } from "./trash";
+import { freeTrashStorage, NO_LONGER_IN_TRASH, PARENT_TASK_IN_TRASH, restoreFromTrash, tasksHeldInTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
   TRASH_TYPE_BY_KEY,
@@ -646,12 +646,12 @@ async function subtasksWithParentInTrash(organizationId: string, page: readonly 
   const rows = await prisma.$queryRaw<Array<{ id: string; pid: string | null }>>`SELECT id, snapshot->'row'->>'parentItemId' AS pid FROM "TrashItem" WHERE id = ANY(${ids}::text[]) AND "organizationId" = ${organizationId}`;
   const pids = [...new Set(rows.map((r) => r.pid).filter((p): p is string => !!p))];
   if (!pids.length) return out;
-  const [live, parked] = await Promise.all([
+  const [live, parkedIds] = await Promise.all([
     prisma.item.findMany({ where: { id: { in: pids } }, select: { id: true } }),
-    prisma.trashItem.findMany({ where: { organizationId, entityType: "item", entityId: { in: pids } }, select: { entityId: true } }),
+    // Its own Trash row or inside another's snapshot (the step 9 review).
+    tasksHeldInTrash(organizationId, pids),
   ]);
   const liveIds = new Set(live.map((i) => i.id));
-  const parkedIds = new Set(parked.map((t) => t.entityId));
   for (const r of rows) if (r.pid && !liveIds.has(r.pid) && parkedIds.has(r.pid)) out.add(r.id);
   return out;
 }

@@ -60,7 +60,8 @@ export async function GET(req: Request) {
         OR: [
           { quarter },
           {
-            quarter: null,
+            // "" is unlabelled too, as GET /api/okrs reads it (the step 9 review).
+            OR: [{ quarter: null }, { quarter: "" }],
             AND: [
               { OR: [{ startDate: null }, { startDate: { lt: range.end } }] },
               { OR: [{ endDate: null }, { endDate: { gte: range.start } }] },
