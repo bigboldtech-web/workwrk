@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
@@ -27,7 +28,9 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
   const orgId = getOrgId(session);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const color = typeof body?.color === "string" && body.color.startsWith("#") ? body.color : "#d4ff2e";
   if (!name) return jsonError("Label name is required");
@@ -50,7 +53,11 @@ export async function DELETE(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
   const orgId = getOrgId(session);
 
-  const { id } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+
+  if (rawBody === BAD_JSON) return badJson();
+
+  const { id } = rawBody;
   if (!id) return jsonError("Label ID is required");
 
   const existing = await prisma.taskLabel.findFirst({

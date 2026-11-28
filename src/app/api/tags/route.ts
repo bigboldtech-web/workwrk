@@ -4,6 +4,7 @@
 // support a `type` filter so callers don't have to pull the world
 // just to render a picker for one dimension.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -69,7 +70,9 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const rawName = typeof body.name === "string" ? body.name.trim() : "";
   const type = typeof body.type === "string" ? body.type : "CUSTOM";
 

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { personHere } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, getUserId, hasPermission, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
@@ -91,7 +92,8 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { name, type, brand, model, serialNumber, imeiNumber, purchaseDate, purchaseCost, warrantyExpiry, condition, notes, assignedToId } = body;
 
   if (!name?.trim() || !type) return jsonError("Name and type are required");

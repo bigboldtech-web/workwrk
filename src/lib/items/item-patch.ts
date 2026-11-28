@@ -39,6 +39,7 @@ import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { gateItem, type ItemCtx } from "@/lib/item-gate";
 import { mergeText } from "@/lib/text-merge";
+import { fieldValuesRefusal } from "@/lib/field-value-check";
 import { applyChecklistOp, checklistOpSchema, type ChecklistOp } from "@/lib/items/checklist-op";
 import { allowsItemAction } from "@/lib/item-role";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence, validZone } from "@/lib/recurrence";
@@ -267,6 +268,11 @@ function metadataWriter(args: {
     // its namespace (routeMetadataPatch), so that is where "theirs" is read.
     const placeOf = (key: string): Json => (args.linkedListId && keys.stored.has(key) ? readNamespace(stored, args.linkedListId) : stored);
     const metadataPatch = mergedOnStored(placeOf, args.metadataPatch, args.descriptionBase, args.checklistOp);
+    // Each List field's value fits its type (pen test V-54).
+    const badValue = metadataPatch ? fieldValuesRefusal(args.fields, metadataPatch) : null;
+    const badBlob = !badValue && args.metadata ? fieldValuesRefusal(args.fields, args.metadata) : null;
+    const bad = badValue ?? badBlob;
+    if (bad) throw new Refusal(400, { error: bad.message, code: "invalid_field_value", key: bad.key, message: bad.message });
     let next: Json = stored;
     if (args.linkedListId) {
       if (metadataPatch) {

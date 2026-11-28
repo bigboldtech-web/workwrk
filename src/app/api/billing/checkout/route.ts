@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
@@ -37,7 +38,9 @@ export async function POST(req: NextRequest) {
   }
 
   const orgId = getOrgId(session);
-  const body = (await req.json()) as Body;
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const body = rawBody as Body;
 
   if (!body.key || !VALID_KEYS.includes(body.key)) {
     return jsonError(`key must be one of: ${VALID_KEYS.join(", ")}`);

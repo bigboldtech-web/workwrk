@@ -1,4 +1,5 @@
 import { orgRoleOf } from "@/lib/access/org-role";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { seedKraToRoleHolders } from "@/lib/alignment-assign";
@@ -130,7 +131,9 @@ export async function POST(req: NextRequest) {
   const denied = await requirePermission(session, "kras", "create");
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { name, description, category, roleId, weight } = body;
 
   if (!name) return jsonError("KRA name is required");
@@ -196,7 +199,9 @@ export async function PATCH(req: NextRequest) {
   const denied = await requirePermission(session, "kras", "edit");
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { id, name, description, category, roleId, weight } = body;
 
   if (!id) return jsonError("KRA id is required");

@@ -2,6 +2,7 @@
 // PATCH  /api/files/[id]  rename / move / star
 // DELETE /api/files/[id]  remove the record (does not delete the blob)
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withFreshFileUrl } from "@/lib/file-urls";
@@ -66,7 +67,8 @@ export async function PATCH(
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
 
   const existing = await prisma.fileEntry.findFirst({
     where: { id, organizationId: orgId },

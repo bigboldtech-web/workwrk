@@ -29,6 +29,7 @@ import { unknownUserIds } from "@/lib/assignable";
 import { prisma } from "@/lib/prisma";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { fieldKeySets } from "@/lib/list-connect";
+import { fieldValuesRefusal } from "@/lib/field-value-check";
 import { validateConnectWrites } from "@/lib/list-connect-server";
 import { applyMetadataPatch, checkHomeMetadataKeys, isReservedMetadataKey, routeMetadataPatch } from "@/lib/list-metadata";
 import { linkedListsOf } from "@/lib/list-links-server";
@@ -149,6 +150,10 @@ export async function createItemAs(c: ItemCreateCtx, id: string, body: unknown):
       }
     }
   }
+
+  // Each List field's value fits its type (pen test V-54).
+  const badValue = fieldValuesRefusal(listFields, submitted);
+  if (badValue) return NextResponse.json({ error: badValue.message, code: "invalid_field_value", key: badValue.key, message: badValue.message }, { status: 400 });
 
   let metadata: Record<string, unknown> = submitted;
   let validatedConnectKeys: string[] = [];

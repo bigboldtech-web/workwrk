@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
@@ -92,7 +93,8 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { sopId, userIds, departmentId, all, dueDate, mandatory } = body;
 
   if (!sopId) return jsonError("sopId is required");

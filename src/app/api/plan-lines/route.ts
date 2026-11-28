@@ -4,6 +4,7 @@
 // scenario, account, costCenter, period). The UI sends an array;
 // we upsert each so editing a cell is one round-trip.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -53,7 +54,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const planId = typeof body.planId === "string" ? body.planId : "";
   const lines: LineInput[] = Array.isArray(body.lines) ? body.lines : [];
   if (!planId) return jsonError("planId required");

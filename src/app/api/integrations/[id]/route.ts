@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
@@ -27,7 +28,8 @@ export async function PATCH(
   if ("error" in gate) return gate.error;
   const orgId = gate.orgId;
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
 
   const integration = await prisma.integration.findFirst({
     where: { id, organizationId: orgId },

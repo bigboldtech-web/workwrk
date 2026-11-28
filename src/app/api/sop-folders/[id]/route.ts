@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
@@ -52,7 +53,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   });
   if (!existing) return jsonError("Folder not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") {
     const name = body.name.trim();

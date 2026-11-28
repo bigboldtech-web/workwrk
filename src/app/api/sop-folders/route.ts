@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
@@ -84,7 +85,8 @@ export async function POST(req: NextRequest) {
   if (stale) return stale;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   if (!name) return jsonError("Folder name is required");
   if (name.length > 60) return jsonError("Folder name too long (max 60 chars)");

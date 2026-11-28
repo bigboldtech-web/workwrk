@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { enumRefusal, KRA_ASSIGNMENT_STATUSES } from "@/lib/alignment-enums";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { isOrgWideAlignment } from "@/lib/alignment-scope";
@@ -30,8 +32,11 @@ export async function PUT(
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { weightage, period, status } = body;
+  const badStatus = enumRefusal("status", status, KRA_ASSIGNMENT_STATUSES);
+  if (badStatus) return jsonError(badStatus, 400);
 
   const orgId = getOrgId(session);
 

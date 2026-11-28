@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
@@ -49,7 +50,8 @@ export async function PATCH(req: NextRequest) {
   if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { matrix } = body;
 
   if (!matrix || typeof matrix !== "object") {

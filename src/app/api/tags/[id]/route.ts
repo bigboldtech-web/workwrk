@@ -3,6 +3,7 @@
 // the safer path for any tag that's already in flight on records;
 // we expose both and let the UI pick.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -27,7 +28,9 @@ export async function PATCH(
   const tag = await prisma.tag.findFirst({ where: { id, organizationId: orgId } });
   if (!tag) return jsonError("Tag not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const data: Record<string, unknown> = {};
 
   if (typeof body.name === "string") {

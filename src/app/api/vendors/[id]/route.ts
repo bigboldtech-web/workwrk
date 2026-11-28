@@ -1,6 +1,7 @@
 // Vendor edit / archive / delete. Soft-archive when the vendor has
 // any related POs or invoices; hard-delete only when truly orphaned.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -26,7 +27,9 @@ export async function PATCH(
   const vendor = await prisma.vendor.findFirst({ where: { id, organizationId: orgId } });
   if (!vendor) return jsonError("Vendor not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const data: Record<string, unknown> = {};
 
   if (typeof body.name === "string") {

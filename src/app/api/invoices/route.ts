@@ -1,5 +1,6 @@
 // Invoices — list + create. Manager+ only. Optional link to a PO.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -65,7 +66,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const vendorId = typeof body.vendorId === "string" ? body.vendorId : "";
   const purchaseOrderId = typeof body.purchaseOrderId === "string" && body.purchaseOrderId
     ? body.purchaseOrderId

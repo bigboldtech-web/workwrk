@@ -6,6 +6,7 @@
 // expense-typed accounts (the cells the user can edit). The grid
 // editor on /planning/[id] uses this single payload to render.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -81,7 +82,8 @@ export async function PATCH(
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const action = typeof body.action === "string" ? body.action : "";
   const orgId = getOrgId(session);
 

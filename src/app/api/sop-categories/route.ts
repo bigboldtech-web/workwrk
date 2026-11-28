@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 
@@ -98,7 +99,8 @@ export async function POST(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { name, categoryId } = body;
 
   if (!name?.trim()) return jsonError("Name is required");
@@ -145,7 +147,9 @@ export async function PATCH(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const { id, type, name } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const { id, type, name } = rawBody;
 
   if (!id) return jsonError("ID is required");
   const next = typeof name === "string" ? name.trim() : "";
@@ -193,7 +197,9 @@ export async function DELETE(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const { id, type } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const { id, type } = rawBody;
 
   if (!id) return jsonError("ID is required");
 

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { AccessLevel } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, hasRole, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -49,7 +50,8 @@ export async function PATCH(
   const { id } = await params;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
 
   const idea = await prisma.idea.findFirst({
     where: { id, organizationId: orgId },

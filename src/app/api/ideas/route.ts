@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { findMigratedIdeasList } from "@/lib/work/ideas-destination";
@@ -50,7 +51,8 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { title, description, category } = body;
 
   if (!title?.trim() || !description?.trim()) {

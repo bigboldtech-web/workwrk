@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { enumRefusal, KRA_ASSIGNMENT_STATUSES } from "@/lib/alignment-enums";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { kpiActorCtx, mayActOnKpisOf } from "@/lib/kpi-review.server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
@@ -154,8 +156,12 @@ export async function POST(req: NextRequest) {
   const denied = await requirePermission(session, "kras", "assign");
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { userId, kraId, weightage, period, status } = body;
+  const badStatus = enumRefusal("status", status, KRA_ASSIGNMENT_STATUSES);
+  if (badStatus) return jsonError(badStatus, 400);
 
   if (!userId || !kraId) {
     return jsonError("userId and kraId are required");

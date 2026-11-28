@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { Prisma } from "@/generated/prisma";
@@ -169,7 +170,8 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { sopId, title, assigneeId, dueDate } = body;
 
   if (!sopId) return jsonError("SOP ID is required");
@@ -248,7 +250,8 @@ export async function PATCH(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { id, action, stepId, notes, inputValues } = body;
 
   if (!id) return jsonError("Process run ID is required");

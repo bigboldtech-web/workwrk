@@ -7,6 +7,7 @@
 //   receive : SENT → RECEIVED  (any party)
 //   close   : RECEIVED → CLOSED  (any party)
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -81,7 +82,9 @@ export async function PATCH(
   });
   if (!po) return jsonError("PO not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const action = typeof body.action === "string" ? body.action : null;
   const isOwner = po.requesterId === userId;
   const note = typeof body.note === "string" ? body.note.trim() || null : null;
