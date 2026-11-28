@@ -102,15 +102,30 @@ function startOfWeek(d: Date): Date {
   return x;
 }
 
-// Add whole days to a date and format as midnight-UTC ISO — matches the
-// drawer DateField + calendar reschedule so a bar lands on the calendar
-// day the cursor pointed at, regardless of timezone.
-function shiftToIso(d: Date, deltaDays: number): string {
+// A day as the List Calendar, the Table and every reader take it: MIDNIGHT
+// WHERE THE VIEWER IS (src/lib/item-date.ts hasTimeOfDay), not UTC midnight
+// (pen test 2026-11-28, V-41). UTC midnight is the evening before for anyone
+// west of UTC, so a bar dragged to 5 Dec came back on 4 Dec, and the Planner
+// and the List Calendar disagreed about the day.
+function dayKeyAfter(d: Date, deltaDays: number): string {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + deltaDays);
-  const y = x.getFullYear();
-  const m = String(x.getMonth() + 1).padStart(2, "0");
-  const day = String(x.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}T00:00:00.000Z`;
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * The column of the calendar day `d` falls on, counted from the window's first
+ * day (local midnight). Whole calendar days, rounded: a day after a
+ * spring-forward change is 23 hours on, and a floor of the hours put a date
+ * stored at local midnight in the column before (the step 6 review).
+ */
+export function dayColumn(d: Date, anchor: Date): number {
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((day - anchor.getTime()) / MS_PER_DAY);
+}
+
+/** Midnight, where the viewer is, of the day `deltaDays` after `d`, as an ISO instant. */
+function shiftToIso(d: Date, deltaDays: number): string {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + deltaDays).toISOString();
 }
 
 function addDays(d: Date, deltaDays: number): Date {
@@ -267,9 +282,7 @@ export function BoardGanttView({
 
   const totalDays = weekCount * 7;
   const windowEnd = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + totalDays);
-  const todayCol = Math.floor(
-    (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - anchor.getTime()) / MS_PER_DAY,
-  );
+  const todayCol = dayColumn(today, anchor);
   const todayInWindow = todayCol >= 0 && todayCol < totalDays;
 
   // ── Drag / resize ────────────────────────────────────────────────
@@ -392,7 +405,7 @@ export function BoardGanttView({
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dueAt: `${value}T00:00:00.000Z`, ...writeContext(row, boardId ?? "") }),
+        body: JSON.stringify({ dueAt: new Date(`${value}T00:00:00`).toISOString(), ...writeContext(row, boardId ?? "") }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(accessMessage(data, "Couldn't set that date.")); return; }
@@ -685,7 +698,7 @@ export function BoardGanttView({
                 }}
                 onDrop={(e) => {
                   e.preventDefault();
-                  if (panelDragId && dropDay !== null) void scheduleDate(panelDragId, shiftToIso(anchor, dropDay).slice(0, 10));
+                  if (panelDragId && dropDay !== null) void scheduleDate(panelDragId, dayKeyAfter(anchor, dropDay));
                   setPanelDragId(null);
                   setDropDay(null);
                 }}
@@ -809,8 +822,8 @@ export function BoardGanttView({
                       </button>
                     );
                   }
-                  const startDay = Math.max(0, Math.floor((s.getTime() - anchor.getTime()) / MS_PER_DAY));
-                  const endDay = Math.min(totalDays - 1, Math.floor((e.getTime() - anchor.getTime()) / MS_PER_DAY));
+                  const startDay = Math.max(0, dayColumn(s, anchor));
+                  const endDay = Math.min(totalDays - 1, dayColumn(e, anchor));
                   const startCol = startDay;
                   const spanCols = Math.max(1, endDay - startDay + 1);
 
@@ -925,7 +938,7 @@ export function BoardGanttView({
               canEdit={canEdit}
               editableIds={editableIds}
               onOpenItem={onOpenItem}
-              onScheduleToday={(id) => void scheduleDate(id, shiftToIso(startOfTodayD, 0).slice(0, 10))}
+              onScheduleToday={(id) => void scheduleDate(id, dayKeyAfter(startOfTodayD, 0))}
               onDragStart={setPanelDragId}
               onDragEnd={() => { setPanelDragId(null); setDropDay(null); }}
               onClose={toggleBacklog}

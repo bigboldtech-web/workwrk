@@ -43,6 +43,7 @@ function cloneMetadata(md: unknown): Record<string, unknown> {
   delete src.skippedOccurrences;
   delete src.recurrenceSourceId;
   delete src.recurrenceKey;
+  delete src.recurrenceZone;
   const cl = src.checklist;
   if (Array.isArray(cl)) {
     src.checklist = cl.map((c) =>
@@ -89,13 +90,47 @@ type CloneSrc = {
  * pinned to `cycleDue` (idempotency + spec: dueAt = the occurrence date).
  * Returns the new root id, or null if the source is gone.
  */
+/**
+ * Does a copy of this occurrence exist already? A copy whose key was written
+ * in the rule's own zone answers by its key, as always (so a copy someone
+ * moved to another day still holds its occurrence). A copy keyed on another
+ * clock (an older rule without a zone, or one saved from elsewhere since) is
+ * read by the day its date falls on in the rule's zone (pen test V-42, the
+ * step 6 review): comparing keys across clocks made a duplicate east of UTC
+ * and swallowed an occurrence west of it.
+ */
+export async function copyExists(boardId: string, sourceId: string, occ: { key: string; date: Date }, zone: string | null): Promise<boolean> {
+  const near = { gte: new Date(occ.date.getTime() - 36 * 3_600_000), lte: new Date(occ.date.getTime() + 36 * 3_600_000) };
+  const candidates = await prisma.item.findMany({
+    where: {
+      boardId,
+      AND: [
+        { metadata: { path: ["recurrenceSourceId"], equals: sourceId } },
+        { OR: [{ metadata: { path: ["recurrenceKey"], equals: occ.key } }, { dueAt: near }, { startAt: near }] },
+      ],
+    },
+    select: { dueAt: true, startAt: true, metadata: true },
+    take: 50,
+  });
+  return candidates.some((c) => copyMatches(c, occ.key, zone));
+}
+
+/** Pure half of copyExists: whether this copy holds the occurrence `key` of a rule in `zone`. */
+export function copyMatches(c: { dueAt: Date | null; startAt: Date | null; metadata: unknown }, key: string, zone: string | null): boolean {
+  const md = c.metadata && typeof c.metadata === "object" ? (c.metadata as Record<string, unknown>) : {};
+  const keyZone = typeof md.recurrenceZone === "string" ? md.recurrenceZone : null;
+  if (keyZone === zone) return md.recurrenceKey === key;
+  const at = c.dueAt ?? c.startAt;
+  return at ? occurrenceKey(new Date(at), zone) === key : md.recurrenceKey === key;
+}
+
 export async function cloneItemTree(
   rootId: string,
   cycleDue: Date,
   actorId: string | null = null,
   rootStatus: string | null = null,
   carryRule: RecurrenceRule | null = null,
-  occurrence: { sourceId: string; key: string } | null = null,
+  occurrence: { sourceId: string; key: string; zone?: string | null } | null = null,
 ): Promise<string | null> {
   const root = await prisma.item.findUnique({
     where: { id: rootId },
@@ -123,6 +158,10 @@ export async function cloneItemTree(
     if (isRoot && occurrence) {
       metadata.recurrenceSourceId = occurrence.sourceId;
       metadata.recurrenceKey = occurrence.key;
+      // The zone the key's day is read in (pen test V-42): a series whose
+      // rule changes zone compares an older copy by its own day, re-read in
+      // the rule's zone, never by a key written on another clock.
+      if (occurrence.zone) metadata.recurrenceZone = occurrence.zone;
     }
     const created = await createBoardItem({
       organizationId: root.organizationId,
@@ -356,20 +395,11 @@ export async function spawnDueRecurringTasks(
       for (const occ of spawnList) {
         // Belt-and-braces idempotency: skip when an instance for this exact
         // occurrence already exists (any state — archived spawns still block).
-        const existing = await prisma.item.findFirst({
-          where: {
-            boardId: anchor.boardId,
-            AND: [
-              { metadata: { path: ["recurrenceSourceId"], equals: anchor.id } },
-              { metadata: { path: ["recurrenceKey"], equals: occ.key } },
-            ],
-          },
-          select: { id: true },
-        });
-        if (!existing) {
+        if (!(await copyExists(anchor.boardId, anchor.id, occ, rule.tz ?? null))) {
           await cloneItemTree(anchor.id, occ.date, null, rule.resetStatus ?? null, null, {
             sourceId: anchor.id,
             key: occ.key,
+            zone: rule.tz ?? null,
           });
           spawned++;
         }
@@ -377,7 +407,7 @@ export async function spawnDueRecurringTasks(
       }
       // Nothing handled this tick (e.g. everything past `until`): still seed
       // the key from the claimed recurNextAt so no retro-spawning can happen.
-      if (!lastKey) lastKey = occurrenceKey(new Date(anchor.recurNextAt));
+      if (!lastKey) lastKey = occurrenceKey(new Date(anchor.recurNextAt), rule.tz);
 
       md.lastSpawnedKey = lastKey;
       if (batch.skipped.length > 0) {

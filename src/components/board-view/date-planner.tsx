@@ -124,6 +124,15 @@ const QUICK_CHIPS: { key: string; label: string }[] = [
 const LABEL = "text-micro font-medium uppercase tracking-wide text-zinc-400";
 const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-sm text-zinc-700 outline-none dark:bg-[#1B1F26] dark:border-[#2A2F38] dark:text-zinc-200 focus:border-[var(--os-brand)] transition-colors";
 
+/** The browser's IANA zone, or null where Intl cannot say. */
+function browserZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 export function DatePlanner({
   item, canEdit, onPatch, statuses = [], compact = false, done = false,
 }: {
@@ -585,7 +594,7 @@ function RepeatTab({
   const [interval, setIntervalN] = useState<number>(rule?.interval ?? 1);
   const [trigger, setTrigger] = useState<RecurTrigger>(rule?.trigger === "ON_COMPLETE" ? "ON_COMPLETE" : "SCHEDULE");
   const [weekdays, setWeekdays] = useState<number[]>(
-    rule?.weekdays?.length ? [...rule.weekdays].sort((a, b) => a - b) : [isoWeekday(dueDate)],
+    rule?.weekdays?.length ? [...rule.weekdays].sort((a, b) => a - b) : [isoWeekday(dueDate, browserZone())],
   );
   const [monthDay, setMonthDay] = useState<number>(rule?.monthDay ?? dueDate.getDate());
   const [yearMonth, setYearMonth] = useState<number>(rule?.yearMonth ?? dueDate.getMonth() + 1);
@@ -635,6 +644,9 @@ function RepeatTab({
     // "HH:MM" (some engines emit "HH:MM:SS" — trim); empty input = null =
     // occurrences keep inheriting the due date's time-of-day.
     atTime: /^([01]\d|2[0-3]):[0-5]\d/.test(atTime) ? atTime.slice(0, 5) : null,
+    // The zone this rule is set in, so its weekdays and time are read on this
+    // person's clock wherever the server runs (pen test V-42).
+    tz: browserZone(),
   }), [freq, interval, trigger, ends, count, untilDate, resetOn, resetStatus, weekdays, monthDay, yearMonth, yearDay, atTime]);
 
   const saveDisabled = ends === "until" && !untilDate;
