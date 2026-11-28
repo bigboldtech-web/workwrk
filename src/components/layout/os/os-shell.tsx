@@ -356,6 +356,15 @@ const SETTINGS_GRID_STYLE: React.CSSProperties = {
   gridTemplateRows: "var(--os-top-h) auto minmax(0, 1fr)",
 };
 
+// The frame, the main column and the settings takeover are all `relative`,
+// so an absolutely placed element with no positioned ancestor of its own (a
+// screen-reader live region at the end of a page, "51 people") is placed
+// against the column that scrolls, not the page. Without it such an element
+// took its spot below a long list, outside every overflow box, and grew the
+// document itself: the whole app (rail, top bar and all) scrolled up past
+// the bottom on Directory, Team, Everything and Analytics. The frame being
+// `relative` and `overflow-hidden` is the backstop: nothing inside it can
+// ever make the page taller than the screen again.
 function Frame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
   const settingsMode = isSettingsRoute(pathname);
@@ -363,7 +372,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   const { askAiVisible, askAiPanelFits } = useOsShell();
 
   return (
-    <div className="workwrk-os grid h-screen overflow-hidden bg-app text-ink" style={settingsMode ? SETTINGS_GRID_STYLE : GRID_STYLE}>
+    <div className="workwrk-os relative grid h-screen overflow-hidden bg-app text-ink" style={settingsMode ? SETTINGS_GRID_STYLE : GRID_STYLE}>
       <SkipLinks settingsMode={settingsMode} />
       <div className="col-start-1 row-span-3 row-start-1 flex min-h-0">
         <Rail />
@@ -383,7 +392,7 @@ function Frame({ children }: { children: React.ReactNode }) {
         {!settingsMode ? <TopPinsStrip /> : null}
       </div>
       {settingsMode ? (
-        <div className="col-span-3 col-start-2 row-start-3 flex min-h-0 min-w-0">
+        <div className="relative col-span-3 col-start-2 row-start-3 flex min-h-0 min-w-0">
           {children}
         </div>
       ) : (
@@ -399,7 +408,7 @@ function Frame({ children }: { children: React.ReactNode }) {
               <HubSidebar overlay onClose={overlay.close} />
             </div>
           ) : null}
-          <main id={MAIN_ID} tabIndex={-1} className="col-start-3 row-start-3 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-app outline-none">
+          <main id={MAIN_ID} tabIndex={-1} className="relative col-start-3 row-start-3 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-app outline-none">
             {children}
           </main>
           {/* The Ask AI panel. Below 1024 it does not render at all (there is
