@@ -8,5 +8,5 @@
 // forms code already refused a key outside the prefix; now every place that
 // stores or signs one does.
 export function keyInWorkspace(key: unknown, organizationId: string): key is string {
-  return typeof key === "string" && !!organizationId && key.startsWith(`orgs/${organizationId}/`);
+  return typeof key === "string" && !!organizationId && key.startsWith(`orgs/${organizationId}/`) && !key.includes("..");
 }

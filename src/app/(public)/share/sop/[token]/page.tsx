@@ -54,7 +54,7 @@ export default async function PublicSopPage({ params }: { params: Promise<{ toke
   // render for an anonymous viewer, exactly like the authed page.
   let content: unknown = sop.content;
   try {
-    const enriched = await enrichScribeScreenshots({ content } as Parameters<typeof enrichScribeScreenshots>[0]);
+    const enriched = await enrichScribeScreenshots({ content } as Parameters<typeof enrichScribeScreenshots>[0], sop.organizationId);
     content = enriched.content ?? content;
   } catch { /* fall back to raw content */ }
   try { content = await presignBlocksImagesAndFiles(content, sop.organizationId); } catch { /* fall back to prior content */ }

@@ -16,13 +16,20 @@
  * Not refused:
  *   - a read (GET, HEAD, OPTIONS);
  *   - a request without the session cookie: nothing of anyone's rides on it
- *     (a cross-SITE post never carries a Lax cookie, and API keys, MCP and
- *     SCIM tokens, cron secrets and webhook senders bring their own proof);
- *   - routes whose writes are not the session's: NextAuth (its own CSRF
- *     token), the public form, doc and table doors, the token APIs;
+ *     (a cross-SITE post never carries a Lax cookie, so an identity
+ *     provider's POST back, an embedded form or a webhook sender passes);
+ *   - a request with neither header: not a browser page (an API client, an
+ *     MCP or SCIM client, cron, curl), which cannot carry a victim's cookie;
  *   - the WorkwrK browser extension (an Origin of chrome-extension:// or
  *     moz-extension://, which no web page can send), which records SOPs with
- *     the person's cookie.
+ *     the person's cookie;
+ *   - the staff console, which has its own stricter guard in the proxy.
+ * NO OTHER PATH IS EXEMPT (the step 4 review, high): v1, MCP, SCIM, OAuth
+ * and the auth routes all also take the session cookie where it is sent
+ * (v1 gives an Owner or Admin every scope on it; /api/auth/mfa/enroll sets a
+ * person's second factor), so an exemption was a forgery door, and nothing
+ * legitimate needs one: our own pages are same-origin, and everything else
+ * is either not a browser or carries no Lax cookie.
  * A request with neither header is not from a browser page (curl, a script)
  * and goes on to the route's own gate.
  *
@@ -32,18 +39,8 @@
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Path prefixes whose writes do not ride the session cookie. */
-const EXEMPT_PREFIXES = [
-  "/api/auth/",
-  "/api/public/",
-  "/api/v1/",
-  "/api/scim/",
-  "/api/mcp",
-  "/api/oauth/",
-  "/api/cron/",
-  // The staff console has its own, stricter guard in the proxy.
-  "/api/admin",
-];
+/** The staff console: its own, stricter guard in the proxy. */
+const isStaffConsole = (path: string) => path === "/api/admin" || path.startsWith("/api/admin/");
 
 export const APP_WRITE_ORIGIN_REFUSAL = "This request did not come from WorkwrK. Reload the page and try again.";
 
@@ -55,7 +52,7 @@ export function appWriteOriginRefused(args: { method: string; path: string; head
   if (SAFE_METHODS.has(args.method.toUpperCase())) return false;
   if (!args.path.startsWith("/api/")) return false;
   if (!args.hasSessionCookie) return false;
-  if (EXEMPT_PREFIXES.some((p) => args.path === p.replace(/\/$/, "") || args.path.startsWith(p))) return false;
+  if (isStaffConsole(args.path)) return false;
 
   const origin = args.headers.get("origin");
   if (origin && isExtensionOrigin(origin)) return false;

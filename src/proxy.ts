@@ -182,7 +182,8 @@ export async function proxy(req: NextRequest) {
       method: req.method,
       path,
       headers: req.headers,
-      hasSessionCookie: req.cookies.has("next-auth.session-token") || req.cookies.has("__Secure-next-auth.session-token"),
+      // Chunked tokens (.0, .1) too: an oversized session skipped the guard.
+      hasSessionCookie: hasSessionCookie(req),
     })
   ) {
     return NextResponse.json({ error: APP_WRITE_ORIGIN_REFUSAL }, { status: 403 });

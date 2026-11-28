@@ -52,21 +52,35 @@ describe("not refused", () => {
     expect(write(H({ origin: "https://evil.example", "sec-fetch-site": "cross-site" }), { cookie: false })).toBe(false);
   });
 
-  it("routes whose writes are not the session's: sign-in, public doors, token APIs, cron", () => {
-    for (const path of ["/api/auth/callback/credentials", "/api/public/forms/x/submit", "/api/v1/tasks", "/api/scim/v2/Users", "/api/mcp", "/api/oauth/token", "/api/cron/digest"]) {
-      expect(write(H({ origin: "https://workwrk.com", "sec-fetch-site": "same-site" }), { path }), path).toBe(false);
+  it("an API client, an MCP or SCIM client, cron or curl (no browser headers) on any route", () => {
+    for (const path of ["/api/v1/people", "/api/scim/v2/Users", "/api/mcp", "/api/oauth/token", "/api/cron/digest", "/api/auth/mfa/enroll"]) {
+      expect(write(H({}), { path }), path).toBe(false);
     }
   });
 
-  it("guard: a look-alike prefix is not exempt", () => {
-    expect(write(H({ origin: "https://workwrk.com" }), { path: "/api/authors" })).toBe(true);
-    expect(write(H({ origin: "https://workwrk.com" }), { path: "/api/publicity" })).toBe(true);
+  it("the staff console, which has its own guard", () => {
+    expect(write(H({ origin: "https://workwrk.com" }), { path: "/api/admin/companies" })).toBe(false);
+  });
+});
+
+describe("no route is a forgery door (the step 4 review, high)", () => {
+  it("v1 (an Owner's cookie has every scope), MCP, SCIM, OAuth, auth routes and public doors are refused from a sibling page", () => {
+    for (const path of ["/api/v1/people", "/api/auth/mfa/enroll", "/api/auth/accept-invite", "/api/mcp", "/api/scim/v2/Users", "/api/oauth/token", "/api/public/forms/x/submit", "/api/cron/digest"]) {
+      expect(write(H({ origin: "https://workwrk.com", "sec-fetch-site": "same-site" }), { path }), path).toBe(true);
+    }
+  });
+
+  it("guard: a look-alike of the staff console is not exempt", () => {
+    expect(write(H({ origin: "https://workwrk.com" }), { path: "/api/admin-x" })).toBe(true);
+    expect(write(H({ origin: "https://workwrk.com" }), { path: "/api/administrators" })).toBe(true);
   });
 });
 
 describe("the proxy uses it", () => {
   it("for every /api write, with the session cookie's presence", () => {
     const proxy = readFileSync("src/proxy.ts", "utf8");
-    expect(proxy).toMatch(/appWriteOriginRefused\(\{\s+method: req\.method,\s+path,\s+headers: req\.headers,\s+hasSessionCookie: req\.cookies\.has\("next-auth\.session-token"\) \|\| req\.cookies\.has\("__Secure-next-auth\.session-token"\),/);
+    // hasSessionCookie counts a chunked token (.0, .1) too.
+    expect(proxy).toMatch(/appWriteOriginRefused\(\{\s+method: req\.method,\s+path,\s+headers: req\.headers,[\s\S]{0,120}hasSessionCookie: hasSessionCookie\(req\),/);
+    expect(proxy).toMatch(/if \(c\.name === b \|\| c\.name\.startsWith\(b \+ "\."\)\) return true;/);
   });
 });

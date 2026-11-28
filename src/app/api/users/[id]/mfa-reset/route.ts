@@ -35,7 +35,6 @@ import { revokeAllGrantsOf } from "@/lib/oauth/grants";
 import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
-import { escapeHtml } from "@/lib/email-templates/escape";
 
 const bodySchema = z.strictObject({ confirm: z.literal("RESET") });
 const err = (status: number, error: string) => NextResponse.json({ error }, { status });
@@ -85,7 +84,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     severity: "critical",
   });
   // A security notice: no category, so no notification preference can mute it.
-  const by = escapeHtml(su.name?.trim() || "An admin");
+  // The template escapes every value now (pen test 2026-11-28, V-28), so the
+  // name goes in as typed: escaping it here too would print "&amp;".
+  const by = su.name?.trim() || "An admin";
   const base = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://app.workwrk.com").replace(/\/+$/, "");
   const { subject, html } = genericNotificationTemplate({
     heading: "Two step verification was reset",
