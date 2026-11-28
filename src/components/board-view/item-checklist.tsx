@@ -2,13 +2,17 @@
 
 // ItemChecklist, metadata-backed checklist (metadata.checklist = array of
 // { text, done }). Add / toggle / remove / reorder; each change persists the
-// whole array via onSave. Mirrors the create-task modal's checklist shape.
+// whole array via onSave, for the render, with the change itself (`op`),
+// which the server applies to the list as stored, so two people on one
+// checklist never erase each other (pen test 2026-11-28, V-33). Mirrors the
+// create-task modal's checklist shape.
 // An item is dragged up or down by its handle, or moved with Alt and the
 // arrow keys; the array order IS the checklist's order.
 
 import { useMemo, useRef, useState } from "react";
 import { Plus, X, CheckSquare, Square, GripVertical } from "lucide-react";
 import type { BoardItemRow } from "@/lib/board-items-shared";
+import { CHECKLIST_TEXT_MAX, type ChecklistOp } from "@/lib/items/checklist-op";
 
 type ChecklistItem = { text: string; done: boolean };
 
@@ -19,7 +23,7 @@ function parse(raw: unknown): ChecklistItem[] {
     .map((x) => ({ text: x.text, done: !!x.done }));
 }
 
-export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: boolean; onSave: (checklist: ChecklistItem[]) => void }) {
+export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: boolean; onSave: (checklist: ChecklistItem[], op: ChecklistOp) => void }) {
   const items = useMemo(() => parse(item.metadata?.checklist), [item.metadata]);
   const [draft, setDraft] = useState("");
 
@@ -27,17 +31,18 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
   const add = () => {
     const t = draft.trim();
     if (!t) return;
-    onSave([...items, { text: t, done: false }]);
+    onSave([...items, { text: t, done: false }], { kind: "add", text: t });
     setDraft("");
   };
-  const toggle = (idx: number) => onSave(items.map((i, n) => (n === idx ? { ...i, done: !i.done } : i)));
-  const remove = (idx: number) => onSave(items.filter((_, n) => n !== idx));
+  const toggle = (idx: number) =>
+    onSave(items.map((i, n) => (n === idx ? { ...i, done: !i.done } : i)), { kind: "toggle", index: idx, text: items[idx].text, done: !items[idx].done });
+  const remove = (idx: number) => onSave(items.filter((_, n) => n !== idx), { kind: "remove", index: idx, text: items[idx].text });
   // Move item `from` so it lands at `to` (an index in the list without it).
   const move = (from: number, to: number) => {
     if (from === to || from < 0 || from >= items.length) return;
     const others = items.filter((_, n) => n !== from);
     const at = Math.max(0, Math.min(to, others.length));
-    onSave([...others.slice(0, at), items[from], ...others.slice(at)]);
+    onSave([...others.slice(0, at), items[from], ...others.slice(at)], { kind: "move", index: from, text: items[from].text, to: at });
   };
   const rootRef = useRef<HTMLDivElement>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -127,6 +132,7 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
               onKeyDown={(e) => { if (e.key === "Enter") add(); }}
               onBlur={add}
               placeholder="Add a checklist item…"
+              maxLength={CHECKLIST_TEXT_MAX}
               className="flex-1 text-xs bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>

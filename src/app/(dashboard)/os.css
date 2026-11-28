@@ -23020,15 +23020,18 @@ table.os-tbl {
   font-family: inherit; resize: vertical; outline: none;
 }
 .bdoc__cmts-form textarea:focus { border-color: var(--os-c-orange); }
-.bdoc__cmts-form button {
+/* The textarea sits in a field that also holds the @-typeahead (pen test V-45). */
+.bdoc__cmts-field { flex: 1; position: relative; display: flex; min-width: 0; }
+.bdoc__cmts-error { margin: 0; padding: 0 14px 10px; font-size: 13px; color: var(--os-danger, #c62828); }
+.bdoc__cmts-form > button {
   display: grid; place-items: center;
   width: 40px; height: 40px;
   border: none; border-radius: 8px;
   background: var(--os-c-orange); color: white; cursor: pointer;
   align-self: flex-end;
 }
-.bdoc__cmts-form button:disabled { opacity: 0.5; cursor: not-allowed; }
-.bdoc__cmts-form button svg { width: 16px; height: 16px; }
+.bdoc__cmts-form > button:disabled { opacity: 0.5; cursor: not-allowed; }
+.bdoc__cmts-form > button svg { width: 16px; height: 16px; }
 
 /* ─── Mentions Inbox ─── */
 .mention-inbox {

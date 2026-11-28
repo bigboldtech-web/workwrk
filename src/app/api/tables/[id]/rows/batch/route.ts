@@ -206,6 +206,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const conflictsByRow = new Map<string, Set<string>>();
     let missingIds: string[] = [];
     if (updates.length > 0) {
+      // Lock the rows before reading them (pen test 2026-11-28, V-35): an
+      // edit to another cell of one of these rows, landing between this read
+      // and the write below, was put back by it. Locked in id order, as the
+      // writes below are, after the allocator lock above, so two batches
+      // always take locks in the same order and never deadlock.
+      const lockIds = [...new Set(updates.map((u) => u.id))].sort();
+      await tx.$queryRaw`SELECT id FROM "DataTableRow" WHERE "tableId" = ${id} AND id = ANY(${lockIds}::text[]) AND "deletedAt" IS NULL ORDER BY id FOR UPDATE`;
       const existing = await tx.dataTableRow.findMany({
         // deletedAt: null, a trashed row is "missing" to an update, so the
         // client is told to evict it rather than silently reviving it.

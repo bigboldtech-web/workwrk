@@ -38,6 +38,8 @@ import { getBoardStatuses } from "@/lib/board-items-shared";
 import { remapStatusOnMove } from "@/lib/item-move";
 import { applyWatcherIds, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { gateItem, type ItemCtx } from "@/lib/item-gate";
+import { mergeText } from "@/lib/text-merge";
+import { applyChecklistOp, checklistOpSchema, type ChecklistOp } from "@/lib/items/checklist-op";
 import { allowsItemAction } from "@/lib/item-role";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
@@ -198,6 +200,15 @@ const patchSchema = z.object({
   // description_changed and writes nothing, so an edit somebody saved in
   // between is never overwritten. Absent: no check, as before.
   expectDescription: z.string().optional(),
+  // Two people on one task at once (pen test 2026-11-28, V-33). The
+  // description this edit was typed over: the saved text is the merge of the
+  // editor's text and whatever is stored now (src/lib/text-merge.ts), on the
+  // locked row, so a paragraph somebody saved meanwhile is kept, never erased.
+  descriptionBase: z.string().max(1_000_000).optional(),
+  // One checklist change, applied to the list as stored (checklist-op.ts);
+  // it decides `checklist`, whatever metadataPatch carries for the optimistic
+  // render, so two people ticking, adding and dragging never erase each other.
+  checklistOp: checklistOpSchema.optional(),
 });
 
 /** A refusal decided inside the metadata write, carried out of its transaction. */
@@ -227,6 +238,10 @@ function metadataWriter(args: {
   aiStrict: boolean;
   /** The description the stored row must still hold (patchSchema expectDescription). */
   expectDescription?: string;
+  /** The description the edit was typed over (patchSchema descriptionBase). */
+  descriptionBase?: string;
+  /** One checklist change, applied to the stored list (patchSchema checklistOp). */
+  checklistOp?: ChecklistOp;
 }) {
   const keys = fieldKeySets(args.fields);
   // Batch 8: a write to one of this List's AI fields is a person's
@@ -243,10 +258,14 @@ function metadataWriter(args: {
       const now = typeof stored.description === "string" ? stored.description : stored.description === undefined || stored.description === null ? "" : null;
       if (now === null || now !== args.expectDescription) throw new Refusal(409, { error: "description_changed" });
     }
+    // In a List the task is only shown in, a key that List defines lives in
+    // its namespace (routeMetadataPatch), so that is where "theirs" is read.
+    const placeOf = (key: string): Json => (args.linkedListId && keys.stored.has(key) ? readNamespace(stored, args.linkedListId) : stored);
+    const metadataPatch = mergedOnStored(placeOf, args.metadataPatch, args.descriptionBase, args.checklistOp);
     let next: Json = stored;
     if (args.linkedListId) {
-      if (args.metadataPatch) {
-        const routed = routeMetadataPatch(args.metadataPatch, { definedKeys: keys.stored, mirrorKeys: keys.mirror });
+      if (metadataPatch) {
+        const routed = routeMetadataPatch(metadataPatch, { definedKeys: keys.stored, mirrorKeys: keys.mirror });
         if (!routed.ok) throw new Refusal(400, { error: routed.error, key: routed.key });
         routed.ns = aiChecked(routed.ns, readNamespace(stored, args.linkedListId));
         const connect = await validateConnectWrites(args.c, args.fields, routed.ns, {
@@ -261,10 +280,10 @@ function metadataWriter(args: {
           nsConnectKeys: new Set(connect.keys),
         });
       }
-    } else if (args.metadataPatch) {
-      const refused = checkHomeMetadataKeys(Object.keys(args.metadataPatch), keys.mirror);
+    } else if (metadataPatch) {
+      const refused = checkHomeMetadataKeys(Object.keys(metadataPatch), keys.mirror);
       if (refused) throw new Refusal(400, { error: refused.error, key: refused.key });
-      const patch = aiChecked(args.metadataPatch, stored);
+      const patch = aiChecked(metadataPatch, stored);
       const connect = await validateConnectWrites(args.c, args.fields, patch, { stored, selfId: args.itemId });
       if (!connect.ok) throw new Refusal(400, { error: connect.error, key: connect.key });
       next = applyMetadataPatch(stored, { top: { ...patch, ...connect.values }, topConnectKeys: new Set(connect.keys) });
@@ -289,6 +308,27 @@ function metadataWriter(args: {
       ? writeWatchers(next, applyWatcherIds(storedWatchers, args.watcherIds, args.c.userId))
       : writeWatchers(next, storedWatchers);
   };
+}
+
+/**
+ * The metadataPatch to apply to `stored`, with V-33's two merges folded in: a
+ * description typed over `descriptionBase` is merged with the stored text,
+ * and a checklist change decides `checklist` from the stored list. Without
+ * either, the patch as sent.
+ */
+function mergedOnStored(placeOf: (key: string) => Json, patch: Json | undefined, descriptionBase: string | undefined, op: ChecklistOp | undefined): Json | undefined {
+  let next = patch;
+  if (descriptionBase !== undefined && next && "description" in next) {
+    const mine = typeof next.description === "string" ? next.description : next.description === null ? "" : null;
+    const held = placeOf("description").description;
+    const theirs = typeof held === "string" ? held : held === undefined || held === null ? "" : null;
+    if (mine !== null && theirs !== null && theirs !== descriptionBase) {
+      const merged = mergeText(descriptionBase, mine, theirs);
+      next = { ...next, description: merged === "" ? null : merged };
+    }
+  }
+  if (op) next = { ...(next ?? {}), checklist: applyChecklistOp(placeOf("checklist").checklist, op) };
+  return next;
 }
 
 async function fieldsOf(boardId: string): Promise<FieldDef[]> {
@@ -323,6 +363,12 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
     parsed.data.watcherIds = wants ? [...others, c.userId] : others;
   }
 
+  // A checklist change is applied over the stored list; the whole-blob save
+  // replaces the list instead, so the two together would drop one silently.
+  if (parsed.data.checklistOp && parsed.data.metadata !== undefined) {
+    return NextResponse.json({ error: "checklist_op_with_metadata", code: "checklist_op_with_metadata", message: "Send a checklist change with metadataPatch, not metadata." }, { status: 400 });
+  }
+
   // Reserved keys are never written by a client, in either shape.
   for (const blob of [parsed.data.metadata, parsed.data.metadataPatch]) {
     const k = blob ? Object.keys(blob).find(isReservedMetadataKey) : undefined;
@@ -351,9 +397,11 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
     // takes contribute on B, as every other link-side write does (reorder,
     // move, add): a read-only guest of B edits none of B's columns, whatever
     // they may do to the task at home.
-    if (parsed.data.metadataPatch) {
+    // A checklist change writes `checklist` as surely as a patch does (the step 5 review).
+    const bWrite = { ...(parsed.data.metadataPatch ?? {}), ...(parsed.data.checklistOp ? { checklist: null } : {}) };
+    if (Object.keys(bWrite).length > 0) {
       const bKeys = fieldKeySets(parseBoardSchema(linkedCtx.list.schema).fields);
-      const routed = routeMetadataPatch(parsed.data.metadataPatch, { definedKeys: bKeys.stored, mirrorKeys: bKeys.mirror });
+      const routed = routeMetadataPatch(bWrite, { definedKeys: bKeys.stored, mirrorKeys: bKeys.mirror });
       if (routed.ok && Object.keys(routed.ns).length > 0 && !(await canContributeBoard(linkedCtx.list.id, c.userId, c.accessLevel))) {
         return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
       }
@@ -470,11 +518,15 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
 
   // ── Phase 5b: the metadata write, as a function of the stored value ──
   const wantsMetadata =
-    parsed.data.metadataPatch !== undefined || parsed.data.metadata !== undefined || parsed.data.watcherIds !== undefined || parsed.data.expectDescription !== undefined;
+    parsed.data.metadataPatch !== undefined ||
+    parsed.data.metadata !== undefined ||
+    parsed.data.watcherIds !== undefined ||
+    parsed.data.expectDescription !== undefined ||
+    parsed.data.checklistOp !== undefined;
   const writerFields = wantsMetadata ? (linkedCtx ? parseBoardSchema(linkedCtx.list.schema).fields : await fieldsOf(currentBoardId)) : [];
   // Batch 8: whether AI-typed values are checked and stamped, read only when
   // this write touches one (src/lib/ai-fields.ts normalizeAiWrites).
-  const touchedKeys = [...Object.keys(parsed.data.metadataPatch ?? {}), ...Object.keys(parsed.data.metadata ?? {})];
+  const touchedKeys = [...Object.keys(parsed.data.metadataPatch ?? {}), ...Object.keys(parsed.data.metadata ?? {}), ...(parsed.data.checklistOp ? ["checklist"] : [])];
   const touchesAi = touchedKeys.some((k) => writerFields.some((f) => f.key === k && isAiFieldType(f.type)));
   const aiStrict = touchesAi
     ? aiFieldsOn((await prisma.organization.findUnique({ where: { id: c.organizationId }, select: { settings: true } }))?.settings)
@@ -491,6 +543,8 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
         now: new Date().toISOString(),
         aiStrict,
         expectDescription: parsed.data.expectDescription,
+        descriptionBase: parsed.data.descriptionBase,
+        checklistOp: parsed.data.checklistOp,
       })
     : null;
   if (writer) {
@@ -509,6 +563,8 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
   delete (parsed.data as { metadata?: unknown }).metadata;
   delete (parsed.data as { watcherIds?: unknown }).watcherIds;
   delete (parsed.data as { expectDescription?: unknown }).expectDescription;
+  delete (parsed.data as { descriptionBase?: unknown }).descriptionBase;
+  delete (parsed.data as { checklistOp?: unknown }).checklistOp;
   const responseContext = linkedCtx ? linkedCtx.list.id : currentBoardId;
 
   // ── The move itself ──────────────────────────────────────────────

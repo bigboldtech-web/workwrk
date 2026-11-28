@@ -84,6 +84,9 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // ── Primary ───────────────────────────────────────────────────────
   task_assigned: k("task_assigned", "Assigned to you", "UserPlus", "primary", "tasks"),
   task_comment: k("task_comment", "Comment on your task", "MessageSquare", "primary", "comments"),
+  // Written by src/lib/docs/doc-comment-notify.ts: a comment on a doc you own
+  // or on a thread you commented in (pen test 2026-11-28, V-45).
+  doc_comment: k("doc_comment", "Comment on a doc", "MessageSquare", "primary", "comments"),
   comment_assigned: k("comment_assigned", "Comment assigned to you", "MessageSquare", "primary", "comments"),
   mention: k("mention", "Mentioned you", "AtSign", "primary", "mentions", true),
   task_due_today: k("task_due_today", "Due today", "CalendarClock", "primary", "tasks"),

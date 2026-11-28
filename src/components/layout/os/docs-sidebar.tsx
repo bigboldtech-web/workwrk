@@ -107,7 +107,9 @@ type DocCounts = { all: number; recent: number; my: number; shared: number; favo
  * reads (spec-docs-knowledge section 2: "the sidebar badge counts and the
  * page counts come from the same query"), paged through to the end so the
  * tree is whole. The rows carry the viewer's role, so the row menu gates its
- * rows exactly as the /docs table does.
+ * rows exactly as the /docs table does. The badges are the answer's
+ * badgeCounts, counted by the page's own default rule (sub-docs left out),
+ * because this read includes sub-docs for the tree (pen test V-46).
  */
 async function loadDocRows(): Promise<{ rows: DocRow[]; counts: DocCounts | null }> {
   const rows: DocRow[] = [];
@@ -118,9 +120,9 @@ async function loadDocRows(): Promise<{ rows: DocRow[]; counts: DocCounts | null
     if (cursor) qs.set("cursor", cursor);
     const res = await fetch(`/api/docs?${qs.toString()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
-    const d = await res.json() as { data?: DocRow[]; nextCursor?: string | null; counts?: DocCounts };
+    const d = await res.json() as { data?: DocRow[]; nextCursor?: string | null; counts?: DocCounts; badgeCounts?: DocCounts };
     rows.push(...(d.data ?? []));
-    if (page === 0 && d.counts) counts = d.counts;
+    if (page === 0) counts = d.badgeCounts ?? d.counts ?? null;
     cursor = d.nextCursor ?? null;
     if (!cursor) break;
   }

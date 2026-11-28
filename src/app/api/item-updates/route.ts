@@ -14,6 +14,7 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docRoleFor, nodeCtxFromSession } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { gateItem, itemCtx } from "@/lib/item-gate";
+import { notifyDocComment } from "@/lib/docs/doc-comment-notify";
 import { z } from "zod";
 
 /**
@@ -64,6 +65,9 @@ const createSchema = z.object({
   entityType: z.string().min(1).max(40),
   entityId: z.string().min(1).max(80),
   body: z.string().min(1).max(20000),
+  // People the composer's @-typeahead put in the comment; told only while the
+  // text still names them (pen test 2026-11-28, V-45).
+  mentionedUserIds: z.array(z.string().min(1).max(64)).max(50).optional(),
 });
 
 export async function GET(req: Request) {
@@ -128,6 +132,18 @@ export async function POST(req: Request) {
       body: parsed.data.body,
       authorId: ctx.userId,
     },
+  });
+  // A doc comment tells the people it names, the doc's owner and the people
+  // already in this thread (V-45). Only doc threads are written here.
+  const [docId, ...blockParts] = parsed.data.entityId.split(":");
+  await notifyDocComment({
+    organizationId: ctx.orgId,
+    docId,
+    blockId: blockParts.join(":"),
+    actorId: ctx.userId,
+    body: parsed.data.body,
+    updateId: update.id,
+    mentionedUserIds: parsed.data.mentionedUserIds,
   });
   return NextResponse.json({ update });
 }

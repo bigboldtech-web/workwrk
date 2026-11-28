@@ -66,6 +66,7 @@ import { BlockNoteCanvas } from "./blocknote-canvas";
 import { refreshSidebar, notifyDocsChanged } from "@/components/layout/os/sidebar-refresh";
 import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
+import { surviving, useMentionTypeahead } from "@/components/comments/mention-typeahead";
 import { BackButton } from "@/components/ui/back-button";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
@@ -2175,7 +2176,14 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
   const [thread, setThread] = useState<Comment[]>(initialThread);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // A post that did not land says so, and the words stay in the box (pen
+  // test 2026-11-28, V-45: a failed comment showed nothing at all).
+  const [postError, setPostError] = useState<string | null>(null);
   const entityId = `${docId}:${blockId}`;
+  // "@" picks a person, as in a task's comments; the server tells only the
+  // people still named when the comment is posted, and only if they can open the doc.
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const typeahead = useMentionTypeahead({ value: draft, setValue: setDraft, textareaRef, side: "top" });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -2225,17 +2233,30 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
     const text = draft.trim();
     if (!text) return;
     setBusy(true);
+    setPostError(null);
+    const mentionedUserIds = surviving(typeahead.mentions, text);
     try {
       const res = await fetch("/api/item-updates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityType: "DOC_BLOCK", entityId, body: text }),
+        body: JSON.stringify({ entityType: "DOC_BLOCK", entityId, body: text, ...(mentionedUserIds.length ? { mentionedUserIds } : {}) }),
       });
       if (res.ok) {
         setDraft("");
+        typeahead.reset();
         await refresh();
         onThreadChanged();
+      } else {
+        setPostError(
+          res.status === 403
+            ? "Not posted: you can view this doc but not comment on it. Ask the owner for Can comment."
+            : res.status === 404
+              ? "Not posted: this doc is no longer available to you."
+              : "Not posted. Your comment is still here: try again.",
+        );
       }
+    } catch {
+      setPostError("Not posted. Check your connection; your comment is still here.");
     } finally { setBusy(false); }
   }
 
@@ -2295,23 +2316,36 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
         className="bdoc__cmts-form"
         onSubmit={(e) => { e.preventDefault(); void postComment(); }}
       >
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={me ? `Comment as ${meName}…` : "Add a comment…"}
-          rows={2}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              void postComment();
-            }
-          }}
-          disabled={busy || !me}
-        />
+        <div className="bdoc__cmts-field">
+          {typeahead.popover}
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => {
+              typeahead.onValueChange(e.target.value);
+              if (postError) setPostError(null);
+            }}
+            onClick={typeahead.onCaretMove}
+            onKeyUp={typeahead.onCaretMove}
+            placeholder={me ? `Comment as ${meName}… (@ to mention)` : "Add a comment…"}
+            rows={2}
+            aria-invalid={postError ? true : undefined}
+            aria-describedby={postError ? "bdoc-cmts-error" : undefined}
+            onKeyDown={(e) => {
+              if (typeahead.onKeyDown(e)) return;
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void postComment();
+              }
+            }}
+            disabled={busy || !me}
+          />
+        </div>
         <button type="submit" disabled={busy || !me || !draft.trim()}>
           {busy ? <Dots variant="pending" /> : <Send />}
         </button>
       </form>
+      {postError ? <p id="bdoc-cmts-error" className="bdoc__cmts-error" role="alert">{postError}</p> : null}
     </aside>
   );
 }
