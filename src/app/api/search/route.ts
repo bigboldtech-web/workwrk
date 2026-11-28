@@ -353,8 +353,9 @@ export async function GET(req: NextRequest) {
       return {
         type: "note" as const,
         id: d.id,
-        title: d.title || "Untitled note",
-        subtitle: d.excerpt ? d.excerpt.slice(0, 80) : (meta?.icon ? `${meta.icon} note` : "note"),
+        // A doc is a doc (pen test V-66: search called every one a "note").
+        title: d.title || "Untitled doc",
+        subtitle: d.excerpt ? d.excerpt.slice(0, 80) : (meta?.icon ? `${meta.icon} Doc` : "Doc"),
         href: door("doc", d.id),
       };
     }),

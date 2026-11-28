@@ -43,7 +43,19 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Columns2, Copy, ExternalLink, FileText, FolderInput, Link2, Pencil, Plus, Star, Trash2, LayoutTemplate, UserPlus, Users,
+  Archive,
+  Columns2,
+  Copy,
+  ExternalLink,
+  FileText,
+  FolderInput,
+  LayoutTemplate,
+  Link2,
+  Pencil,
+  Plus,
+  Star,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import { ShareDialog } from "@/components/access/share-dialog";
 import { MANAGE_BAR, panelAtLeast, type PanelRole } from "@/lib/access/access-panel";
@@ -206,14 +218,15 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     return () => { alive = false; };
   }, [roleKnown, doc.id, boot.viewer.id]);
   const role: DocMenuRole = doc.role ?? resolved?.role ?? "view";
-  const own = doc.own ?? resolved?.own ?? false;
   const canEdit = role === "full" || role === "edit";
   const offers = docMenuOffers(canEdit, caps);
   const rolePending = !roleKnown && resolved === null;
   // The skeleton holds the place of rows still to come: the role's, or at
   // Can edit the Duplicate and Move rows the caps decide.
   const pending = rolePending || (canEdit && caps === "pending");
-  const canTrash = role === "full" || (role === "edit" && own);
+  // Full access only, as the server decides (V-14): a creator at Can edit was
+  // offered Archive and then refused (the step 11 review).
+  const canTrash = role === "full";
   // The same rule the header's chip and the server's canShare use, so the
   // two doors never disagree. Until the role lands the row waits behind the
   // skeleton rather than reading one label and then the other.
@@ -339,22 +352,25 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
 
   async function trash() {
     onClose();
+    // Archived, not deleted (pen test 2026-11-28, V-66): the doc lands on
+    // Trash's Archived tab, keeps no countdown and Empty trash leaves it, so
+    // "Move to Trash" promised what never happened.
     const ok = await confirm({
-      title: `Move "${title}" to Trash?`,
-      description: "You can restore it from Trash.",
+      title: `Archive "${title}"?`,
+      description: "It leaves the list and waits under Archived in Trash, where you can restore it.",
       destructive: true,
-      confirmLabel: "Move to Trash",
+      confirmLabel: "Archive",
     });
     if (!ok) return;
     const r = await apiFetch(`/api/docs/${doc.id}`, { method: "DELETE" });
     if (r.ok) {
-      toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=doc") } });
+      toast("Archived", { action: { label: "View archived", onClick: () => router.push("/trash?tab=archived&type=doc") } });
       done("trashed");
       // The open doc leaves for the list of its own section: /docs in the
       // Docs hub, the nearest Work crumb in Work.
       const open = currentOpenObject();
       if (open?.kind === "doc" && open.id === doc.id) router.push(open.closeHref);
-    } else toast(r.error || "Couldn't move to Trash");
+    } else toast(r.error || "Couldn't archive");
   }
 
   if (mode === "rename") {
@@ -444,7 +460,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
       {canTrash ? (
         <>
           <MenuSeparator />
-          <MenuItem icon={Trash2} label="Move to Trash" destructive onClick={() => void trash()} />
+          <MenuItem icon={Archive} label="Archive" destructive onClick={() => void trash()} />
         </>
       ) : null}
     </MenuList>

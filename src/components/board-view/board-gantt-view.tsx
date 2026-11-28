@@ -638,19 +638,22 @@ export function BoardGanttView({
                       const d = addDays(anchor, i);
                       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
                       return (
+                        // The letter sits OVER the number (pen test 2026-11-28,
+                        // V-64): side by side, neighbouring days ran together at
+                        // 1440 px ("M 16T 17W 18T"), the columns being ~24 px.
                         <div
                           key={i}
-                          className={`border-l first:border-l-0 border-line-soft flex items-center justify-center gap-0.5 text-xs ${
+                          className={`border-l first:border-l-0 border-line-soft flex min-w-0 flex-col items-center justify-center overflow-hidden leading-none ${
                             isWeekend ? "bg-subtle" : ""
                           }`}
                         >
-                          <span className="text-ink-3">{"SMTWTFS"[d.getDay()]}</span>
+                          <span className="text-[10px] leading-[11px] text-ink-3">{"SMTWTFS"[d.getDay()]}</span>
                           {i === todayCol ? (
-                            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand-soft px-1 text-micro font-semibold text-brand-deep" aria-label="Today">
+                            <span className="inline-flex h-[13px] min-w-[16px] items-center justify-center rounded-full bg-brand-soft px-0.5 text-[10px] font-semibold leading-none text-brand-deep tabular-nums" aria-label="Today">
                               {d.getDate()}
                             </span>
                           ) : (
-                            <span className="text-ink-2 tabular-nums">{d.getDate()}</span>
+                            <span className="text-[11px] leading-[13px] text-ink-2 tabular-nums">{d.getDate()}</span>
                           )}
                         </div>
                       );

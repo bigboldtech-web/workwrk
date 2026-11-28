@@ -194,7 +194,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const standing = await docStandingNow(ctx, { id });
   if (!roleAtLeast(standing.unlockedRole, "VIEW")) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!standing.canManage) {
-    const message = "Only someone with Full access can move this doc to Trash.";
+    const message = "Only someone with Full access can archive this doc.";
     return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
   }
   if (existing.archivedAt) return NextResponse.json({ ok: true, alreadyArchived: true });
