@@ -92,7 +92,9 @@ export async function GET(req: NextRequest) {
 
   // Meetings ride the Item ladder as hidden rows (src/lib/system-items.ts);
   // they are not tasks and must not appear in the public task API.
-  const where: Record<string, unknown> = { organizationId: ctx.organizationId, archivedAt: null, ...NOT_SYSTEM_ITEMS };
+  // Not a task of an archived List (pen test 2026-11-28, V-36): every
+  // surface in the app leaves them out.
+  const where: Record<string, unknown> = { organizationId: ctx.organizationId, archivedAt: null, board: { archivedAt: null }, ...NOT_SYSTEM_ITEMS };
   if (assigneeId) where.OR = [{ ownerId: assigneeId }, { assigneeIds: { has: assigneeId } }];
   if (status) where.status = { equals: status, mode: "insensitive" };
   // A from or to that is not a date is the caller's mistake (400), not an

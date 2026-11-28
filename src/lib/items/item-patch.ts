@@ -22,6 +22,8 @@
 // Server-only: imports prisma.
 
 import { NextResponse } from "next/server";
+import { linkedListsOf } from "@/lib/list-links-server";
+import { resolveListStatus } from "@/lib/item-move";
 import { z } from "zod";
 import {
   getBoardItemRow,
@@ -445,13 +447,21 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
 
   // ── Phase 5b: a linked task's status comes from its HOME set ─────
   if (parsed.data.status !== undefined && parsed.data.status !== null) {
-    // Every task's status is one of its List's (pen test 2026-11-28, V-39):
-    // the check ran only for a task linked into another List, so any string
-    // was stored, and an old tab's write after a move landed a foreign status
-    // (Kanban put it in the first column, group-by showed a stray group).
-    const verdict = validateLinkedStatus(parsed.data.status, currentStatuses, remap ? remap.status : gate.item.status, true);
-    if (!verdict.ok) {
-      return NextResponse.json({ error: "invalid_status", reason: verdict.reason, homeStatuses: currentStatuses }, { status: 409 });
+    const { links } = await linkedListsOf(gate.item);
+    const stillLinked = links.filter((l) => l.boardId !== currentBoardId);
+    const current = remap ? remap.status : gate.item.status;
+    if (stillLinked.length > 0) {
+      const verdict = validateLinkedStatus(parsed.data.status, currentStatuses, current, true);
+      if (!verdict.ok) {
+        return NextResponse.json({ error: "invalid_status", reason: verdict.reason, homeStatuses: currentStatuses }, { status: 409 });
+      }
+    } else if (parsed.data.status !== current) {
+      // Every other task's status is one of its List's too (pen test
+      // 2026-11-28, V-39, and its review): any string was stored, so an old
+      // tab or a picker offering another List's statuses landed a value the
+      // List does not have. It is translated by meaning, never refused, and
+      // an unchanged value is left alone (an undo to an older value works).
+      parsed.data.status = resolveListStatus(currentStatuses, parsed.data.status);
     }
   }
 

@@ -24,6 +24,7 @@
 // Pure module: imports only the client-safe status types.
 
 import type { StatusOption } from "@/lib/board-items-shared";
+import { isDoneStatusName } from "@/lib/board-items-shared";
 
 export type StatusRemapReason =
   | "same-value"
@@ -137,4 +138,29 @@ export const PERSONAL_LIST_SLUG = "personal-list";
  */
 export function moveDestinations<T extends { productSlug?: string | null }>(lists: readonly T[]): T[] {
   return lists.filter((l) => l.productSlug !== PERSONAL_LIST_SLUG);
+}
+
+/**
+ * A status someone asked for, as a status of THIS List (pen test 2026-11-28,
+ * V-39, and its review). Never refused and never dropped silently: the value
+ * itself when the List has it; else the List's status of the same name (case,
+ * spaces and underscores aside: "In progress" for IN_PROGRESS); else, for a
+ * done word ("Complete", "Done", "Shipped"...), the List's first done status;
+ * else the List's first open status. A List with no set keeps the value.
+ * Used for a create and for a status edit, so a picker that offered another
+ * List's statuses (the create modal's Space workflow, My Work's bulk menu)
+ * lands the meaning, never a value this List does not have.
+ */
+export function resolveListStatus(statuses: readonly StatusOption[], wanted: string): string {
+  if (statuses.length === 0) return wanted;
+  if (statuses.some((s) => s.value === wanted)) return wanted;
+  const norm = (x: string) => x.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  const w = norm(wanted);
+  const byName = statuses.find((s) => norm(s.value) === w || norm(s.label) === w);
+  if (byName) return byName.value;
+  if (isDoneStatusName(wanted)) {
+    const done = firstOfGroup(statuses, "DONE") ?? firstOfGroup(statuses, "CLOSED");
+    if (done) return done.value;
+  }
+  return (firstOfGroup(statuses, "ACTIVE") ?? statuses[0]).value;
 }

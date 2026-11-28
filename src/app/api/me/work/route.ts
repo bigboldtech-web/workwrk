@@ -183,7 +183,10 @@ export async function GET(req: Request) {
     });
     and.push({ id: { in: assignments.map((a) => a.entityId) } });
   }
-  if (and.length) where.AND = and;
+  // Appended, never replaced: the archived-List clause above (V-36) and a
+  // delegated scope's own conditions stay under every filter (the step 4b
+  // review: any filter brought archived-List tasks back).
+  if (and.length) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), ...and];
 
   const select = {
     id: true, title: true, status: true, priority: true, startAt: true, dueAt: true,
