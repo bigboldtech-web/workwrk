@@ -766,6 +766,13 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
   });
   const priority = normalizePriority(input.priority);
 
+  // The status is one of THIS List's (pen test 2026-11-28, V-39): a create
+  // with none, or with one the List does not have, opens in the List's first
+  // status, never the default set's "TO_DO" in a List that has no such one.
+  const listRow = await prisma.board.findUnique({ where: { id: input.boardId }, select: { statuses: true } });
+  const listStatuses = getBoardStatuses(listRow);
+  const status = input.status && listStatuses.some((s) => s.value === input.status) ? input.status : (listStatuses[0]?.value ?? "TO_DO");
+
   // Synthetic itemId — for studio-item rows the Item row IS the row;
   // there's no separate canonical entity table. We use the row's own
   // id so itemId == id; the unique constraint becomes per-row.
@@ -777,7 +784,7 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
     itemType: "studio-item",
     itemId: id,
     title: trimmed,
-    status: input.status ?? "TO_DO",
+    status,
     ownerId: createAssignees.ownerId,
     assigneeIds: createAssignees.assigneeIds,
     groupKey: input.groupKey ?? null,
@@ -1324,6 +1331,14 @@ export async function moveBoardItem(args: {
   const descendantIds = descendants.map((d) => d.id);
   /** The status the task left, as read under its row lock. */
   let movedFrom = before.status;
+  // A subtask moved to a List its parent is not in becomes a task of that
+  // List (pen test 2026-11-28, V-40): kept under a parent in another List, it
+  // vanished from the parent's subtasks there, and the parent's delete took
+  // it out of the List it was moved to, under people who could see only that.
+  const parentBoardId = before.parentItemId
+    ? (await prisma.item.findUnique({ where: { id: before.parentItemId }, select: { boardId: true } }))?.boardId ?? null
+    : null;
+  const detachFromParent = !!before.parentItemId && parentBoardId !== args.toBoardId;
 
   // ONE transaction, under the TARGET List's order lock and a row lock on
   // the task: the append position, the move, the link that becomes pointless
@@ -1390,6 +1405,7 @@ export async function moveBoardItem(args: {
           // nothing is how a moved task "disappears" from a grouped board.
           groupKey: rootWas.groupKey === rootWas.status ? args.status : null,
           position,
+          ...(detachFromParent ? { parentItemId: null } : {}),
           ...(shownInTarget ? { metadata: metadata as object } : {}),
         },
         include: { board: { select: { spaceId: true } } },

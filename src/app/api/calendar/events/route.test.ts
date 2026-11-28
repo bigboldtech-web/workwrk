@@ -39,6 +39,9 @@ import { GET } from "./route";
 
 let db: ItemTestDb;
 function task(id: string, boardId: string, ownerId: string, metadata: unknown = null) {
+  // Every task has its List (the calendar leaves out a task of an archived
+  // List, so it reads the List, as SQL's join does).
+  if (!db.boards.some((b) => b.id === boardId)) db.boards.push({ id: boardId, organizationId: "org-1", archivedAt: null, statuses: null });
   db.items.push({
     id, title: `Title of ${id}`, organizationId: "org-1", boardId, status: "TO_DO", archivedAt: null, itemType: "TASK",
     ownerId, assigneeIds: [], startAt: null, dueAt: new Date("2026-09-16T00:00:00Z"), metadata,

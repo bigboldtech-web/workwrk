@@ -57,7 +57,6 @@ import {
   type Json,
 } from "@/lib/list-metadata";
 import { validateLinkedStatus } from "@/lib/list-links";
-import { linkedListsOf } from "@/lib/list-links-server";
 import { BUILT_IN_FIELD_KEYS, fieldChanges } from "@/lib/automation/field-changes";
 import { linkedContextFor } from "@/lib/item-context";
 import { isAiFieldType, normalizeAiWrites } from "@/lib/ai-fields";
@@ -446,9 +445,11 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
 
   // ── Phase 5b: a linked task's status comes from its HOME set ─────
   if (parsed.data.status !== undefined && parsed.data.status !== null) {
-    const { links } = await linkedListsOf(gate.item);
-    const stillLinked = links.filter((l) => l.boardId !== currentBoardId);
-    const verdict = validateLinkedStatus(parsed.data.status, currentStatuses, remap ? remap.status : gate.item.status, stillLinked.length > 0);
+    // Every task's status is one of its List's (pen test 2026-11-28, V-39):
+    // the check ran only for a task linked into another List, so any string
+    // was stored, and an old tab's write after a move landed a foreign status
+    // (Kanban put it in the first column, group-by showed a stray group).
+    const verdict = validateLinkedStatus(parsed.data.status, currentStatuses, remap ? remap.status : gate.item.status, true);
     if (!verdict.ok) {
       return NextResponse.json({ error: "invalid_status", reason: verdict.reason, homeStatuses: currentStatuses }, { status: 409 });
     }
