@@ -577,8 +577,13 @@ export async function POST(req: NextRequest) {
       ? keyResults.map((kr) => ({
           title: kr.title,
           unit: kr.unit || null,
-          startValue: kr.startValue || 0,
-          targetValue: kr.targetValue || 100,
+          // As POST /api/okrs/[id]/key-results reads it (pen test 2026-11-28,
+          // V-44): a 0 target stays 0 ("reduce incidents from 10 to 0"), and
+          // the current value opens at the start, not at 0.
+          startValue: typeof kr.startValue === "number" && Number.isFinite(kr.startValue) ? kr.startValue : 0,
+          targetValue: typeof kr.targetValue === "number" && Number.isFinite(kr.targetValue) ? kr.targetValue : 100,
+          // A KPI-linked result is measured by its KPI, so it is given no number.
+          ...(typeof kr.kpiId === "string" && validKpiIds.has(kr.kpiId) ? {} : { currentValue: typeof kr.startValue === "number" && Number.isFinite(kr.startValue) ? kr.startValue : 0 }),
           kpiId: typeof kr.kpiId === "string" && validKpiIds.has(kr.kpiId) ? kr.kpiId : null,
         }))
       : [],

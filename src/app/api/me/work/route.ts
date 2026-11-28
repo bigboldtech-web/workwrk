@@ -130,6 +130,10 @@ export async function GET(req: Request) {
           archivedAt: null,
         };
   if (!includeSubtasks) where.parentItemId = null;
+  // Not a task of an archived List (pen test 2026-11-28, V-36): Everything and
+  // Workload left them out, My Work listed them. AND, so a List condition the
+  // delegated scope carries is kept.
+  where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { board: { archivedAt: null } }];
 
   // ── filters ──────────────────────────────────────────────────────
   //
@@ -179,7 +183,10 @@ export async function GET(req: Request) {
     });
     and.push({ id: { in: assignments.map((a) => a.entityId) } });
   }
-  if (and.length) where.AND = and;
+  // Appended, never replaced: the archived-List clause above (V-36) and a
+  // delegated scope's own conditions stay under every filter (the step 4b
+  // review: any filter brought archived-List tasks back).
+  if (and.length) where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), ...and];
 
   const select = {
     id: true, title: true, status: true, priority: true, startAt: true, dueAt: true,
@@ -504,11 +511,12 @@ async function workFacets(userId: string, organizationId: string, scopeWhere: Pr
   // The scope predicate without the page's own filters: the facets describe
   // what the viewer COULD narrow to, not what the current narrowing left.
   const base: Prisma.ItemWhereInput = scopeWhere
-    ? { organizationId: scopeWhere.organizationId, id: scopeWhere.id, archivedAt: null, NOT: scopeWhere.NOT, OR: scopeWhere.OR }
+    ? { organizationId: scopeWhere.organizationId, id: scopeWhere.id, archivedAt: null, board: { archivedAt: null }, NOT: scopeWhere.NOT, OR: scopeWhere.OR }
     : {
         organizationId,
         OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
         archivedAt: null,
+        board: { archivedAt: null },
       };
 
   const [byStatus, byBoard, byType, ownIds] = await Promise.all([

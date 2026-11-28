@@ -71,6 +71,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     prisma.item.findMany({
       where: {
         archivedAt: null,
+        board: { archivedAt: null },
         ...NOT_SYSTEM_ITEMS,
         organizationId: { in: liveOrgIds },
         OR: [{ ownerId: sub.userId }, { assigneeIds: { has: sub.userId } }],

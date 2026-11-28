@@ -141,6 +141,8 @@ export async function GET(req: NextRequest) {
       where: {
         organizationId: orgId,
         archivedAt: null,
+        // Not a task of an archived List (pen test 2026-11-28, V-36).
+        board: { archivedAt: null },
         ...NOT_SYSTEM_ITEMS,
         title: ci,
         // Its List, or the assignment grant (owner or assignee), as its page.

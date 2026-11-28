@@ -31,6 +31,8 @@ export async function GET(req: Request) {
     // Any task I'm an assignee of — primary owner OR one of several assignees.
     OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
     archivedAt: null,
+    // Not a task of an archived List (pen test 2026-11-28, V-36).
+    board: { archivedAt: null },
   };
 
   // Done is decided by each task's own List, in SQL (src/lib/list-done.ts).

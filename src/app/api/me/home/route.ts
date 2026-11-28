@@ -101,6 +101,8 @@ async function loadWork(userId: string, organizationId: string, accessLevel: str
   const mine = {
     organizationId,
     archivedAt: null,
+    // Not a task of an archived List (pen test 2026-11-28, V-36).
+    board: { archivedAt: null },
     ...NOT_SYSTEM_ITEMS,
     // Mine: primary assignee or one of several.
     OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],

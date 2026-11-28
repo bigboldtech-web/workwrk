@@ -67,6 +67,7 @@ import { normaliseEventKind, resolveEventEnd, resolveEventTitle } from "@/lib/ca
 import { nodeCtxFromSession, nodeRoleMap } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import type { Prisma } from "@/generated/prisma";
+import { listDoneTest } from "@/lib/list-done";
 
 export type CalendarEventKind = "task" | "meeting" | "event" | "external" | "reminder";
 
@@ -80,6 +81,13 @@ interface CalEvent {
   end: string;
   allDay: boolean;
   status: string | null;
+  /**
+   * A task in a done status of ITS List (list-done.ts): the grid never calls
+   * it Overdue (pen test 2026-11-28, V-37: only the literal "DONE" counted,
+   * so a task finished into SHIPPED or CLOSED read Overdue in the Planner
+   * while My Work and Home called it done).
+   */
+  done?: boolean;
   personId: string | null;
   url: string | null;
   editable: boolean;
@@ -249,6 +257,8 @@ export async function GET(req: Request) {
     const taskWhere: Prisma.ItemWhereInput = {
       organizationId: orgId,
       archivedAt: null,
+      // Not a task of an archived List (pen test 2026-11-28, V-36).
+      board: { archivedAt: null },
       // A meeting is already a `meeting` event on this calendar; its
       // hidden Item row must not appear a second time as a task
       // (src/lib/system-items.ts).
@@ -310,6 +320,8 @@ export async function GET(req: Request) {
     // On My calendar every task is the viewer's own (rule 9), so it moves,
     // except in a List where Can comment is the whole of their access (founder
     // decision 3): the task gate refuses those dates, so the block holds still.
+    const boardIdsHere = [...new Set(items.map((i) => i.boardId).filter((b): b is string => !!b))];
+    const isDone = listDoneTest(boardIdsHere.length ? await prisma.board.findMany({ where: { id: { in: boardIdsHere } }, select: { id: true, statuses: true } }) : []);
     const readOnlyBoardIds = calendar === "my"
       ? await liftWithheldListIds({ userId: viewerId, organizationId: orgId, accessLevel: u.accessLevel }, items.map((i) => i.boardId))
       : new Set<string>();
@@ -353,6 +365,7 @@ export async function GET(req: Request) {
         allDay: dateOnly,
         ...(dateOnly ? { dayKey: start.toISOString().slice(0, 10) } : {}),
         status: hidden ? null : it.status,
+        done: hidden ? false : isDone(it.boardId, it.status),
         personId,
         url: hidden ? null : `/item/${it.id}`,
         // A team read is read only: moving somebody else's task from a

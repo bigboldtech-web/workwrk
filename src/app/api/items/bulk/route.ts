@@ -21,6 +21,8 @@
 // applied on its own and the report is complete.
 
 import { NextRequest, NextResponse } from "next/server";
+import { statusGroupInWorkspace } from "@/lib/items/status-group.server";
+import { resolveListStatus } from "@/lib/item-move";
 import { z } from "zod";
 import { itemCtx, gateItem } from "@/lib/item-gate";
 import { archiveBoardItem, updateBoardItem } from "@/lib/board-items";
@@ -135,17 +137,28 @@ export async function POST(req: NextRequest) {
   }
   const contextReadable = parsed.data.contextBoardId ? await listReader(c).row(parsed.data.contextBoardId) : null;
 
+  // The group the bulk status has in the Lists that declare it, read once.
+  let statusHint: Awaited<ReturnType<typeof statusGroupInWorkspace>> | undefined;
   for (const { id, gate } of gated) {
     const rowLinks = linksByItem.get(id) ?? [];
     if (patch.archive && contextReadable && rowLinks.some((l) => l.boardId === contextReadable.id)) {
       results.push({ id, ok: false, reason: "use_list_link" });
       continue;
     }
+    // The status each row gets: a linked row keeps the linked rule (its home
+    // List's set, else refused); any other is translated into ITS List's set
+    // by meaning (pen test 2026-11-28, V-39, the step 4b review: "SHIPPED"
+    // from List B was written onto List A's tasks).
+    let rowStatus = patch.status;
     if (patch.status !== undefined && patch.status !== null) {
       const verdict = validateLinkedStatus(patch.status, getBoardStatuses(gate.item.board), gate.item.status, rowLinks.length > 0);
       if (!verdict.ok) {
         results.push({ id, ok: false, reason: "invalid_status" });
         continue;
+      }
+      if (rowLinks.length === 0 && patch.status !== gate.item.status && !getBoardStatuses(gate.item.board).some((s) => s.value === patch.status)) {
+        if (statusHint === undefined) statusHint = await statusGroupInWorkspace(c.organizationId, patch.status);
+        rowStatus = resolveListStatus(getBoardStatuses(gate.item.board), patch.status, statusHint);
       }
     }
     try {
@@ -159,7 +172,7 @@ export async function POST(req: NextRequest) {
       const updated = await updateBoardItem(
         id,
         {
-          ...(patch.status !== undefined ? { status: patch.status } : {}),
+          ...(patch.status !== undefined ? { status: rowStatus } : {}),
           ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
           ...(patch.dueAt !== undefined ? { dueAt: patch.dueAt ? new Date(patch.dueAt) : null } : {}),
           ...(patch.startAt !== undefined ? { startAt: patch.startAt ? new Date(patch.startAt) : null } : {}),
@@ -194,7 +207,7 @@ export async function POST(req: NextRequest) {
           alreadyTold: [ownerTold],
         }).catch(() => 0);
       }
-      if (patch.status !== undefined && patch.status !== before.status) {
+      if (patch.status !== undefined && rowStatus !== before.status) {
         await notifyItemStatusChanged({
           organizationId: c.organizationId,
           item: target,

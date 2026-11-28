@@ -85,6 +85,13 @@ export async function createItemAs(c: ItemCreateCtx, id: string, body: unknown):
   // may do it (canContributeBoard), only GUESTs are blocked.
   const canWrite = await canContributeBoard(id, c.userId, c.accessLevel);
   if (!canWrite) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Nothing new goes into an archived List, as nothing is moved into one
+  // (pen test 2026-11-28, V-36: a create answered 201 into the archive).
+  const archived = (await prisma.board.findUnique({ where: { id }, select: { archivedAt: true } }))?.archivedAt;
+  if (archived) {
+    const message = "This List is archived. Restore it before adding tasks.";
+    return NextResponse.json({ error: message, code: "list_archived", message }, { status: 409 });
+  }
 
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {

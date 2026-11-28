@@ -54,6 +54,8 @@ export interface CalEvent {
   end: string;
   allDay: boolean;
   status: string | null;
+  /** Done in its List's own set (the server decides; V-37). */
+  done?: boolean;
   personId: string | null;
   /** Where clicking goes, when the block navigates rather than opening a popover. */
   url: string | null;
@@ -507,7 +509,7 @@ function Block({
   const ref = useRef<HTMLDivElement>(null);
   const Glyph = KIND_GLYPH[event.kind];
   const tone = kindTone(event.kind);
-  const overdue = event.kind === "task" && new Date(event.end).getTime() < now.getTime() && event.status !== "DONE";
+  const overdue = event.kind === "task" && new Date(event.end).getTime() < now.getTime() && !event.done && event.status !== "DONE";
   return (
     <div
       ref={ref}
