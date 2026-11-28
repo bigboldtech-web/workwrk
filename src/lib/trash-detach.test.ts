@@ -14,7 +14,10 @@ function fakeDb(rows: Row[]) {
   return {
     rows: byId,
     item: {
-      findUnique: async ({ where }: { where: { id: string } }) => (byId.has(where.id) ? { id: where.id } : null),
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const r = byId.get(where.id);
+        return r ? { id: r.id, parentItemId: r.parentItemId } : null;
+      },
       updateMany: async ({ where, data }: { where: { id: string; parentItemId: null }; data: { parentItemId: string } }) => {
         const r = byId.get(where.id);
         if (!r || r.parentItemId !== null) return { count: 0 };
@@ -37,5 +40,12 @@ describe("relinkDetached", () => {
     await relinkDetached(db as never, [{ id: "moved", parentItemId: "parent" }, { id: "lone", parentItemId: "gone" }]);
     expect(db.rows.get("moved")?.parentItemId).toBe("other");
     expect(db.rows.get("lone")?.parentItemId).toBeNull();
+  });
+
+  it("never makes a loop: a parent filed under the task meanwhile leaves the task where it is (the step 7 review)", async () => {
+    // P was trashed and C let go; then P's old parent Q was filed under C.
+    const db = fakeDb([{ id: "P", parentItemId: "Q" }, { id: "Q", parentItemId: "C" }, { id: "C", parentItemId: null }]);
+    await relinkDetached(db as never, [{ id: "C", parentItemId: "P" }]);
+    expect(db.rows.get("C")?.parentItemId).toBeNull();
   });
 });

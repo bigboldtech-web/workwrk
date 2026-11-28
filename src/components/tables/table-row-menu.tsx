@@ -60,6 +60,8 @@ export interface TableMenuTarget {
   spaceSlug?: string | null;
   isFavorite?: boolean;
   isPublic?: boolean;
+  /** The signed public address (GET /api/tables/[id].publicRef, pen test V-30), known only to Full access. */
+  publicRef?: string | null;
   /** Full access on the table (GET /api/tables/[id].canManage). Absent = resolved on open. */
   canManage?: boolean;
   /** The viewer's role when the host knows it (the Work tree); Full access stands in for an absent canManage. */
@@ -128,7 +130,7 @@ export function TableRowMenu({
     let alive = true;
     void (async () => {
       const [t, f] = await Promise.all([
-        apiFetch<{ canManage?: boolean; isPublic?: boolean; spaceId?: string | null; publicLinksAllowed?: boolean }>(`/api/tables/${table.id}`, { cache: "no-store" }),
+        apiFetch<{ canManage?: boolean; isPublic?: boolean; spaceId?: string | null; publicLinksAllowed?: boolean; publicRef?: string | null }>(`/api/tables/${table.id}`, { cache: "no-store" }),
         table.isFavorite === undefined ? apiFetch<{ tables?: { id: string }[] }>("/api/me/favorites/tables", { cache: "no-store" }) : Promise.resolve(null),
       ]);
       if (!alive) return;
@@ -137,6 +139,7 @@ export function TableRowMenu({
         isPublic: t.ok ? !!t.data.isPublic : table.isPublic,
         spaceId: t.ok ? t.data.spaceId ?? null : table.spaceId,
         publicLinksAllowed: t.ok ? t.data.publicLinksAllowed !== false : true,
+        publicRef: t.ok ? t.data.publicRef ?? null : null,
       });
       if (f && f.ok) setFav((f.data.tables ?? []).some((x) => x.id === table.id));
     })();
@@ -156,8 +159,27 @@ export function TableRowMenu({
   const title = table.name || "Untitled table";
   const full: TableMenuTarget = { ...table, ...(resolved ?? {}), isFavorite: fav, canManage };
 
+  // The embed code needs the SIGNED address (pen test V-30: the bare id no
+  // longer opens), which only Full access is given. A host that skipped the
+  // open-time read has it fetched here once, so the click copies at once.
+  const [embedRef, setEmbedRef] = useState<string | null>(table.publicRef ?? null);
+  const refKnown = embedRef ?? full.publicRef ?? null;
+  useEffect(() => {
+    if (refKnown || !canManage || !full.isPublic) return;
+    let alive = true;
+    void apiFetch<{ publicRef?: string | null }>(`/api/tables/${table.id}`, { cache: "no-store" }).then((t) => {
+      if (alive && t.ok) setEmbedRef(t.data.publicRef ?? null);
+    });
+    return () => { alive = false; };
+  }, [refKnown, canManage, full.isPublic, table.id]);
+
   function copyEmbed() {
-    void navigator.clipboard?.writeText(embedSnippet("table", table.id, title)).then(() => toast("Embed code copied"), () => toast("Couldn't copy", { tone: "danger" }));
+    if (!refKnown) {
+      toast("Only people with Full access can copy the embed code.", { tone: "danger" });
+      onClose();
+      return;
+    }
+    void navigator.clipboard?.writeText(embedSnippet("table", refKnown, title)).then(() => toast("Embed code copied"), () => toast("Couldn't copy", { tone: "danger" }));
     onClose();
   }
 
@@ -319,7 +341,7 @@ export function TableRowMenu({
         />
       ) : null}
       <MenuItem icon={Link2} label="Copy link" onClick={copyLink} />
-      {full.isPublic && full.publicLinksAllowed !== false ? <MenuItem icon={Code2} label="Copy embed code" onClick={copyEmbed} /> : null}
+      {full.isPublic && full.publicLinksAllowed !== false && canManage ? <MenuItem icon={Code2} label="Copy embed code" onClick={copyEmbed} /> : null}
       {!isAgent ? (
         <>
           <MenuSeparator />

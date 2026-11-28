@@ -5924,9 +5924,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const tbAnchorRef = (key: string) => ({ current: tbAnchor.current[key] ?? null });
   // A public link only opens while the workspace allows public links; a
   // stale isPublic under an Off workspace offers no glyph and no embed code.
+  const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false;
   // The embed code needs the SIGNED address (pen test V-30), which only the
-  // people who manage the link are given.
-  const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false && !!table.publicRef;
+  // people who manage the link are given; the Public globe shows to everyone.
+  const embedReady = linkIsLive && !!table.publicRef;
   const autosaveStatus = saveFailed ? "error" : savingCols ? "saving" : lastSavedAt ? "saved" : "idle";
   const moveOpen = sheetMoreOpen;
 
@@ -6009,7 +6010,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         <MorePortal anchorRef={sheetMoreRef} width={280} open placement="below" onClose={() => setSheetMoreOpen(false)}>
           <TableRowMenu
             key={sheetMenuMode}
-            table={{ id: table.id, name: table.name, spaceId: table.spaceId ?? null, spaceSlug: place?.spaceSlug ?? null, spaceName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null, isPublic: !!table.isPublic, canManage: !!table.canManage, publicLinksAllowed: table.publicLinksAllowed !== false }}
+            table={{ id: table.id, name: table.name, spaceId: table.spaceId ?? null, spaceSlug: place?.spaceSlug ?? null, spaceName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null, isPublic: !!table.isPublic, canManage: !!table.canManage, publicLinksAllowed: table.publicLinksAllowed !== false, publicRef: table.publicRef ?? null }}
             context="sheet"
             initialMode={sheetMenuMode}
             onClose={() => setSheetMoreOpen(false)}
@@ -6099,7 +6100,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
           <button type="button" onClick={copySheetLink} className="inline-flex items-center gap-1.5 px-2.5 text-sm font-medium text-ink hover:bg-hover" title="Copy a link to this table" aria-label="Copy link">
             <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="@max-[870px]:hidden">Copy link</span>
           </button>
-          {linkIsLive ? (
+          {embedReady ? (
             <button ref={tbButton("link")} type="button" onClick={() => setToolbarMenu((m) => (m === "link" ? null : "link"))} className="inline-flex w-7 items-center justify-center border-s border-line-strong text-ink-2 hover:bg-hover" aria-label="More link options" aria-haspopup="menu" aria-expanded={toolbarMenu === "link"}>
               <ChevronDown className="h-3.5 w-3.5" />
             </button>

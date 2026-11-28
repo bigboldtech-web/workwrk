@@ -360,6 +360,9 @@ async function captureDriveFolderSubtree(rootId: string): Promise<Row[]> {
 async function detachCrossListChildren(db: TrashDb, roots: Array<{ id: string; boardId: string }>, deletedBoards?: ReadonlySet<string>): Promise<Row[]> {
   const detached: Row[] = [];
   const sameList = (a: string, b: string) => a === b || (!!deletedBoards && deletedBoards.has(a) && deletedBoards.has(b));
+  // Every task walked once: a parent loop in the data (which relinkDetached
+  // now refuses to make, but older rows may hold) never spins the walk.
+  const seen = new Set(roots.map((r) => r.id));
   let frontier = roots;
   while (frontier.length) {
     const boardOf = new Map(frontier.map((f) => [f.id, f.boardId]));
@@ -371,7 +374,8 @@ async function detachCrossListChildren(db: TrashDb, roots: Array<{ id: string; b
       detached.push(...cross.map((k) => ({ id: k.id, parentItemId: k.parentItemId }) as Row));
     }
     const crossIds = new Set(cross.map((k) => k.id));
-    frontier = kids.filter((k) => !crossIds.has(k.id)).map((k) => ({ id: k.id, boardId: k.boardId }));
+    frontier = kids.filter((k) => !crossIds.has(k.id) && !seen.has(k.id)).map((k) => ({ id: k.id, boardId: k.boardId }));
+    for (const f of frontier) seen.add(f.id);
   }
   return detached;
 }
@@ -384,6 +388,16 @@ export async function relinkDetached(db: Pick<RestoreDb, "item">, detached: Row[
     if (!id || !parentItemId) continue;
     const parent = await db.item.findUnique({ where: { id: parentItemId }, select: { id: true } });
     if (!parent) continue;
+    // Never a loop: if the parent now sits somewhere under the task (someone
+    // filed it there while the parent was in Trash), the task stays where it is.
+    let up: string | null = parentItemId;
+    let loops = false;
+    for (let hops = 0; up && hops < 500; hops += 1) {
+      if (up === id) { loops = true; break; }
+      const row: { parentItemId: string | null } | null = await db.item.findUnique({ where: { id: up }, select: { parentItemId: true } });
+      up = row?.parentItemId ?? null;
+    }
+    if (loops) continue;
     await db.item.updateMany({ where: { id, parentItemId: null }, data: { parentItemId } });
   }
 }
@@ -490,7 +504,10 @@ const REGISTRY: Record<TrashType, Entry> = {
       return { label: row.name || "Untitled table", snapshot: { row, children: { rows } } };
     },
     restore: async (s) => {
-      await prisma.dataTable.create({ data: asData(s.row) });
+      // Back with its public link OFF, as a form comes back (the step 7
+      // review, V-30): Trash then Restore otherwise revived the very link the
+      // owner had, or, from a snapshot older than V-30, its bare-id link.
+      await prisma.dataTable.create({ data: asData({ ...(s.row as Record<string, unknown>), isPublic: false }) });
       const rows = s.children?.rows ?? [];
       if (rows.length) await prisma.dataTableRow.createMany({ data: asData(rows), skipDuplicates: true });
     },
@@ -828,7 +845,8 @@ const REGISTRY: Record<TrashType, Entry> = {
       await restoreBoardChildren(s, db);
       const canvases = s.children?.canvases ?? [];
       if (canvases.length) await db.whiteboard.createMany({ data: asData(canvases), skipDuplicates: true });
-      const tables = s.children?.tables ?? [];
+      // Tables come back private, as one restored alone does (V-30).
+      const tables = (s.children?.tables ?? []).map((t) => ({ ...(t as Record<string, unknown>), isPublic: false }) as Row);
       if (tables.length) await db.dataTable.createMany({ data: asData(tables), skipDuplicates: true });
       const tableRows = s.children?.tableRows ?? [];
       if (tableRows.length) await db.dataTableRow.createMany({ data: asData(tableRows), skipDuplicates: true });

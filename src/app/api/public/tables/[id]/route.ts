@@ -84,14 +84,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // The data signature: any cell edit, insert, delete, column change or
   // settings change moves one of these, so the memo can never serve an old
   // evaluation of new data.
+  // table.id, never the route param: the param is the signed address (V-30),
+  // and filtering rows by it counted none, so a cell edit or a deleted row
+  // was served stale until the memo expired (the step 7 review).
   const agg = await prisma.dataTableRow.aggregate({
-    where: { tableId: id, deletedAt: null },
+    where: { tableId: table.id, deletedAt: null },
     _max: { updatedAt: true },
     _count: { _all: true },
   });
   const sig = `${table.updatedAt.getTime()}:${agg._max.updatedAt?.getTime() ?? 0}:${agg._count._all}`;
 
-  const { snapshot, truncated, updatedAt } = await snapshots.get(id, sig, () => evaluate(table));
+  const { snapshot, truncated, updatedAt } = await snapshots.get(table.id, sig, () => evaluate(table));
   const { page, nextCursor, start } = pageEmbedRows(snapshot.rows, sp.get("cursor"), sp.get("limit"));
 
   return NextResponse.json(
