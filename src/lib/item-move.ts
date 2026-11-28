@@ -151,13 +151,22 @@ export function moveDestinations<T extends { productSlug?: string | null }>(list
  * List's statuses (the create modal's Space workflow, My Work's bulk menu)
  * lands the meaning, never a value this List does not have.
  */
-export function resolveListStatus(statuses: readonly StatusOption[], wanted: string): string {
+export function resolveListStatus(
+  statuses: readonly StatusOption[],
+  wanted: string,
+  /** The group the value has in the Lists that declare it ("SHIPPED" is done in List B). */
+  groupHint?: StatusOption["group"] | null,
+): string {
   if (statuses.length === 0) return wanted;
   if (statuses.some((s) => s.value === wanted)) return wanted;
   const norm = (x: string) => x.trim().toLowerCase().replace(/[\s_-]+/g, " ");
   const w = norm(wanted);
   const byName = statuses.find((s) => norm(s.value) === w || norm(s.label) === w);
   if (byName) return byName.value;
+  if (groupHint) {
+    const same = firstOfGroup(statuses, groupHint) ?? (groupHint === "CLOSED" ? firstOfGroup(statuses, "DONE") : groupHint === "DONE" ? firstOfGroup(statuses, "CLOSED") : undefined);
+    if (same) return same.value;
+  }
   if (isDoneStatusName(wanted)) {
     const done = firstOfGroup(statuses, "DONE") ?? firstOfGroup(statuses, "CLOSED");
     if (done) return done.value;

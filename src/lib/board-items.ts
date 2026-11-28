@@ -19,6 +19,7 @@
 //   DONE         green
 
 import { prisma } from "@/lib/prisma";
+import { statusGroupInWorkspace } from "@/lib/items/status-group.server";
 import { seatedHereAmong } from "@/lib/access/seated-here";
 import { logActivity } from "@/lib/item-thread";
 import { applyCompletionStep, boardStatusesOf, completionOnUnarchive, completionStep, recordCompletions, type CompletionDb } from "@/lib/item-completions";
@@ -774,7 +775,9 @@ export async function createBoardItem(input: CreateBoardItemInput, opts: CreateB
   const listRow = await prisma.board.findUnique({ where: { id: input.boardId }, select: { statuses: true } });
   const listStatuses = getBoardStatuses(listRow);
   const status = input.status
-    ? resolveListStatus(listStatuses, input.status)
+    ? listStatuses.some((s) => s.value === input.status)
+      ? input.status
+      : resolveListStatus(listStatuses, input.status, await statusGroupInWorkspace(input.organizationId, input.status))
     : (listStatuses.find((s) => s.group === "ACTIVE") ?? listStatuses[0])?.value ?? "TO_DO";
   // A column picked by its status follows the status it became.
   const groupKey = input.groupKey != null && input.groupKey === input.status ? status : input.groupKey ?? null;

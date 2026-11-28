@@ -22,6 +22,7 @@
 // Server-only: imports prisma.
 
 import { NextResponse } from "next/server";
+import { statusGroupInWorkspace } from "@/lib/items/status-group.server";
 import { linkedListsOf } from "@/lib/list-links-server";
 import { resolveListStatus } from "@/lib/item-move";
 import { z } from "zod";
@@ -461,7 +462,9 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
       // tab or a picker offering another List's statuses landed a value the
       // List does not have. It is translated by meaning, never refused, and
       // an unchanged value is left alone (an undo to an older value works).
-      parsed.data.status = resolveListStatus(currentStatuses, parsed.data.status);
+      if (!currentStatuses.some((s) => s.value === parsed.data.status)) {
+        parsed.data.status = resolveListStatus(currentStatuses, parsed.data.status, await statusGroupInWorkspace(c.organizationId, parsed.data.status));
+      }
     }
   }
 

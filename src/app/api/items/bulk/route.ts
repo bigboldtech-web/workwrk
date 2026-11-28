@@ -21,6 +21,7 @@
 // applied on its own and the report is complete.
 
 import { NextRequest, NextResponse } from "next/server";
+import { statusGroupInWorkspace } from "@/lib/items/status-group.server";
 import { resolveListStatus } from "@/lib/item-move";
 import { z } from "zod";
 import { itemCtx, gateItem } from "@/lib/item-gate";
@@ -136,6 +137,8 @@ export async function POST(req: NextRequest) {
   }
   const contextReadable = parsed.data.contextBoardId ? await listReader(c).row(parsed.data.contextBoardId) : null;
 
+  // The group the bulk status has in the Lists that declare it, read once.
+  let statusHint: Awaited<ReturnType<typeof statusGroupInWorkspace>> | undefined;
   for (const { id, gate } of gated) {
     const rowLinks = linksByItem.get(id) ?? [];
     if (patch.archive && contextReadable && rowLinks.some((l) => l.boardId === contextReadable.id)) {
@@ -153,7 +156,10 @@ export async function POST(req: NextRequest) {
         results.push({ id, ok: false, reason: "invalid_status" });
         continue;
       }
-      if (rowLinks.length === 0 && patch.status !== gate.item.status) rowStatus = resolveListStatus(getBoardStatuses(gate.item.board), patch.status);
+      if (rowLinks.length === 0 && patch.status !== gate.item.status && !getBoardStatuses(gate.item.board).some((s) => s.value === patch.status)) {
+        if (statusHint === undefined) statusHint = await statusGroupInWorkspace(c.organizationId, patch.status);
+        rowStatus = resolveListStatus(getBoardStatuses(gate.item.board), patch.status, statusHint);
+      }
     }
     try {
       if (patch.archive) {
