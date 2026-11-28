@@ -9,6 +9,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { delegatedNodeRole } from "@/lib/access/delegate";
+import { levelInCompany } from "@/lib/access/company-wall";
 import type { Prisma, Space, SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
@@ -156,16 +157,21 @@ export async function visibleSpaceIds(
  * The viewer's role on one Space, decided by node-rules R2 over the Space row
  * and the viewer's own SpaceMember row, which is everything that rule reads,
  * so the delegates below issue the one query they always issued. No org
- * filter is applied here today and none is added: callers compare
- * space.organizationId themselves.
+ * filter on the query: a Space in another workspace is not there at all
+ * for this viewer (the company wall, lib/access/company-wall.ts).
  */
-async function spaceRoleOf(spaceId: string, userId: string, accessLevel: string | null | undefined) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the callers; the level held in the Space's workspace decides
+async function spaceRoleOf(spaceId: string, userId: string, _accessLevel: string | null | undefined) {
   const row = await prisma.space.findUnique({
     where: { id: spaceId },
     include: { members: { where: { userId }, select: { role: true } } },
   });
   if (!row) return { row: null, role: "none" as NodeRole };
-  const ctx = nodeCtxFromLevel(userId, row.organizationId, accessLevel);
+  // The company wall (lib/access/company-wall.ts, pen test 2026-11-28): no
+  // seat in the Space's workspace, no Space; the level held there decides.
+  const level = await levelInCompany(userId, row.organizationId);
+  if (!level) return { row: null, role: "none" as NodeRole };
+  const ctx = nodeCtxFromLevel(userId, row.organizationId, level);
   const rows = emptyRows(row.organizationId);
   rows.spaces.set(row.id, {
     id: row.id, organizationId: row.organizationId, name: row.name, slug: row.slug, icon: row.icon, color: row.color,
@@ -175,7 +181,7 @@ async function spaceRoleOf(spaceId: string, userId: string, accessLevel: string 
   const own = row.members[0]?.role as MemberRole | undefined;
   if (own) grants.space.set(row.id, own);
   const live = decide(rows, grants, { kind: "space", id: row.id }).role;
-  return { row, role: await delegatedNodeRole(userId, row.organizationId, accessLevel, { kind: "space", id: row.id }, live) };
+  return { row, role: await delegatedNodeRole(userId, row.organizationId, level, { kind: "space", id: row.id }, live) };
 }
 
 /**

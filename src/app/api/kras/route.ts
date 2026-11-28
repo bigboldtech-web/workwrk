@@ -102,7 +102,9 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         role: { select: { id: true, title: true } },
+        // This workspace's KPIs only (the company wall, pen test 2026-11-28, V-03).
         kpis: {
+          where: { organizationId: orgId },
           select: {
             id: true, name: true, unit: true, type: true, frequency: true, targetValue: true,
             lowerIsBetter: true, direction: true, isNorthStar: true, ownership: true,

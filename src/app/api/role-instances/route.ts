@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { allOwned, allPeopleHere, idOrNull } from "@/lib/access/company-wall";
 
 // RoleInstance — Role × Scope held by a person (the cloneable instance).
 const INSTANCE_INCLUDE = {
@@ -32,13 +33,20 @@ export async function POST(req: NextRequest) {
   if (!roleId) return jsonError("roleId is required");
   const role = await prisma.role.findFirst({ where: { id: roleId, organizationId: orgId }, select: { id: true } });
   if (!role) return jsonError("Role not found", 404);
+  // The company wall (pen test 2026-11-28, V-02): a person or scope from
+  // another workspace was stored and handed back with their name and email.
+  const scopeId = idOrNull(body.scopeId ?? null);
+  const userId = idOrNull(body.userId ?? null);
+  if (scopeId === "invalid" || userId === "invalid") return jsonError("Invalid person or scope");
+  if (!(await allPeopleHere([userId], orgId))) return jsonError("Person not found", 404);
+  if (!(await allOwned("scope", [scopeId], orgId))) return jsonError("Scope not found", 404);
 
   try {
     const row = await prisma.roleInstance.create({
       data: {
         roleId,
-        scopeId: body.scopeId ?? null,
-        userId: body.userId ?? null,
+        scopeId,
+        userId,
         name: body.name ?? null,
         organizationId: orgId,
       },

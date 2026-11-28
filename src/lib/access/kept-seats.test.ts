@@ -169,6 +169,9 @@ describe("every caller of the level helpers says which seats it means", () => {
    */
   const CALLERS: Record<string, Choice> = {
     "src/app/api/boot/route.ts": { live: 1 }, // the viewer's own level
+    // the company wall: the person's own access to a List, Space or Folder
+    // in that row's workspace (pen test 2026-11-28, V-01)
+    "src/lib/access/company-wall.ts": { live: 1 },
     // who the record names, for someone anchored here and (the final review,
     // product M3) for a membership person's manager and reports here
     "src/app/api/users/[id]/route.ts": { kept: 2 },

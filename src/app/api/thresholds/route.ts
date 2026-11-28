@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { allOwned, idOrNull } from "@/lib/access/company-wall";
 
 // Threshold, a tunable value that drives automation, stored as a row.
 export async function GET(req: NextRequest) {
@@ -26,6 +27,11 @@ export async function POST(req: NextRequest) {
   if (!label) return jsonError("Threshold label is required");
   if (!trigger) return jsonError("Threshold trigger is required");
   if (!Number.isFinite(value)) return jsonError("Threshold value must be a number");
+  // The company wall (pen test 2026-11-28, V-04): a threshold on another
+  // company's job title showed on its role page, and it could not delete it.
+  const roleId = idOrNull(body.roleId ?? null);
+  if (roleId === "invalid") return jsonError("Invalid job title");
+  if (!(await allOwned("role", [roleId], getOrgId(session)))) return jsonError("Job title not found", 404);
 
   const row = await prisma.threshold.create({
     data: {
@@ -34,7 +40,7 @@ export async function POST(req: NextRequest) {
       value,
       unit: body.unit ?? null,
       businessHoursOnly: body.businessHoursOnly ?? true,
-      roleId: body.roleId ?? null,
+      roleId,
       organizationId: getOrgId(session),
     },
   });

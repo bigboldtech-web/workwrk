@@ -13,6 +13,7 @@ import {
   jsonSuccess,
   isOrgAdmin,
 } from "@/lib/api-helpers";
+import { allOwned } from "@/lib/access/company-wall";
 
 type LineInput = {
   scenarioId: string;
@@ -66,6 +67,22 @@ export async function POST(req: NextRequest) {
   });
   if (!plan) return jsonError("plan not found", 404);
   if (plan.status === "ARCHIVED") return jsonError("plan is archived", 400);
+
+  // The company wall (pen test 2026-11-28, V-07): another company's period,
+  // account, cost center or scenario was written onto a line, shown back by
+  // name, and its Restrict relations then blocked that company's own deletes.
+  const ids = (k: keyof LineInput) => lines.map((l) => (l && typeof l === "object" ? l[k] : undefined));
+  const shape = lines.every((l) => l && typeof l === "object"
+    && ["scenarioId", "accountId", "periodId"].every((k) => typeof (l as unknown as Record<string, unknown>)[k] === "string")
+    && (l.costCenterId == null || typeof l.costCenterId === "string"));
+  if (!shape) return jsonError("each line needs scenarioId, accountId and periodId");
+  const [scenariosOk, accountsOk, centersOk, periodsOk] = await Promise.all([
+    allOwned("planScenario", ids("scenarioId"), orgId),
+    allOwned("glAccount", ids("accountId"), orgId),
+    allOwned("costCenter", ids("costCenterId"), orgId),
+    allOwned("accountingPeriod", ids("periodId"), orgId),
+  ]);
+  if (!scenariosOk || !accountsOk || !centersOk || !periodsOk) return jsonError("A scenario, account, cost center or period was not found", 404);
 
   // Manual upsert loop — Postgres treats NULL costCenterId as
   // non-equal to other NULLs, so the composite unique constraint

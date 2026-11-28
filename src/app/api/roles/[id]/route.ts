@@ -20,9 +20,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: { id, organizationId: orgId },
     include: {
       department: { select: { id: true, name: true } },
+      // Every list below is this workspace's only (the company wall, pen test
+      // 2026-11-28, V-03 and V-04): rows another company attached here used
+      // to show on this page, and this company could not remove them.
       kraTemplates: {
+        where: { organizationId: orgId },
         include: {
           kpis: {
+            where: { organizationId: orgId },
             select: {
               id: true, name: true, description: true, unit: true, frequency: true,
               type: true, ownership: true, formula: true, direction: true, isNorthStar: true,
@@ -31,17 +36,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
             // North-star gauge first, then alphabetical.
             orderBy: KPI_ORDER,
           },
-          sops: { select: { id: true, title: true, status: true } },
+          sops: { where: { organizationId: orgId }, select: { id: true, title: true, status: true } },
           _count: { select: { assignments: true } },
         },
         orderBy: { name: "asc" },
       },
-      ownedAreas: { select: { id: true, name: true, description: true } },
+      ownedAreas: { where: { organizationId: orgId }, select: { id: true, name: true, description: true } },
       boundaries: {
+        where: { organizationId: orgId },
         include: { area: { include: { ownerRole: { select: { id: true, title: true } } } } },
       },
-      thresholds: { orderBy: { createdAt: "asc" } },
+      thresholds: { where: { organizationId: orgId }, orderBy: { createdAt: "asc" } },
       instances: {
+        where: { organizationId: orgId },
         include: {
           scope: { select: { id: true, name: true, dimension: true } },
           user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },

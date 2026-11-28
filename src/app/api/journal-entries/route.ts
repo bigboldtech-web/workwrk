@@ -18,6 +18,7 @@ import {
   isOrgAdmin,
 } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
+import { allOwned } from "@/lib/access/company-wall";
 
 type LineInput = {
   debitAccountId?: string;
@@ -122,6 +123,10 @@ export async function POST(req: NextRequest) {
       return jsonError("one or more accounts not found in this org", 404);
     }
   }
+  // The company wall (pen test 2026-11-28, V-07): cost centers too.
+  const centers = lines.map((l) => l.costCenterId);
+  if (centers.some((c) => c != null && typeof c !== "string")) return jsonError("invalid cost center");
+  if (!(await allOwned("costCenter", centers, orgId))) return jsonError("one or more cost centers not found in this org", 404);
 
   // Sequential reference (JE-000001) — race-safe via retry loop.
   // Skipping the `Sequence` table pattern because journal entries

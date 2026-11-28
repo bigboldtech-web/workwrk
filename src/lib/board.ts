@@ -15,6 +15,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { delegatedNodeRole } from "@/lib/access/delegate";
+import { levelInCompany } from "@/lib/access/company-wall";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { getBoardStatuses, isDoneStatus, parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
@@ -782,22 +783,29 @@ export interface BoardReaderRow {
 /**
  * The viewer's role on one List, from the one resolver (node-access): the
  * List's own grant, its owner, its Folder chain and its Space, with the
- * PRIVATE cut and the legacy floor. No org filter is applied here today and
- * none is added: the row's own org is the world's, and callers compare
- * board.organizationId themselves.
+ * PRIVATE cut and the legacy floor. A List in a workspace the person holds
+ * no seat in is not there at all, and the role is decided with the level they
+ * hold in the List's workspace (lib/access/company-wall.ts): two routes that
+ * left the workspace check to their caller let any person read another
+ * company's Lists (pen test 2026-11-28, V-01). `accessLevel` is kept for the
+ * callers' signature and no longer decides anything.
  */
 export async function boardRoleOf(
   boardId: string,
   userId: string,
-  accessLevel: string | null | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the callers; the level held in the row's workspace decides
+  _accessLevel: string | null | undefined,
 ): Promise<{ board: BoardReaderRow | null; role: NodeRole }> {
   const board = await prisma.board.findUnique({
     where: { id: boardId },
     select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
   });
   if (!board) return { board: null, role: "none" };
-  const decision = await nodeRole(nodeCtxFromLevel(userId, board.organizationId, accessLevel), { kind: "list", id: boardId });
-  return { board, role: await delegatedNodeRole(userId, board.organizationId, accessLevel, { kind: "list", id: boardId }, decision.role) };
+  // The level the person holds in the List's workspace, never the one passed.
+  const level = await levelInCompany(userId, board.organizationId);
+  if (!level) return { board: null, role: "none" };
+  const decision = await nodeRole(nodeCtxFromLevel(userId, board.organizationId, level), { kind: "list", id: boardId });
+  return { board, role: await delegatedNodeRole(userId, board.organizationId, level, { kind: "list", id: boardId }, decision.role) };
 }
 
 /**
