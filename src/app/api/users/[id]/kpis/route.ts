@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { personHere } from "@/lib/access/seated-here";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
@@ -22,11 +23,9 @@ export async function GET(
     return jsonError("You can only view KPIs for yourself or your reports.", 403);
   }
 
-  // Verify user belongs to org
-  const user = await prisma.user.findFirst({
-    where: { id: userId, organizationId: orgId },
-    select: { id: true, firstName: true, lastName: true },
-  });
+  // A person by the seat they hold here, a membership one too (pen test
+  // 2026-11-28, V-43, the step 4c review).
+  const user = await personHere(orgId, userId, "kept");
   if (!user) return jsonError("User not found", 404);
 
   // Get all KRA assignments for this user, this workspace's only

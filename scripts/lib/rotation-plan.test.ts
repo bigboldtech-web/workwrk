@@ -73,6 +73,28 @@ describe("planRotation", () => {
     expect(plan.unreadable).toHaveLength(1);
   });
 
+  it("moves a tool login saved before the seal, sealed as its JSON, and counts an empty one as empty (the step 4c review)", () => {
+    const plan = planRotation(
+      [
+        { model: "tool", column: "credentials", id: "t1", blob: { username: "ops", password: "pw" } },
+        { model: "tool", column: "credentials", id: "t2", blob: { username: " ", password: "" } },
+        { model: "tool", column: "credentials", id: "t3", blob: null },
+        cell("tool", "credentials", "t4", JSON.stringify({ username: "a" }), OLD),
+        cell("tool", "credentials", "t5", JSON.stringify({ username: "b" }), NEW),
+      ],
+      { newKey: NEW, oldKey: OLD },
+    );
+    expect(plan.columns.find((c) => c.model === "tool")).toMatchObject({ rows: 5, onOld: 2, onNew: 1, empty: 2, unreadable: 0 });
+    expect(plan.moves.map((m) => [m.cell.id, m.plain])).toEqual([
+      ["t1", JSON.stringify({ username: "ops", password: "pw" })],
+      ["t4", JSON.stringify({ username: "a" })],
+    ]);
+    expect(plan.unreadable).toEqual([]);
+    // Another column keeps its rule: a value that is not a sealed blob opens with neither key.
+    const strict = planRotation([{ model: "orgSecret", column: "encryptedKey", id: "s1", blob: { username: "x" } }], { newKey: NEW, oldKey: OLD });
+    expect(strict.unreadable.map((u) => u.id)).toEqual(["s1"]);
+  });
+
   it("refuses a column SEALED_COLUMNS does not list", () => {
     expect(() => planRotation([cell("user", "passwordHash", "u1", "x")], { newKey: NEW, oldKey: OLD })).toThrow(/not in SEALED_COLUMNS/);
   });

@@ -26,7 +26,18 @@ export function openToken(blob: unknown): string {
 }
 
 /** Every column that holds a sealed blob, by Prisma model and field. A nullable one may hold none. */
-export const SEALED_COLUMNS: ReadonlyArray<{ model: string; column: string; nullable: boolean }> = [
+export const SEALED_COLUMNS: ReadonlyArray<{
+  model: string;
+  column: string;
+  nullable: boolean;
+  /**
+   * The column held plain JSON objects before it was sealed (a tool's saved
+   * login, V-27). A rotation seals such a value with the new key rather than
+   * calling it unreadable; an empty one ({} or every field blank) counts as
+   * empty.
+   */
+  legacyPlain?: true;
+}> = [
   { model: "orgSecret", column: "encryptedKey", nullable: false },
   { model: "teammateConnection", column: "refreshTokenSealed", nullable: false },
   { model: "teammateConnection", column: "accessTokenSealed", nullable: true },
@@ -38,5 +49,5 @@ export const SEALED_COLUMNS: ReadonlyArray<{ model: string; column: string; null
   // A tool's saved login (src/lib/tools/tool-credentials.ts, pen test
   // 2026-11-28, V-27); null on a tool with none, and a login saved before
   // the seal reads as "opens with neither" until it is first opened.
-  { model: "tool", column: "credentials", nullable: true },
+  { model: "tool", column: "credentials", nullable: true, legacyPlain: true },
 ];

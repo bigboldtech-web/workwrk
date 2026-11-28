@@ -17,6 +17,7 @@
 // ?quarter= switches the OKR cycle (default: current quarter).
 
 import { NextRequest } from "next/server";
+import { alignmentPersonCard } from "@/lib/people/alignment-card.server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { buildPersonAlignment } from "@/lib/person-alignment";
@@ -29,28 +30,10 @@ export async function GET(req: NextRequest) {
   const userId = getUserId(session);
   const quarter = new URL(req.url).searchParams.get("quarter");
 
-  const me = await prisma.user.findFirst({
-    where: { id: userId, organizationId: orgId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      role: {
-        select: {
-          id: true,
-          title: true,
-          // The JD — Role.description is the mission statement the
-          // career home renders under "My role".
-          description: true,
-          level: true,
-          department: { select: { id: true, name: true } },
-        },
-      },
-      manager: { select: { id: true, firstName: true, lastName: true } },
-      department: { select: { id: true, name: true } },
-    },
-  });
+  // By the seat held HERE, a membership one too (pen test 2026-11-28, V-43,
+  // the step 4c review): someone here through a membership could not open
+  // their own career home.
+  const me = await alignmentPersonCard(orgId, userId);
   if (!me) return jsonError("User not found", 404);
 
   const [alignment, pendingReviews, assets] = await Promise.all([

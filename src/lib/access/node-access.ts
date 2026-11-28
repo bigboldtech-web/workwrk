@@ -22,6 +22,7 @@
 // Server-only: prisma and the session.
 
 import { getServerSession } from "next-auth";
+import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { authOptions } from "../auth";
 import { prisma } from "../prisma";
 import { readDocLock } from "../doc-lock";
@@ -826,7 +827,10 @@ async function generalOf(rows: NodeRows, ref: NodeRef, canShare: boolean, viewer
     const entry = rows.docSharing.get(ref.id);
     restricted = entry?.restricted === true;
     const on = !!entry?.publicSecret;
-    publicLink = { on, allowed: true, url: on && canShare ? `/share/doc/${ref.id}.${entry?.publicSecret}` : null };
+    // The workspace's Public links switch (V-31, the step 4c review): off,
+    // the dialog offers no switch to turn one on.
+    const org = await prisma.organization.findUnique({ where: { id: rows.organizationId }, select: { settings: true } });
+    publicLink = { on, allowed: orgPublicLinksAllowed(org?.settings), url: on && canShare ? `/share/doc/${ref.id}.${entry?.publicSecret}` : null };
   }
   if (ref.kind === "table" || ref.kind === "form") {
     const row = ref.kind === "table"

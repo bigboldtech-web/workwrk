@@ -7,7 +7,7 @@
 
 import { NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
-import { openLogin, sealLogin } from "@/lib/tools/tool-credentials";
+import { openLogin, sealLegacyLogins, sealLogin } from "@/lib/tools/tool-credentials";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
@@ -47,6 +47,11 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "desc" },
     take: 500,
   });
+
+  // A login saved before the seal is sealed now, every one this list holds,
+  // in the background (V-27, the step 4c review: a login nobody opened stayed
+  // plain, and an empty one is cleared).
+  void sealLegacyLogins(tools.map((t) => ({ id: t.id, credentials: t.credentials })));
 
   const peopleIds = [...new Set(tools.flatMap((t) => [t.addedBy, ...t.shares.map((s) => s.userId)]))];
   const people = peopleIds.length

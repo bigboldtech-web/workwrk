@@ -112,7 +112,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.icon !== undefined) data.icon = str(body.icon, 16);
   if (body.category !== undefined) data.category = str(body.category, 60);
   // Kept sealed (pen test 2026-11-28, V-27).
-  if (body.credentials !== undefined) data.credentials = body.credentials && typeof body.credentials === "object" && !Array.isArray(body.credentials) ? sealLogin(body.credentials) : null;
+  // A cleared login is none, never a sealed empty one (the step 4c review).
+  if (body.credentials !== undefined) data.credentials = body.credentials && typeof body.credentials === "object" && !Array.isArray(body.credentials) && hasLogin(body.credentials) ? sealLogin(body.credentials) : null;
 
   const updated = await prisma.tool.update({ where: { id }, data, select: { id: true, name: true, description: true, url: true, icon: true, category: true, updatedAt: true } });
   if (body.credentials !== undefined) {

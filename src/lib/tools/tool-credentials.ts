@@ -8,6 +8,8 @@
 // Server-only.
 
 import { openToken, sealToken, type Sealed } from "@/lib/connectors/seal";
+import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 
 export type ToolLogin = Record<string, unknown>;
 
@@ -41,5 +43,28 @@ export function sealLogin(login: ToolLogin): ToolLogin | Sealed {
   } catch (err) {
     console.error("[tool-credentials] no key to seal a saved login; kept as typed", err);
     return login;
+  }
+}
+
+/**
+ * Seal every login in these rows that predates the seal; an empty one is
+ * cleared. Each write only lands while the row still holds what was read, so
+ * a save made meanwhile is never overwritten. Never throws.
+ */
+export async function sealLegacyLogins(rows: ReadonlyArray<{ id: string; credentials: unknown }>): Promise<void> {
+  for (const r of rows) {
+    if (!r.credentials || typeof r.credentials !== "object" || Array.isArray(r.credentials) || isSealedLogin(r.credentials)) continue;
+    const login = r.credentials as ToolLogin;
+    const empty = !Object.values(login).some((v) => typeof v === "string" && v.trim().length > 0);
+    const next = empty ? null : sealLogin(login);
+    if (next && !isSealedLogin(next)) return; // no key: nothing can be sealed now
+    try {
+      await prisma.tool.updateMany({
+        where: { id: r.id, credentials: { equals: r.credentials as object } },
+        data: { credentials: next === null ? Prisma.DbNull : (next as object) },
+      });
+    } catch (err) {
+      console.error("[tool-credentials] sealing an older login failed", err);
+    }
   }
 }

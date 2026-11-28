@@ -66,9 +66,14 @@ async function mutateRows(
     await tx.$queryRaw`SELECT id FROM "App" WHERE id = ${appId} FOR UPDATE`;
     const fresh = await tx.app.findUnique({ where: { id: appId }, select: { ui: true, status: true } });
     if (!fresh || fresh.status === "ARCHIVED") return { ok: false as const, status: 404, error: "app not found" };
-    const result = change(rowsFromUi(fresh.ui));
+    const before = rowsFromUi(fresh.ui);
+    const beforeChars = JSON.stringify(before).length;
+    const result = change(before);
     if (!result.ok) return result;
-    if (JSON.stringify(result.rows).length > ROWS_MAX_CHARS) {
+    // Over the cap only when the write grows the rows: a delete or a shrink
+    // always lands, so an app already past it can be cut back (the step 4c review).
+    const afterChars = JSON.stringify(result.rows).length;
+    if (afterChars > ROWS_MAX_CHARS && afterChars > beforeChars) {
       return { ok: false as const, status: 413, error: "This app's rows are full (2 MB). Promote it to a real board to keep adding." };
     }
     await tx.app.update({
@@ -155,7 +160,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
     for (const ref of refs) {
       const i = locate(rows, ref);
       if (i < 0) { if (!ids) return { ok: false, status: 400, error: "row not found" }; continue; }
-      rows[i] = { ...rows[i], ...row, __id: (rows[i].__id as string | undefined) ?? newRowId(), __updatedAt: stamp };
+      const merged = { ...rows[i], ...row, __id: (rows[i].__id as string | undefined) ?? newRowId(), __updatedAt: stamp };
+      // The row as it becomes, not only the patch: edits with different keys
+      // could grow one row past the cap (the step 4c review).
+      if (!rowFits(merged)) return { ok: false, status: 400, error: TOO_BIG_ROW };
+      rows[i] = merged;
       changed++;
     }
     return { ok: true, rows, body: { ok: true, changed, failed: refs.length - changed } };

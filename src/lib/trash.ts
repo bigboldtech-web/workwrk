@@ -236,7 +236,9 @@ type TrashDb = Pick<
 const asData = (r: unknown): any => r;
 
 /** The client a hierarchy restore writes through: its transaction. */
-type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow" | "itemCompletion" | "timeEntry">;
+type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow" | "itemCompletion" | "timeEntry"> & {
+  $executeRaw?: Prisma.TransactionClient["$executeRaw"];
+};
 
 /**
  * Which time entries pointed at these tasks (pen test 2026-11-28, V-38).
@@ -251,16 +253,25 @@ async function timeLinksOf(db: Partial<Pick<TrashDb, "timeEntry">>, itemIds: str
   return rows as unknown as Row[];
 }
 
-async function restoreTimeLinks(db: Partial<Pick<RestoreDb, "timeEntry">>, links: Row[] | undefined): Promise<void> {
+export async function restoreTimeLinks(db: Partial<Pick<RestoreDb, "timeEntry" | "$executeRaw">>, links: Row[] | undefined): Promise<void> {
   if (!links?.length || !db.timeEntry) return;
-  const byItem = new Map<string, string[]>();
-  for (const l of links) {
-    const itemId = String(l.itemId ?? "");
-    if (!itemId) continue;
-    const list = byItem.get(itemId) ?? [];
-    list.push(String(l.id));
-    byItem.set(itemId, list);
+  const pairs = links
+    .map((l) => ({ id: String(l.id ?? ""), itemId: String(l.itemId ?? "") }))
+    .filter((p) => p.id && p.itemId);
+  if (pairs.length === 0) return;
+  // ONE statement for the whole restore (the step 4c review: one update per
+  // task, in sequence, could run a big Space's restore past its transaction
+  // timeout and fail it whole). A client without raw SQL (a test double)
+  // falls back to one update per task.
+  if (db.$executeRaw) {
+    for (let at = 0; at < pairs.length; at += 5000) {
+      const chunk = pairs.slice(at, at + 5000);
+      await db.$executeRaw`UPDATE "TimeEntry" AS t SET "itemId" = v.item FROM unnest(${chunk.map((p) => p.id)}::text[], ${chunk.map((p) => p.itemId)}::text[]) AS v(id, item) WHERE t.id = v.id AND t."itemId" IS NULL`;
+    }
+    return;
   }
+  const byItem = new Map<string, string[]>();
+  for (const p of pairs) byItem.set(p.itemId, [...(byItem.get(p.itemId) ?? []), p.id]);
   for (const [itemId, ids] of byItem) {
     await db.timeEntry.updateMany({ where: { id: { in: ids }, itemId: null }, data: { itemId } });
   }

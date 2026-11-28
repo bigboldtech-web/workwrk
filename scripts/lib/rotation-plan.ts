@@ -83,6 +83,13 @@ export function opensWith(blob: unknown, key: string): string | null {
   }
 }
 
+/** A value in the sealed blob's shape ({ v: 1, iv, ct, tag }). */
+function looksSealed(v: unknown): boolean {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const b = v as Record<string, unknown>;
+  return b.v === 1 && typeof b.iv === "string" && typeof b.ct === "string" && typeof b.tag === "string";
+}
+
 /** The plan for these cells. A cell of a column SEALED_COLUMNS does not list is a mistake in the caller, and throws. */
 export function planRotation(cells: readonly SealedCell[], keys: { newKey: string; oldKey?: string | null }): RotationPlan {
   const columns: ColumnCounts[] = SEALED_COLUMNS.map((c) => ({ model: c.model, column: c.column, rows: 0, onNew: 0, onOld: 0, empty: 0, unreadable: 0 }));
@@ -101,6 +108,19 @@ export function planRotation(cells: readonly SealedCell[], keys: { newKey: strin
       }
       counts.unreadable += 1;
       unreadable.push(cell);
+      continue;
+    }
+    // A login saved before its column was sealed (V-27, the step 4c review):
+    // never unreadable, which stopped every rotation. An empty one is empty;
+    // any other is sealed with the new key by the move, as its plain JSON.
+    if (SEALED_COLUMNS[i].legacyPlain && !looksSealed(cell.blob)) {
+      const fields = cell.blob && typeof cell.blob === "object" && !Array.isArray(cell.blob) ? Object.values(cell.blob as Record<string, unknown>) : [];
+      if (!fields.some((v) => typeof v === "string" && v.trim().length > 0)) {
+        counts.empty += 1;
+        continue;
+      }
+      counts.onOld += 1;
+      moves.push({ cell, plain: JSON.stringify(cell.blob) });
       continue;
     }
     if (opensWith(cell.blob, keys.newKey) !== null) {
