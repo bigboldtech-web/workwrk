@@ -24,7 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { itemCtx, gateItem } from "@/lib/item-gate";
 import { archiveBoardItem, updateBoardItem } from "@/lib/board-items";
-import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
+import { notifyItemAssigned, notifyItemStatusChanged, notifyNewAssignees } from "@/lib/notify-item";
 import { unknownUserIds } from "@/lib/assignable";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { validateLinkedStatus } from "@/lib/list-links";
@@ -173,14 +173,26 @@ export async function POST(req: NextRequest) {
       // real transition only, and never to the person who made it. A bulk edit
       // is not a reason for the people it touches to hear about it less.
       const target = { id, title: updated.title, dueAt: updated.dueAt ?? null };
-      if (patch.ownerId !== undefined && patch.ownerId && patch.ownerId !== before.ownerId) {
+      const ownerTold = patch.ownerId !== undefined && patch.ownerId && patch.ownerId !== before.ownerId ? patch.ownerId : null;
+      if (ownerTold) {
         await notifyItemAssigned({
           organizationId: c.organizationId,
           item: target,
-          ownerId: patch.ownerId,
+          ownerId: ownerTold,
           actorId: c.userId,
           reassigned: before.ownerId !== null,
         }).catch(() => {});
+      }
+      // Everyone newly on the task through bulk assignees (V-15).
+      if (patch.assigneeIds !== undefined || patch.ownerId !== undefined) {
+        await notifyNewAssignees({
+          organizationId: c.organizationId,
+          item: target,
+          before: { ownerId: before.ownerId, assigneeIds: before.assigneeIds },
+          after: { ownerId: updated.ownerId, assigneeIds: updated.assigneeIds },
+          actorId: c.userId,
+          alreadyTold: [ownerTold],
+        }).catch(() => 0);
       }
       if (patch.status !== undefined && patch.status !== before.status) {
         await notifyItemStatusChanged({

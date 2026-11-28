@@ -250,6 +250,52 @@ export async function notifyItemAssigned(args: {
   });
 }
 
+/** The people on a task after a write who were not on it before, less the actor and anyone already told. */
+export function newlyOnTask(
+  before: { ownerId: string | null; assigneeIds: readonly string[] | null | undefined },
+  after: { ownerId: string | null; assigneeIds: readonly string[] | null | undefined },
+  actorId: string | null,
+  alreadyTold: readonly (string | null | undefined)[] = [],
+): string[] {
+  const had = new Set([before.ownerId, ...(before.assigneeIds ?? [])].filter(Boolean));
+  const told = new Set(alreadyTold.filter(Boolean));
+  return [...new Set([after.ownerId, ...(after.assigneeIds ?? [])])]
+    .filter((id): id is string => !!id && !had.has(id) && !told.has(id) && id !== actorId);
+}
+
+/**
+ * Everyone NEWLY on a task (its owner or one of its assignees) hears that
+ * they were assigned, once (pen test 2026-11-28, V-15: assigning from the task
+ * drawer, a List cell, bulk edit or a create with assigneeIds told no one,
+ * because only an owner change notified, and only that one person). Not the
+ * actor, not anyone who was already on it, not anyone `alreadyTold` (the
+ * owner notice above, when the same write changed the owner). Prefs honored.
+ */
+export async function notifyNewAssignees(args: {
+  organizationId: string;
+  item: ItemNotifyTarget;
+  before: { ownerId: string | null; assigneeIds: readonly string[] | null | undefined };
+  after: { ownerId: string | null; assigneeIds: readonly string[] | null | undefined };
+  actorId: string | null;
+  alreadyTold?: readonly (string | null | undefined)[];
+}): Promise<number> {
+  const added = newlyOnTask(args.before, args.after, args.actorId, args.alreadyTold);
+  if (added.length === 0) return 0;
+  const who = await actorName(args.actorId);
+  const due = formatDue(args.item.dueAt);
+  return emit({
+    organizationId: args.organizationId,
+    prefKey: "task_assigned",
+    type: "task_assigned",
+    recipientIds: added,
+    actorId: args.actorId,
+    title: args.item.title,
+    message: `${who} assigned you this task${due ? ` · due ${due}` : ""}`,
+    link: itemLink(args.item.id),
+    itemId: args.item.id,
+  });
+}
+
 /**
  * A task changed status. Recipients = the current owner plus everyone who
  * has commented on the task (the thread is the only durable record of who

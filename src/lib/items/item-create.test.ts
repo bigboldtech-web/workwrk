@@ -37,7 +37,7 @@ vi.mock("@/lib/board-items", async () => ({
   getBoardItemRow: async (id: string) => ({ id, enriched: true }),
   listBoardItems: async () => [],
 }));
-vi.mock("@/lib/notify-item", () => ({ notifyItemAssigned: async (a: unknown) => void h.notices.push(a) }));
+vi.mock("@/lib/notify-item", () => ({ notifyItemAssigned: async (a: unknown) => void h.notices.push(a), notifyNewAssignees: async () => 0 }));
 vi.mock("@/services/webhookDispatcher", () => ({ dispatchEvent: async (e: unknown) => void h.events.push(e) }));
 vi.mock("@/lib/assignable", () => ({ unknownUserIds: async (ids: string[]) => ids.filter((i) => h.unknown.includes(i)) }));
 vi.mock("@/lib/list-connect-server", () => ({ validateConnectWrites: async () => ({ ok: true, values: {}, keys: [] }) }));

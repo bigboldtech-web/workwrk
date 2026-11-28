@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { canReadBoard } from "@/lib/board";
 import { SET_ASIDE_ENTITY } from "@/lib/item-completions";
+import { gateItem, itemCtx } from "@/lib/item-gate";
 
 export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
@@ -77,6 +78,17 @@ export async function GET(req: Request) {
   }
   // Read by the status set writer alone: answered as a List the caller cannot read is.
   if (entityType === SET_ASIDE_ENTITY) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // A task's activity takes the task's own gate (pen test 2026-11-28, V-08):
+  // it was filtered by workspace only, so anyone in the company read the
+  // feed of a private task, comment previews included. No other kind is
+  // served here (the task drawer reads /api/items/[id]/activity).
+  if (entityType !== "BOARD_ITEM") return NextResponse.json({ error: "not found" }, { status: 404 });
+  {
+    const c = await itemCtx();
+    if ("error" in c) return c.error;
+    const gate = await gateItem(entityId, c, "view");
+    if ("error" in gate) return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   const activity = await prisma.itemActivity.findMany({
     where: { organizationId: ctx.orgId, entityType, entityId },

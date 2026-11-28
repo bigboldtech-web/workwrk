@@ -5,6 +5,26 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { viewerFromSession } from "@/lib/access/viewer";
+
+/**
+ * Who may change or remove a saved task template: the person who saved it,
+ * an Admin or the Owner, the rule Template Center keeps for the same rows
+ * (pen test 2026-11-28, V-11: this route checked the workspace only, so any
+ * member rewrote or deleted the company's task templates, and every task made
+ * from one carried the change). A built-in template is never changed here.
+ */
+async function templateRefusal(id: string, orgId: string): Promise<Response | null> {
+  const existing = await prisma.template.findUnique({ where: { id }, select: { organizationId: true, kind: true, builtIn: true, createdById: true } });
+  if (!existing || existing.organizationId !== orgId || existing.kind !== "TASK" || existing.builtIn) return jsonError("Not found", 404);
+  const viewer = await viewerFromSession();
+  if (!viewer) return jsonError("Unauthorized", 401);
+  const isOrgAdmin = viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN";
+  if (!isOrgAdmin && existing.createdById !== viewer.userId) {
+    return jsonError("Only the person who saved this template, an Admin or the Owner can change it.", 403);
+  }
+  return null;
+}
 
 const patchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
@@ -15,8 +35,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const { id } = await params;
-  const existing = await prisma.template.findUnique({ where: { id }, select: { organizationId: true, kind: true } });
-  if (!existing || existing.organizationId !== getOrgId(session) || existing.kind !== "TASK") return jsonError("Not found", 404);
+  const refused = await templateRefusal(id, getOrgId(session));
+  if (refused) return refused;
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
@@ -37,8 +57,8 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const { id } = await params;
-  const existing = await prisma.template.findUnique({ where: { id }, select: { organizationId: true, kind: true } });
-  if (!existing || existing.organizationId !== getOrgId(session) || existing.kind !== "TASK") return jsonError("Not found", 404);
+  const refused = await templateRefusal(id, getOrgId(session));
+  if (refused) return refused;
   await prisma.template.delete({ where: { id } });
   return jsonSuccess({ ok: true });
 }

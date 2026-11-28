@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docRoleFor, nodeCtxFromSession } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
+import { gateItem, itemCtx } from "@/lib/item-gate";
 import { z } from "zod";
 
 /**
@@ -21,7 +22,7 @@ import { z } from "zod";
  * org, or one they cannot open, is the same 404 as a wrong id.
  */
 async function docBlockGate(entityType: string, entityId: string, orgId: string, need: "read" | "write"): Promise<NextResponse | null> {
-  if (entityType !== "DOC_BLOCK") return null;
+  if (entityType !== "DOC_BLOCK") return threadGate(entityType, entityId, need);
   const docId = entityId.split(":")[0];
   const notFound = NextResponse.json({ error: "not found" }, { status: 404 });
   if (!docId) return notFound;
@@ -34,6 +35,24 @@ async function docBlockGate(entityType: string, entityId: string, orgId: string,
   // A Can view grant is read only; every older "view" listing reads as Can
   // comment, so nobody who commented before loses it.
   if (need === "write" && !info.canComment) return NextResponse.json({ error: "read-only" }, { status: 403 });
+  return null;
+}
+
+/**
+ * Every other thread (pen test 2026-11-28, V-08). A task's comments here
+ * were filtered by workspace only, so anyone in the company read and posted
+ * comments on a private task they could not open. A task's thread takes the
+ * task's own gate (Can view to read, Can comment to post), the one
+ * /api/items/[id]/updates uses; any other kind is not served here (the doc
+ * editor's block comments are the only caller), so none can slip past a gate.
+ */
+async function threadGate(entityType: string, entityId: string, need: "read" | "write"): Promise<NextResponse | null> {
+  const notFound = NextResponse.json({ error: "not found" }, { status: 404 });
+  if (entityType !== "BOARD_ITEM") return notFound;
+  const c = await itemCtx();
+  if ("error" in c) return c.error;
+  const gate = await gateItem(entityId, c, need === "read" ? "view" : "comment");
+  if ("error" in gate) return need === "read" || gate.error.status === 404 ? notFound : gate.error;
   return null;
 }
 

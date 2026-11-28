@@ -40,7 +40,7 @@ import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } f
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
-import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
+import { notifyItemAssigned, notifyItemStatusChanged, notifyNewAssignees } from "@/lib/notify-item";
 import { publishItemChanged } from "@/lib/notify-realtime";
 import { announceAddedMentions } from "@/lib/items/item-mentions";
 import { parseBoardSchema, type FieldDef } from "@/lib/field-catalog";
@@ -637,6 +637,18 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
         actorId: c.userId,
         reassigned: gate.item.ownerId !== null,
       });
+    }
+    // Everyone newly on the task through its assignees (V-15); the owner
+    // notice above already told a new owner.
+    if (parsed.data.assigneeIds !== undefined || parsed.data.ownerId !== undefined) {
+      await notifyNewAssignees({
+        organizationId: c.organizationId,
+        item: { id: updated.id, title: updated.title, dueAt: updated.dueAt ?? null },
+        before: { ownerId: gate.item.ownerId, assigneeIds: gate.item.assigneeIds },
+        after: { ownerId: updated.ownerId, assigneeIds: updated.assigneeIds },
+        actorId: c.userId,
+        alreadyTold: ownerChanged ? [updated.ownerId] : [],
+      }).catch(() => 0);
     }
     if (statusChanged) {
       await notifyItemStatusChanged({

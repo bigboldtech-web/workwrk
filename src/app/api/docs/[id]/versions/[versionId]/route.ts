@@ -9,7 +9,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
-import { requireDocRole } from "@/lib/doc-sharing";
+import { docStandingNow, requireDocRole } from "@/lib/doc-sharing";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 export async function GET(
   _req: Request,
@@ -56,9 +57,15 @@ export async function POST(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   // Restoring a version rewrites live content — an edit, not a read.
-  const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
+  // Restoring replaces the page: Can edit with the page lock applied (pen
+  // test 2026-11-28, V-14: a member the lock left on Can comment restored an
+  // old version over a locked page).
+  const standing = await docStandingNow(ctx, { id });
+  if (!roleAtLeast(standing.unlockedRole, "VIEW")) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!roleAtLeast(standing.role, "EDIT")) {
+    const message = standing.locked ? "This doc is locked." : "You can view this doc but not edit it.";
+    return NextResponse.json({ error: message, code: standing.locked ? "locked" : "read-only", message }, { status: 403 });
+  }
   if (doc.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
 
   const source = await prisma.docVersion.findFirst({
