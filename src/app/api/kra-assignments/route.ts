@@ -192,7 +192,9 @@ export async function POST(req: NextRequest) {
   const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
   if (!ORG_WIDE_ASSIGNERS.has(callerLevel)) {
     const teamIds = await getTeamUserIds(orgId, getUserId(session));
-    if (!teamIds.includes(userId)) {
+    // Their reports, never themselves (the report tree starts at the caller,
+    // and a KRA of one's own moves one's own performance score).
+    if (!teamIds.includes(userId) || userId === getUserId(session)) {
       return jsonError("You can only assign KRAs to people who report to you.", 403);
     }
   }

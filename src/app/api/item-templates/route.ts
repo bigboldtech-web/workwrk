@@ -10,6 +10,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { gateItem, itemCtx, type ItemCtx } from "@/lib/item-gate";
+import { viewerFromSession } from "@/lib/access/viewer";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -18,9 +19,18 @@ export async function GET() {
     where: { organizationId: getOrgId(session), kind: "TASK" },
     orderBy: { updatedAt: "desc" },
     take: 200,
-    select: { id: true, name: true, payload: true },
+    select: { id: true, name: true, payload: true, createdById: true },
   });
-  const templates = rows.map((r) => ({ id: r.id, name: r.name, config: r.payload }));
+  // Whether this person may update each one: the rule PATCH keeps (who saved
+  // it, an Admin or the Owner), so the Update menu offers only what lands.
+  const viewer = await viewerFromSession();
+  const isOrgAdmin = viewer?.orgRole === "OWNER" || viewer?.orgRole === "ADMIN";
+  const templates = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    config: r.payload,
+    canEdit: isOrgAdmin || (!!viewer && r.createdById === viewer.userId),
+  }));
   return jsonSuccess({ templates });
 }
 

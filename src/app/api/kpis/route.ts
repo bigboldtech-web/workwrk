@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission, isOrgAdmin } from "@/lib/api-helpers";
-import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { canTouchUserAlignment, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { KPI_ORDER } from "@/lib/alignment";
 import { allOwned } from "@/lib/access/company-wall";
 import type { Prisma } from "@/generated/prisma";
@@ -173,15 +173,16 @@ export async function DELETE(req: NextRequest) {
 
   const existing = await prisma.kPI.findFirst({
     where: { id, organizationId: getOrgId(session) },
-    select: { id: true, _count: { select: { records: true } } },
+    select: { id: true, _count: { select: { records: true, keyResults: true } } },
   });
   if (!existing) return jsonError("KPI not found", 404);
   // A delete takes every person's recorded values with it, and unlinks the
   // goals it feeds (pen test 2026-11-28, V-12: any team lead or manager did
-  // it, with no undo). With values recorded, only an Admin or the Owner may;
-  // a KPI nothing was recorded against yet stays theirs to remove.
-  if (existing._count.records > 0 && !isOrgAdmin(session)) {
-    return jsonError("This KPI has recorded values. Only an Admin or the Owner can delete it.", 403);
+  // it, with no undo). In use (values recorded, or a goal fed by it), only
+  // the org-wide roles may (Admin, Owner, HR, executives: the roles trusted
+  // with anyone's KRAs); a KPI nothing uses yet stays a manager's to remove.
+  if ((existing._count.records > 0 || existing._count.keyResults > 0) && !isOrgWideAlignment(session)) {
+    return jsonError("This KPI has recorded values or feeds a goal. Only an Admin, the Owner, HR or an executive can delete it.", 403);
   }
 
   await prisma.kPI.delete({ where: { id } });

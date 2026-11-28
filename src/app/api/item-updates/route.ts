@@ -49,6 +49,10 @@ async function docBlockGate(entityType: string, entityId: string, orgId: string,
 async function threadGate(entityType: string, entityId: string, need: "read" | "write"): Promise<NextResponse | null> {
   const notFound = NextResponse.json({ error: "not found" }, { status: 404 });
   if (entityType !== "BOARD_ITEM") return notFound;
+  // A task's comment is posted through its own thread (/api/items/[id]/updates),
+  // which tells the people mentioned and records the activity; one written here
+  // skipped all of that (the step 3 review). Reading stays, behind the gate.
+  if (need === "write") return notFound;
   const c = await itemCtx();
   if ("error" in c) return c.error;
   const gate = await gateItem(entityId, c, need === "read" ? "view" : "comment");

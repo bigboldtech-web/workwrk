@@ -14,6 +14,9 @@ import { getTeamUserIds } from "@/lib/team";
  */
 async function mayChangeAssignmentOf(session: unknown, orgId: string, personId: string): Promise<boolean> {
   if (isOrgWideAlignment(session)) return true;
+  // Never one's own: the report tree starts at the caller, and changing one's
+  // own weights moves one's own performance score (the step 3 review).
+  if (personId === getUserId(session)) return false;
   const teamIds = await getTeamUserIds(orgId, getUserId(session));
   return teamIds.includes(personId);
 }
