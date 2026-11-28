@@ -55,6 +55,10 @@ export default async function TrashPage({
 
   return (
     <TrashClient
+      // A link to another tab or type while Trash is open (a toast's "View
+      // archived") starts it afresh there, instead of the tab it opened on (the
+      // step 11 review).
+      key={`${resolveTrashTab(sp.tab, sp.type)}|${sp.type ?? ""}`}
       initialTab={resolveTrashTab(sp.tab, sp.type)}
       initialType={typeFromParam(sp.type)}
       initialQuery={sp.q ?? ""}

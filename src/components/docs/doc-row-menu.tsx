@@ -218,14 +218,15 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
     return () => { alive = false; };
   }, [roleKnown, doc.id, boot.viewer.id]);
   const role: DocMenuRole = doc.role ?? resolved?.role ?? "view";
-  const own = doc.own ?? resolved?.own ?? false;
   const canEdit = role === "full" || role === "edit";
   const offers = docMenuOffers(canEdit, caps);
   const rolePending = !roleKnown && resolved === null;
   // The skeleton holds the place of rows still to come: the role's, or at
   // Can edit the Duplicate and Move rows the caps decide.
   const pending = rolePending || (canEdit && caps === "pending");
-  const canTrash = role === "full" || (role === "edit" && own);
+  // Full access only, as the server decides (V-14): a creator at Can edit was
+  // offered Archive and then refused (the step 11 review).
+  const canTrash = role === "full";
   // The same rule the header's chip and the server's canShare use, so the
   // two doors never disagree. Until the role lands the row waits behind the
   // skeleton rather than reading one label and then the other.
@@ -369,7 +370,7 @@ export function DocRowMenu({ doc, context, onClose, onChanged, onShare, extraRow
       // Docs hub, the nearest Work crumb in Work.
       const open = currentOpenObject();
       if (open?.kind === "doc" && open.id === doc.id) router.push(open.closeHref);
-    } else toast(r.error || "Couldn't move to Trash");
+    } else toast(r.error || "Couldn't archive");
   }
 
   if (mode === "rename") {

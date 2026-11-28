@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Clock, FileText, FolderInput, LayoutTemplate, Search, SlidersHorizontal, Star, Trash2, User, Users, Import as ImportIcon,
+  Archive, Clock, FileText, FolderInput, LayoutTemplate, Search, SlidersHorizontal, Star, Trash2, User, Users, Import as ImportIcon,
 } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
@@ -288,13 +288,15 @@ export default function DocsPage() {
     void load();
   }
   async function bulkTrash() {
-    const ids = selectedRows.filter((r) => r.canManage || (r.myRole === "edit" && r.ownerId === meId)).map((r) => r.id);
-    if (ids.length === 0) { toast("You cannot move these docs to Trash"); return; }
-    const ok = await confirm({ title: `Move ${ids.length} doc${ids.length === 1 ? "" : "s"} to Trash?`, description: "You can restore them from Trash.", destructive: true, confirmLabel: "Move to Trash" });
+    // Archived, as the row menu says (pen test V-66, the step 11 review), and
+    // only where the server agrees: Full access (V-14).
+    const ids = selectedRows.filter((r) => r.canManage).map((r) => r.id);
+    if (ids.length === 0) { toast("Only someone with Full access can archive these docs."); return; }
+    const ok = await confirm({ title: `Archive ${ids.length} doc${ids.length === 1 ? "" : "s"}?`, description: "They leave the list and wait under Archived in Trash, where you can restore them.", destructive: true, confirmLabel: "Archive" });
     if (!ok) return;
     const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "DELETE" })));
     const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;
-    toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : "Moved to Trash", failed ? { tone: "danger" } : { action: { label: "View Trash", onClick: () => router.push("/trash?type=doc") } });
+    toast(failed ? `Archived ${ids.length - failed}, ${failed} failed` : "Archived", failed ? { tone: "danger" } : { action: { label: "View archived", onClick: () => router.push("/trash?tab=archived&type=doc") } });
     setSelected(new Set());
     dispatchDocsChanged();
     void load();
@@ -540,7 +542,7 @@ export default function DocsPage() {
                       ]} />
                   </span>
                   <BulkAction icon={Star} label="Add to favorites" onClick={() => void bulkFavorite()} />
-                  <BulkAction icon={Trash2} label="Move to Trash" destructive onClick={() => void bulkTrash()} />
+                  <BulkAction icon={Archive} label="Archive" destructive onClick={() => void bulkTrash()} />
                 </>
               }
             />

@@ -174,7 +174,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
       done("trashed");
       const open = currentOpenObject();
       if (open?.kind === "canvas" && open.id === canvas.id) router.push(open.closeHref); else router.refresh();
-    } else toast(r.error || "Couldn't move to Trash");
+    } else toast(r.error || "Couldn't archive");
   }
 
   if (mode === "rename") {
