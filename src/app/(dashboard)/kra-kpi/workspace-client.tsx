@@ -464,7 +464,7 @@ function OrphanActions({ orphan: o, roles, onDone }: { orphan: OrphanKra; roles:
     // A KRA with KPIs is not deleted (pen test V-60): its KPIs would be left on
     // no screen. Attach it to a job title, where they show, and move them first.
     if (o.kpis.length) {
-      toast(`${o.name} has ${o.kpis.length} ${o.kpis.length === 1 ? "KPI" : "KPIs"}. Attach it to a job title, then move or delete ${o.kpis.length === 1 ? "it" : "them"} before deleting the KRA.`, { tone: "danger" });
+      toast(`${o.name} has ${o.kpis.length} ${o.kpis.length === 1 ? "KPI" : "KPIs"}, so it stays here with ${o.kpis.length === 1 ? "it" : "them"}. Attach it to a job title, or delete its KPIs first to delete it.`, { tone: "danger" });
       return;
     }
     const names = o.activeAssignees.map((a) => `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim()).filter(Boolean);

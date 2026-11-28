@@ -62,6 +62,8 @@ import {
   initAutosave,
   onSent,
   onSaved,
+  createSaveQueue,
+  type SaveQueue,
   onServerValue,
   onTyped,
   retryDelayMs,
@@ -452,7 +454,11 @@ export function BoardItemDetail({
       {/* 4, the description (c) */}
       <section>
         <h3 className="mb-1.5 text-sm font-medium text-ink">Description</h3>
+        {/* One field, and one save queue, per task (the final review): a host
+            that switches task without remounting (the Inbox) kept the queue,
+            and a save waiting for task A went to task B. */}
         <DescriptionField
+          key={item.id}
           item={item}
           canEdit={canEdit}
           draft={descriptionDraft}
@@ -1575,23 +1581,40 @@ function DescriptionField({
     taggedRef.current = m;
   }, []);
 
-  const commit = useCallback(() => {
-    if (!shouldCommit(reconciled, value, stored)) return;
-    const sent = value;
-    setSave((s) => onSent(s, sent));
-    // Typed over `synced`, the server value this edit started from. When
-    // somebody saved meanwhile, the server merges the two (pen test V-33) and
-    // answers with the merged text, which this field then holds as saved.
-    const answer = onSave(sent, surviving(taggedRef.current, sent), reconciled.synced);
-    if (answer && typeof (answer as Promise<unknown>).then === "function") {
-      void (answer as Promise<unknown>).then((r) => {
-        const saved = savedDescriptionOf(r);
-        if (saved === null) return;
+  // ONE SAVE AT A TIME (createSaveQueue, the final review of pen test
+  // 2026-11-28). Each save is typed over the text the server last answered
+  // with; a save while one is out waits for that answer. Two overlapping saves
+  // of this one person both carried the old base, and the server's merge
+  // (V-33) stored their edited line twice.
+  const onSaveRef = useRef(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  });
+  const queueRef = useRef<SaveQueue | null>(null);
+  useEffect(() => {
+    if (queueRef.current) return;
+    queueRef.current = createSaveQueue("", async (sent, base) => {
+      setSave((s) => onSent(s, sent));
+      const answer = onSaveRef.current(sent, surviving(taggedRef.current, sent), base);
+      const r = answer && typeof (answer as Promise<unknown>).then === "function" ? await (answer as Promise<unknown>) : null;
+      const saved = savedDescriptionOf(r);
+      if (saved !== null) {
         setSave((s) => onSaved(s, sent, saved));
         setAdopted((n) => n + 1);
-      });
-    }
-  }, [reconciled, value, stored, onSave]);
+      }
+      return saved;
+    });
+  }, []);
+  // The server's text reaching a clean field is the base (on mount, and when
+  // another person's edit arrives).
+  useEffect(() => {
+    if (!reconciled.dirty) queueRef.current?.follow(reconciled.synced);
+  }, [reconciled.dirty, reconciled.synced]);
+
+  const commit = useCallback(() => {
+    if (!shouldCommit(reconciled, value, stored)) return;
+    queueRef.current?.commit(value);
+  }, [reconciled, value, stored]);
 
   // Autosave 2s after the last keystroke, and on blur (design-system 5.17),
   // then RETRY with a backoff, because the indicator promises one. `attempt`

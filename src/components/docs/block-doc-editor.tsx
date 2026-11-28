@@ -180,7 +180,7 @@ export const DOC_TOO_LARGE_COPY = "This doc is too large to save (over 9 MB). Re
 
 export const DOC_SAVE_REFUSAL_COPY: Record<DocSaveRefusal, string> = {
   "no-access": "You no longer have access to this doc. Your changes are kept in this tab: copy them or ask the owner to share it again.",
-  archived: "This doc was moved to Trash, so your changes were not saved. They are kept in this tab: copy them before you leave.",
+  archived: "This doc was archived, so your changes were not saved. They are kept in this tab: copy them before you leave.",
 };
 
 // The Request link on the Can view and Can comment strips (access 5.6). It
@@ -1100,9 +1100,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return (
       <div className="os-chrome flex flex-col items-center justify-center gap-3 px-6 py-24 text-center">
         <Trash2 className="h-8 w-8 text-ink-3" strokeWidth={1.5} aria-hidden />
-        <p className="text-row font-medium text-ink">This doc is in the Trash</p>
+        <p className="text-row font-medium text-ink">This doc is archived</p>
         <p className="max-w-sm text-base leading-snug text-ink-2">
-          &ldquo;{doc.title || "Untitled doc"}&rdquo; was moved to Trash. Restore it to keep editing.
+          &ldquo;{doc.title || "Untitled doc"}&rdquo; was archived. Restore it from Trash, under Archived, to keep editing.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <button
@@ -1674,6 +1674,9 @@ function PageComments({ docId, me, open, canComment = true, onClose }: { docId: 
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // "@" picks a person here too (pen test V-45, the final review: only the
+  // block comments had it, so a page comment's @mention reached nobody).
+  const typeahead = useMentionTypeahead({ value: draft, setValue: setDraft, textareaRef: inputRef, side: "top" });
   const fileRef = useRef<HTMLInputElement | null>(null);
   const entityId = `${docId}:__page__`;
 
@@ -1715,14 +1718,17 @@ function PageComments({ docId, me, open, canComment = true, onClose }: { docId: 
     const text = draft.trim();
     if (!text || !me) return;
     setBusy(true);
+    const mentionedUserIds = surviving(typeahead.mentions, text);
     try {
       const res = await fetch("/api/item-updates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityType: "DOC_BLOCK", entityId, body: text }),
+        body: JSON.stringify({ entityType: "DOC_BLOCK", entityId, body: text, ...(mentionedUserIds.length ? { mentionedUserIds } : {}) }),
       });
-      if (res.ok) { setDraft(""); await refresh(); }
-      else toast("Couldn't add comment");
+      if (res.ok) { setDraft(""); typeahead.reset(); await refresh(); }
+      else toast(res.status === 403 ? "You can view this doc but not comment on it." : "Couldn't add comment. Your comment is still here.", { tone: "danger" });
+    } catch {
+      toast("Couldn't add comment. Check your connection; your comment is still here.", { tone: "danger" });
     } finally { setBusy(false); }
   }
 
@@ -1792,25 +1798,31 @@ function PageComments({ docId, me, open, canComment = true, onClose }: { docId: 
         ) : (
           <span className="bdoc__pcmt-av bdoc__pcmt-av--i">{meInitials}</span>
         )}
-        <textarea
-          ref={inputRef}
-          className="bdoc__pcmts-input"
-          placeholder="Add a comment…"
-          rows={1}
-          value={draft}
-          disabled={!me || busy}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void post(); }
-            if (e.key === "Escape" && !draft.trim()) { e.preventDefault(); onClose(); }
-          }}
-        />
+        <div className="bdoc__cmts-field">
+          {typeahead.popover}
+          <textarea
+            ref={inputRef}
+            className="bdoc__pcmts-input"
+            placeholder="Add a comment… (@ to mention)"
+            rows={1}
+            value={draft}
+            disabled={!me || busy}
+            onChange={(e) => typeahead.onValueChange(e.target.value)}
+            onClick={typeahead.onCaretMove}
+            onKeyUp={typeahead.onCaretMove}
+            onKeyDown={(e) => {
+              if (typeahead.onKeyDown(e)) return;
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void post(); }
+              if (e.key === "Escape" && !draft.trim()) { e.preventDefault(); onClose(); }
+            }}
+          />
+        </div>
         <div className="bdoc__pcmts-actions">
           <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void attachFile(f); }} />
           <button type="button" title="Attach file" aria-label="Attach file" disabled={!me || uploading} onClick={() => fileRef.current?.click()}>
             {uploading ? <Dots variant="pending" /> : <Paperclip />}
           </button>
-          <button type="button" title="Mention" aria-label="Mention" disabled={!me} onClick={() => { setDraft((p) => `${p}@`); inputRef.current?.focus(); }}>
+          <button type="button" title="Mention" aria-label="Mention" disabled={!me} onClick={() => { typeahead.onValueChange(`${draft}@`); inputRef.current?.focus(); }}>
             <AtSign />
           </button>
           <button type="button" className="bdoc__pcmts-send" title="Comment" aria-label="Send comment" disabled={!me || busy || !draft.trim()} onClick={() => void post()}>

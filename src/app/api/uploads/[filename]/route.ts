@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
 import { readUpload } from "@/lib/local-uploads";
+import { authOptions } from "@/lib/auth";
+import { personHere } from "@/lib/access/seated-here";
+import { uploadLinkValid } from "@/lib/upload-link";
+
+/** "file-<companyId>-...": the company an attachment was uploaded in. */
+const FILE_COMPANY = /^file-([a-z0-9]{20,32})-/i;
 
 // Images show in the page; every other file downloads, never opens as a page
 // of the app. An image opened on its own is sandboxed (the uploads rule in
@@ -14,7 +21,7 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ filename: string }> }
 ) {
   const { filename } = await params;
@@ -26,6 +33,32 @@ export async function GET(
 
   const ext = filename.split(".").pop()?.toLowerCase() || "";
   const mimeType = MIME_TYPES[ext] || "application/octet-stream";
+
+  // An attachment is its company's (pen test 2026-11-28, V-23, the final
+  // review): anyone with the URL downloaded it, for ever, a former member or
+  // a removed guest included. A file needs someone signed in with a live seat
+  // in the company its name carries (an older name without one, anyone signed
+  // in). Images (avatars, logos, pictures in a page or a public share) stay
+  // open, as the pages that show them need.
+  // A public door (a shared doc or SOP, the e-sign page) hands its anonymous
+  // reader a short-lived link signed for this file (src/lib/upload-link.ts).
+  const sp = new URL(req.url).searchParams;
+  const signedLink = uploadLinkValid(filename, sp.get("exp"), sp.get("sig"));
+  if (!MIME_TYPES[ext] && !signedLink) {
+    const session = await getServerSession(authOptions).catch(() => null);
+    const userId = (session?.user as { id?: string } | undefined)?.id ?? null;
+    if (!userId) {
+      // A link opened in a browser (an email, a new window) goes to log in and back.
+      if ((req.headers.get("accept") ?? "").includes("text/html")) {
+        return NextResponse.redirect(new URL(`/login?callbackUrl=${encodeURIComponent(`/api/uploads/${filename}`)}`, req.url));
+      }
+      return NextResponse.json({ error: "Sign in to WorkwrK to download this file." }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
+    const company = FILE_COMPANY.exec(filename)?.[1] ?? null;
+    if (company && !(await personHere(company, userId, "live"))) {
+      return NextResponse.json({ error: "File not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+    }
+  }
 
   try {
     // storage/uploads, or public/uploads for a file not moved yet.

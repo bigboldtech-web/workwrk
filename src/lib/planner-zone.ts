@@ -34,3 +34,16 @@ export function wallClockIn(d: Date, zone: string): { day: string; midnight: boo
   const hour = p.hour === "24" ? "00" : p.hour;
   return { day: `${p.year}-${p.month}-${p.day}`, midnight: hour === "00" && p.minute === "00" && p.second === "00" && d.getUTCMilliseconds() === 0 };
 }
+
+/**
+ * The all-day reading of a task date for a grid drawn in `zone`: midnight in
+ * that zone (the app's own rule, V-41), on that zone's day; null when the date
+ * carries a time. Exactly midnight UTC is NOT read as all-day (the final
+ * review): it is 5 PM in Los Angeles in summer, the date picker's own default,
+ * and 7 PM in New York in winter. Dates the Gantt wrote at UTC midnight before
+ * V-41 therefore show with their time outside UTC.
+ */
+export function allDayKey(d: Date, zone: string): string | null {
+  const wall = wallClockIn(d, zone);
+  return wall.midnight ? wall.day : null;
+}

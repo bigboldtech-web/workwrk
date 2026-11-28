@@ -11,7 +11,7 @@
 //
 // Pure: no prisma, no React. Every rule below is unit-tested.
 
-import { csvFormulaSafe } from "./csv";
+import { csvExportCell, csvFormulaSafe } from "./csv";
 
 /** Everything the one Trash can hold. */
 export type TrashTypeKey =
@@ -300,7 +300,10 @@ export interface TrashCsvRow {
 
 /** RFC 4180: quote everything, double the quotes inside. */
 export function csvCell(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
+  // Formula-safe in the helper itself (pen test V-29, the final review): the
+  // Everything and Activity exports wrote people's text through it as is.
+  const safe = csvExportCell(value);
+  return `"${safe.replace(/"/g, '""')}"`;
 }
 
 /** `expires`: something empties Trash (src/lib/purge-jobs.ts); without it there is no Time left to state. */

@@ -3,6 +3,11 @@ import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import nextConfig from "../../../../../next.config";
 
 vi.mock("fs/promises", () => ({ readFile: async () => Buffer.from("x") }));
+// Who is signed in, and where they hold a live seat (the final review, V-23).
+const who = vi.hoisted(() => ({ userId: "u1" as string | null, seats: new Set<string>(["cmcompanyaaaaaaaaaaaaaaaa"]) }));
+vi.mock("next-auth", () => ({ getServerSession: async () => (who.userId ? { user: { id: who.userId } } : null) }));
+vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/access/seated-here", () => ({ personHere: async (company: string) => (who.seats.has(company) ? { id: who.userId } : null) }));
 
 import { GET } from "./route";
 
@@ -35,6 +40,15 @@ describe("uploaded files", () => {
       expect(res.headers.get("content-type"), name).toBe("application/octet-stream");
       expect(res.headers.get("content-disposition"), name).toBe("attachment");
     }
+  });
+
+  it("a file is its company's: signed out it asks to sign in, a stranger to the company finds nothing, images stay open (the final review, V-23)", async () => {
+    who.userId = null;
+    expect((await get("file-cmcompanyaaaaaaaaaaaaaaaa-x.pdf")).status).toBe(401);
+    expect((await get("logo-o-1.png")).status).toBe(200);
+    who.userId = "u1";
+    expect((await get("file-cmcompanyaaaaaaaaaaaaaaaa-x.pdf")).status).toBe(200);
+    expect((await get("file-cmothercompanybbbbbbbbbbb-x.pdf")).status).toBe(404);
   });
 
   it("open sandboxed on their own, by the route and straight from the folder", async () => {

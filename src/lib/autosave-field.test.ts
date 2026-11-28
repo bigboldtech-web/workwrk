@@ -9,7 +9,9 @@ import {
   retryDelayMs,
   savedDescriptionOf,
   shouldCommit,
+  createSaveQueue,
 } from "@/lib/autosave-field";
+import { mergeText as mergeTextForTest } from "@/lib/text-merge";
 
 describe("autosave-field", () => {
   it("follows the server while the field is clean", () => {
@@ -135,5 +137,76 @@ describe("onSaved: nothing left to send (the step 5 review)", () => {
     s = onTyped(s, "a\nb\nc");
     s = onSaved(s, "a\nb", "a\nb\nc");
     expect(s).toEqual({ local: "a\nb\nc", synced: "a\nb\nc", dirty: false, sent: null, attempt: 0 });
+  });
+});
+
+// The final review of pen test 2026-11-28: one person's overlapping saves.
+describe("createSaveQueue: one description save at a time", () => {
+  /** A server that stores what it is sent, merged over its base like PATCH /api/items/[id]. */
+  function server(initial: string) {
+    let stored = initial;
+    const answers: Array<() => void> = [];
+    const send = (text: string, base: string) =>
+      new Promise<string | null>((resolve) => {
+        answers.push(() => {
+          stored = stored === base ? text : mergeTextForTest(base, text, stored);
+          resolve(stored);
+        });
+      });
+    return {
+      send,
+      answerNext: async () => { answers.shift()?.(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); },
+      /** Somebody else's save lands directly. */
+      othersSave: (text: string) => { stored = text; },
+      get stored() { return stored; },
+      get pending() { return answers.length; },
+    };
+  }
+
+  it("a save made while one is out waits, and goes typed over the answer: the line is never written twice", async () => {
+    const s = server("");
+    const q = createSaveQueue("", s.send);
+    q.commit("Fix login");
+    q.commit("Fix login on Safari"); // Esc while the autosave is out
+    expect(s.pending).toBe(1);
+    await s.answerNext();
+    expect(q.base).toBe("Fix login");
+    expect(s.pending).toBe(1);
+    await s.answerNext();
+    expect(s.stored).toBe("Fix login on Safari");
+    expect(q.busy).toBe(false);
+  });
+
+  it("someone else's paragraph saved meanwhile is kept, and the waiting text is carried onto it", async () => {
+    const s = server("Old");
+    const q = createSaveQueue("Old", s.send);
+    q.commit("Old\nmine");
+    q.commit("Old\nmine\nmore");
+    // Somebody else saves a paragraph at the top before the first answer.
+    s.othersSave("Theirs\nOld");
+    await s.answerNext();
+    expect(s.stored).toBe("Theirs\nOld\nmine");
+    await s.answerNext();
+    expect(s.stored).toBe("Theirs\nOld\nmine\nmore");
+  });
+
+  it("a save that did not land keeps the base, and the next commit tries again", async () => {
+    let calls = 0;
+    const q = createSaveQueue("a", async () => { calls += 1; return null; });
+    q.commit("ab");
+    await Promise.resolve(); await Promise.resolve();
+    expect(q.base).toBe("a");
+    q.commit("abc");
+    await Promise.resolve(); await Promise.resolve();
+    expect(calls).toBe(2);
+  });
+
+  it("follows the server only while nothing is out", () => {
+    const q = createSaveQueue("a", () => new Promise(() => {}));
+    q.follow("b");
+    expect(q.base).toBe("b");
+    q.commit("bc");
+    q.follow("zzz");
+    expect(q.base).toBe("b");
   });
 });

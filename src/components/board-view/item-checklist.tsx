@@ -13,6 +13,7 @@ import { useMemo, useRef, useState } from "react";
 import { Plus, X, CheckSquare, Square, GripVertical } from "lucide-react";
 import type { BoardItemRow } from "@/lib/board-items-shared";
 import { CHECKLIST_TEXT_MAX, type ChecklistOp } from "@/lib/items/checklist-op";
+import { useOsToast } from "@/components/layout/os/toast";
 
 type ChecklistItem = { text: string; done: boolean };
 
@@ -23,16 +24,26 @@ function parse(raw: unknown): ChecklistItem[] {
     .map((x) => ({ text: x.text, done: !!x.done }));
 }
 
-export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: boolean; onSave: (checklist: ChecklistItem[], op: ChecklistOp) => void }) {
+export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: boolean; onSave: (checklist: ChecklistItem[], op: ChecklistOp) => void | Promise<unknown> }) {
   const items = useMemo(() => parse(item.metadata?.checklist), [item.metadata]);
   const [draft, setDraft] = useState("");
+  const { toast } = useOsToast();
 
   const done = items.filter((i) => i.done).length;
   const add = () => {
     const t = draft.trim();
     if (!t) return;
-    onSave([...items, { text: t, done: false }], { kind: "add", text: t });
+    const answer = onSave([...items, { text: t, done: false }], { kind: "add", text: t });
     setDraft("");
+    // A refused add (a full checklist, the final review) says why and gives
+    // the typed text back, instead of vanishing at the next refresh.
+    if (answer && typeof (answer as Promise<unknown>).then === "function") {
+      void (answer as Promise<{ ok?: boolean; payload?: { message?: string; error?: string } } | null>).then((r) => {
+        if (!r || r.ok !== false) return;
+        setDraft((d) => d || t);
+        toast(r.payload?.message ?? r.payload?.error ?? "Couldn't add that item.", { tone: "danger" });
+      });
+    }
   };
   const toggle = (idx: number) =>
     onSave(items.map((i, n) => (n === idx ? { ...i, done: !i.done } : i)), { kind: "toggle", index: idx, text: items[idx].text, done: !items[idx].done });

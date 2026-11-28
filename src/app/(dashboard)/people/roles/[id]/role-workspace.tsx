@@ -986,6 +986,9 @@ function healthyLine(p: Kpi): string | null {
 type ConfirmState =
   | { kind: "detach-kra"; id: string; name: string }
   | { kind: "delete-kra"; id: string; name: string }
+  // A KRA with KPIs is never deleted (pen test V-60, the final review): its
+  // KPIs and their readings would sit on no screen. Detaching keeps both.
+  | { kind: "delete-kra-has-kpis"; id: string; name: string; kpis: number }
   | { kind: "delete-kpi"; id: string; name: string }
   | null;
 
@@ -1006,14 +1009,14 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
   const runConfirm = async () => {
     if (!confirm) return;
     const ok =
-      confirm.kind === "detach-kra"
+      confirm.kind === "detach-kra" || confirm.kind === "delete-kra-has-kpis"
         ? await call("/api/kras", "PATCH", { id: confirm.id, roleId: null })
         : confirm.kind === "delete-kra"
           ? await call(`/api/kras?id=${confirm.id}`, "DELETE")
           : await call(`/api/kpis?id=${confirm.id}`, "DELETE");
     if (ok) {
       toast(
-        confirm.kind === "detach-kra"
+        confirm.kind === "detach-kra" || confirm.kind === "delete-kra-has-kpis"
           ? `"${confirm.name}" moved to Needs a job title`
           : confirm.kind === "delete-kra" ? "KRA deleted" : "KPI deleted",
       );
@@ -1030,9 +1033,15 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
     },
     "delete-kra": {
       title: "Delete this KRA?",
-      description: "Everyone's assignment to it is removed and its KPI gauges are detached from the job title. Recorded readings on those gauges survive. This cannot be undone.",
+      description: "Everyone's assignment to it is removed. This cannot be undone.",
       confirmLabel: "Delete KRA",
       destructive: true,
+    },
+    "delete-kra-has-kpis": {
+      title: "This KRA has KPIs",
+      description: "Deleting it would leave its KPIs and every reading on them on no screen. Detach it from the job title instead: it moves to the “Needs a job title” list with its KPIs, and people keep their history. To delete it, delete its KPIs first.",
+      confirmLabel: "Detach instead",
+      destructive: false,
     },
     "delete-kpi": {
       title: "Delete this KPI?",
@@ -1112,7 +1121,7 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                       { icon: Pencil, label: "Edit KRA", onClick: () => setKraDialog({ kra: k }) },
                       { icon: Plus, label: "Add KPI", onClick: () => setKpiDialog({ kraId: k.id, kraName: k.name }) },
                       { icon: Unlink, label: "Detach from job title", onClick: () => setConfirm({ kind: "detach-kra", id: k.id, name: k.name }) },
-                      { icon: Trash2, label: "Delete KRA", destructive: true, onClick: () => setConfirm({ kind: "delete-kra", id: k.id, name: k.name }) },
+                      { icon: Trash2, label: "Delete KRA", destructive: true, onClick: () => setConfirm(k.kpis.length > 0 ? { kind: "delete-kra-has-kpis", id: k.id, name: k.name, kpis: k.kpis.length } : { kind: "delete-kra", id: k.id, name: k.name }) },
                     ]}
                   />
                 ) : null}

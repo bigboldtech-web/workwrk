@@ -55,7 +55,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { plannerZone, wallClockIn } from "@/lib/planner-zone";
+import { allDayKey, plannerZone } from "@/lib/planner-zone";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
@@ -337,8 +337,8 @@ export async function GET(req: Request) {
       // a timed one-hour block put it at 00:00. It belongs in the all-day
       // lane, on the day it reads as in the viewer's zone (V-41), the same day
       // the List Calendar files it under.
-      const wall = wallClockIn(start, zone);
-      const dateOnly = !(it.startAt && it.dueAt) && wall.midnight;
+      const dayKey = it.startAt && it.dueAt ? null : allDayKey(start, zone);
+      const dateOnly = dayKey !== null;
       const end = dateOnly
         ? new Date(start.getTime() + 24 * 60 * 60 * 1000 - 60_000)
         : it.dueAt && it.startAt ? it.dueAt : new Date(start.getTime() + 60 * 60 * 1000);
@@ -366,7 +366,7 @@ export async function GET(req: Request) {
         start: start.toISOString(),
         end: end.toISOString(),
         allDay: dateOnly,
-        ...(dateOnly ? { dayKey: wall.day } : {}),
+        ...(dayKey !== null ? { dayKey } : {}),
         status: hidden ? null : it.status,
         done: hidden ? false : isDone(it.boardId, it.status),
         personId,

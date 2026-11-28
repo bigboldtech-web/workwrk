@@ -14,6 +14,7 @@
  * rendered by the same SopReadView the app page uses.
  */
 
+import { signContentUploadLinks, signUploadUrl } from "@/lib/upload-link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
@@ -58,6 +59,8 @@ export default async function PublicSopPage({ params }: { params: Promise<{ toke
     content = enriched.content ?? content;
   } catch { /* fall back to raw content */ }
   try { content = await presignBlocksImagesAndFiles(content, sop.organizationId); } catch { /* fall back to prior content */ }
+  // Local attachment links signed for this anonymous reader (V-23, the final review).
+  content = signContentUploadLinks(content, sop.organizationId);
   // Only what the page shows reaches the browser: SopReadView is a client
   // component, so its whole content prop is serialized into the page. The
   // steps' job titles, "Creates a task" and the run's List id are internal

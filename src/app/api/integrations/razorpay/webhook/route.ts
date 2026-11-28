@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 
 /**
  * POST /api/integrations/razorpay/webhook
@@ -138,4 +139,7 @@ async function recordKpiReading(params: {
       notes: "Ingested via Razorpay webhook",
     },
   });
+  // The goals this KPI feeds keep their stored progress in step (pen test
+  // V-32, the final review: this was the one KPI writer that did not).
+  refreshGoalsFedBy(params.organizationId, [params.kpiId]);
 }

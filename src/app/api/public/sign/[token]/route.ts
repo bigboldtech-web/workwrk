@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { signUploadUrl } from "@/lib/upload-link";
 import { prisma } from "@/lib/prisma";
 import { getRequestContext } from "@/lib/request-context";
 import { envelopeStatusAfter, isRequiredField, nextPartyInOrder, sanitizeSignValues } from "@/lib/contracts";
@@ -58,7 +59,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     title: ag.title,
     content: ag.content,
     sourceType: ag.sourceType,
-    pdfUrl: ag.pdfUrl,
+    // A contract PDF stored on this server, signed for the outside signer, who
+    // has no WorkwrK session (V-23, the final review).
+    pdfUrl: ag.pdfUrl ? signUploadUrl(ag.pdfUrl, ag.organizationId) : ag.pdfUrl,
     status: ag.status,
     org: { name: org?.name ?? "WorkwrK", logo: org?.logo ?? null },
     sender: sender ? { name: `${sender.firstName} ${sender.lastName}`.trim() } : null,
