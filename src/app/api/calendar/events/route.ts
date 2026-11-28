@@ -55,6 +55,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { plannerZone, wallClockIn } from "@/lib/planner-zone";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
@@ -107,11 +108,6 @@ interface CalEvent {
   busyOnly?: boolean;
 }
 
-/** True when `d` is exactly midnight UTC: the shape a date-only column has. */
-function isUtcMidnight(d: Date): boolean {
-  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
-}
-
 function parseDate(v: string | null): Date | null {
   if (!v) return null;
   const d = new Date(v);
@@ -137,6 +133,12 @@ export async function GET(req: Request) {
   const orgId = u.organizationId;
 
   const url = new URL(req.url);
+  // Pen test 2026-11-28, V-41: a task date is all-day when it is midnight
+  // WHERE THE VIEWER IS. Only UTC midnight counted before, so a day picked in
+  // a List Calendar (stored as local midnight) was a one-hour block here, on
+  // another day for anyone east of UTC, while the List Calendar showed it
+  // all day.
+  const zone = plannerZone(url.searchParams.get("tz"));
   const fallback = defaultRange();
   const from = parseDate(url.searchParams.get("from")) ?? fallback.from;
   const to = parseDate(url.searchParams.get("to")) ?? fallback.to;
@@ -329,13 +331,13 @@ export async function GET(req: Request) {
       const start = it.startAt ?? it.dueAt;
       if (!start) continue;
       // A DATE-ONLY TASK IS AN ALL-DAY ROW (spec-planner section 2, the P-1
-      // fix). A task whose only date is a due date is stored at 00:00 UTC,
-      // which is a calendar day, not a moment: rendering it as a timed
-      // one-hour block put it at whatever wall clock that instant lands on,
-      // which for every western zone is the PREVIOUS day. It belongs in the
-      // all-day lane, and `dayKey` tells the grid which column without asking
-      // it to re-read an instant that was never one.
-      const dateOnly = !(it.startAt && it.dueAt) && isUtcMidnight(start);
+      // fix). A day picked anywhere in the product is stored as midnight where
+      // the person picking was, a calendar day, not a moment: rendering it as
+      // a timed one-hour block put it at 00:00. It belongs in the all-day
+      // lane, on the day it reads as in the viewer's zone (V-41), the same day
+      // the List Calendar files it under.
+      const wall = wallClockIn(start, zone);
+      const dateOnly = !(it.startAt && it.dueAt) && wall.midnight;
       const end = dateOnly
         ? new Date(start.getTime() + 24 * 60 * 60 * 1000 - 60_000)
         : it.dueAt && it.startAt ? it.dueAt : new Date(start.getTime() + 60 * 60 * 1000);
@@ -363,7 +365,7 @@ export async function GET(req: Request) {
         start: start.toISOString(),
         end: end.toISOString(),
         allDay: dateOnly,
-        ...(dateOnly ? { dayKey: start.toISOString().slice(0, 10) } : {}),
+        ...(dateOnly ? { dayKey: wall.day } : {}),
         status: hidden ? null : it.status,
         done: hidden ? false : isDone(it.boardId, it.status),
         personId,

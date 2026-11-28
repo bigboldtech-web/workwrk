@@ -41,7 +41,8 @@ import { gateItem, type ItemCtx } from "@/lib/item-gate";
 import { mergeText } from "@/lib/text-merge";
 import { applyChecklistOp, checklistOpSchema, type ChecklistOp } from "@/lib/items/checklist-op";
 import { allowsItemAction } from "@/lib/item-role";
-import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
+import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence, validZone } from "@/lib/recurrence";
+import { getEffectivePreferences } from "@/lib/preferences";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
@@ -102,7 +103,7 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     // backlog + records skips). max(now, …) here silently swallowed today's
     // instance when the rule was saved after its time-of-day had passed.
     recurNextAt = nextOccurrenceAfter(base, rule, base);
-    spawnKey = occurrenceKey(base);
+    spawnKey = occurrenceKey(base, rule.tz);
   }
   // The bookkeeping keys are written over the LOCKED stored blob, so this
   // write can never undo a field value written a moment earlier.
@@ -140,6 +141,10 @@ const recurRuleSchema = z.object({
   // Explicit occurrence time, "HH:MM" 24-hour local. null/absent = inherit
   // the anchor's time-of-day (legacy behavior).
   atTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
+  // The zone the rule was set in (pen test 2026-11-28, V-42): its days and
+  // "HH:MM" are read on that wall clock. Absent: the setter's preferred zone
+  // is stamped below, else the rule keeps the host's clock, as before.
+  tz: z.string().max(64).refine((v) => validZone(v) !== null, "unknown time zone").nullable().optional(),
 });
 
 const patchSchema = z.object({
@@ -361,6 +366,13 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
     const wants = parsed.data.watcherIds!.includes(c.userId);
     const others = gate.watcherIds.filter((w) => w !== c.userId);
     parsed.data.watcherIds = wants ? [...others, c.userId] : others;
+  }
+
+  // A repeat rule saved without its zone takes the setter's preferred one, so
+  // its weekdays and times are theirs, not the server's (V-42).
+  if (parsed.data.recurRule && !parsed.data.recurRule.tz) {
+    const zone = validZone((await getEffectivePreferences(c.userId, c.organizationId).catch(() => null))?.home?.locale?.timezone);
+    if (zone) parsed.data.recurRule.tz = zone;
   }
 
   // A checklist change is applied over the stored list; the whole-blob save

@@ -377,7 +377,7 @@ export async function spawnDueRecurringTasks(
       }
       // Nothing handled this tick (e.g. everything past `until`): still seed
       // the key from the claimed recurNextAt so no retro-spawning can happen.
-      if (!lastKey) lastKey = occurrenceKey(new Date(anchor.recurNextAt));
+      if (!lastKey) lastKey = occurrenceKey(new Date(anchor.recurNextAt), rule.tz);
 
       md.lastSpawnedKey = lastKey;
       if (batch.skipped.length > 0) {

@@ -177,6 +177,9 @@ export function CalendarPage() {
     });
     if (showDeclined) qs.set("declined", "1");
     if (wantTeam) qs.set("calendar", "team");
+    // The zone this grid reads in, so a task date at midnight here is all-day
+    // and on the day the List Calendar shows it (pen test V-41).
+    if (locale.timezone) qs.set("tz", locale.timezone);
     const r = await apiFetch<FeedResponse>(`/api/calendar/events?${qs.toString()}`);
     if (r.ok) {
       setFeed(r.data);
@@ -191,7 +194,7 @@ export function CalendarPage() {
       setLoadFailed(true);
     }
     setLoadedKey(key);
-  }, [rangeFrom, rangeTo, sources, showDeclined, wantTeam]);
+  }, [rangeFrom, rangeTo, sources, showDeclined, wantTeam, locale.timezone]);
 
   useEffect(() => {
     const run = async () => { await load(); };

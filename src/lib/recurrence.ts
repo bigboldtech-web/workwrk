@@ -59,6 +59,59 @@ export interface RecurrenceRule {
    *  (e.g. "09:00"). null/absent = inherit the anchor's time-of-day (the
    *  behavior every stored rule had before this field existed). */
   atTime?: string | null;
+  /** The IANA zone the rule was set in (pen test 2026-11-28, V-42). Every
+   *  weekday, day, month and "HH:MM" of the rule is read on the wall clock
+   *  THERE, so "every Friday at 17:00" stays a Friday at 17:00 for the person
+   *  who set it, across UTC midnight and across a DST change. null/absent =
+   *  the host's zone, which is what every rule got before this field. */
+  tz?: string | null;
+}
+
+/** A zone name Intl knows, or null. */
+export function validZone(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const z = raw.trim();
+  if (!z || z.length > 64) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: z });
+    return z;
+  } catch {
+    return null;
+  }
+}
+
+// ── The wall clock in a zone ───────────────────────────────────────────
+// The arithmetic runs on a "wall date": a Date whose UTC fields ARE the wall
+// clock in the rule's zone, so setUTCDate / setUTCMonth step whole calendar
+// days and months there, never 24-hour lumps across a DST change. Without a
+// zone, the host's local fields, exactly as before.
+
+function wallOf(instant: Date, zone: string | null | undefined): Date {
+  if (!zone) {
+    return new Date(Date.UTC(instant.getFullYear(), instant.getMonth(), instant.getDate(), instant.getHours(), instant.getMinutes(), instant.getSeconds(), instant.getMilliseconds()));
+  }
+  const p: Record<string, string> = {};
+  // hourCycle h23, never hour12:false (which answers "24" for midnight on Node 20).
+  for (const x of new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(instant)) p[x.type] = x.value;
+  const hour = p.hour === "24" ? 0 : Number(p.hour);
+  return new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second), instant.getUTCMilliseconds()));
+}
+
+/** The instant whose wall clock in `zone` reads as `wall`'s UTC fields. A wall time a DST jump skips lands just after it. */
+function instantOf(wall: Date, zone: string | null | undefined): Date {
+  if (!zone) {
+    return new Date(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), wall.getUTCHours(), wall.getUTCMinutes(), wall.getUTCSeconds(), wall.getUTCMilliseconds());
+  }
+  const wanted = wall.getTime();
+  let guess = wanted;
+  for (let i = 0; i < 3; i += 1) {
+    const drift = wanted - wallOf(new Date(guess), zone).getTime();
+    if (drift === 0) break;
+    guess += drift;
+  }
+  return new Date(guess);
 }
 
 // "HH:MM" 24-hour. parseRecurrence + applyTimeOfDay both gate on this so a
@@ -116,23 +169,24 @@ export function parseRecurrence(raw: unknown): RecurrenceRule | null {
   // Explicit time-of-day — absent/invalid parses to null, NEVER invented, so
   // every pre-existing rule keeps inheriting the anchor's time.
   const atTime = typeof o.atTime === "string" && AT_TIME_RE.test(o.atTime) ? o.atTime : null;
+  const tz = validZone(o.tz);
 
   return {
     freq: freq as RecurFreq, interval, trigger, createNew, forever, count, until,
-    resetStatus, syncDue, weekdays, monthDay, yearMonth, yearDay, atTime,
+    resetStatus, syncDue, weekdays, monthDay, yearMonth, yearDay, atTime, tz,
   };
 }
 
-/** The date with the rule's explicit `atTime` applied in LOCAL time, or the
- *  date unchanged when the rule has none (occurrences then inherit the
- *  anchor's time-of-day exactly as before this field existed). Never shifts
- *  the calendar day — occurrenceKey() stays stable either way. */
+/** The date with the rule's explicit `atTime` applied on the wall clock of
+ *  the rule's zone, or the date unchanged when the rule has none (occurrences
+ *  then inherit the anchor's time-of-day exactly as before this field
+ *  existed). Never shifts the calendar day: occurrenceKey() stays stable. */
 export function applyTimeOfDay(date: Date, rule: RecurrenceRule): Date {
   const m = rule.atTime ? AT_TIME_RE.exec(rule.atTime) : null;
   if (!m) return date;
-  const d = new Date(date);
-  d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-  return d;
+  const wall = wallOf(new Date(date), rule.tz);
+  wall.setUTCHours(Number(m[1]), Number(m[2]), 0, 0);
+  return instantOf(wall, rule.tz);
 }
 
 /** True once the series has run its course under a non-forever rule: the
@@ -151,29 +205,31 @@ export function seriesEnded(rule: RecurrenceRule, nextCycle: Date): boolean {
  *  setFullYear handle month-length + leap years). QUARTER = 3 months. Legacy
  *  plain stepping — the calendar fields are handled by the iterator below. */
 export function advanceDate(from: Date | string, rule: RecurrenceRule): Date {
-  const d = new Date(from);
+  const d = wallOf(new Date(from), rule.tz);
   const n = Math.max(1, rule.interval);
   switch (rule.freq) {
-    case "DAY": d.setDate(d.getDate() + n); break;
-    case "WEEK": d.setDate(d.getDate() + 7 * n); break;
-    case "MONTH": d.setMonth(d.getMonth() + n); break;
-    case "QUARTER": d.setMonth(d.getMonth() + 3 * n); break;
-    case "YEAR": d.setFullYear(d.getFullYear() + n); break;
+    case "DAY": d.setUTCDate(d.getUTCDate() + n); break;
+    case "WEEK": d.setUTCDate(d.getUTCDate() + 7 * n); break;
+    case "MONTH": d.setUTCMonth(d.getUTCMonth() + n); break;
+    case "QUARTER": d.setUTCMonth(d.getUTCMonth() + 3 * n); break;
+    case "YEAR": d.setUTCFullYear(d.getUTCFullYear() + n); break;
   }
-  return d;
+  return instantOf(d, rule.tz);
 }
 
-/** ISO weekday of a date: 1=Mon .. 7=Sun. */
-export function isoWeekday(d: Date): number {
-  const w = d.getDay();
+/** ISO weekday of a date (1=Mon .. 7=Sun), in `zone` (the rule's), else the host's. */
+export function isoWeekday(d: Date, zone?: string | null): number {
+  const w = wallOf(d, zone).getUTCDay();
   return w === 0 ? 7 : w;
 }
 
-/** Local-date occurrence key, YYYY-MM-DD. Sorts lexicographically. Used for
- *  spawn idempotency (metadata.lastSpawnedKey / metadata.recurrenceKey). */
-export function occurrenceKey(d: Date): string {
+/** The occurrence key, YYYY-MM-DD, of the day `d` falls on in `zone` (the
+ *  rule's), else the host's. Sorts lexicographically. Used for spawn
+ *  idempotency (metadata.lastSpawnedKey / metadata.recurrenceKey). */
+export function occurrenceKey(d: Date, zone?: string | null): string {
+  const w = wallOf(d, zone);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${w.getUTCFullYear()}-${p(w.getUTCMonth() + 1)}-${p(w.getUTCDate())}`;
 }
 
 // Hard cap on iterator steps so a pathological rule can never spin forever.
@@ -199,17 +255,24 @@ function makeOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => 
 }
 
 function makeRawOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => Date {
-  const anchor = new Date(anchorInput);
+  // On the wall clock of the rule's zone (V-42): the anchor's weekday, day of
+  // month and time of day are THERE, and each grid point is turned back into
+  // the instant it names there. The host's zone when the rule has none.
+  const zone = rule.tz;
+  const anchor = wallOf(new Date(anchorInput), zone);
+  const at = (y: number, m0: number, d: number) =>
+    instantOf(new Date(Date.UTC(y, m0, d, anchor.getUTCHours(), anchor.getUTCMinutes(), anchor.getUTCSeconds(), anchor.getUTCMilliseconds())), zone);
+  const daysIn = (y: number, m0: number) => new Date(Date.UTC(y, m0 + 1, 0)).getUTCDate();
   const n = Math.max(1, rule.interval);
-  const h = anchor.getHours(), mi = anchor.getMinutes(), se = anchor.getSeconds(), ms = anchor.getMilliseconds();
 
   if (rule.freq === "WEEK" && rule.weekdays && rule.weekdays.length > 0) {
     const days = Array.from(new Set(rule.weekdays)).sort((a, b) => a - b);
-    // Monday of the anchor's week — week offsets count from here.
-    const monday = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - (isoWeekday(anchor) - 1));
+    // Monday of the anchor's week, there. Week offsets count from here.
+    const anchorDow = anchor.getUTCDay() === 0 ? 7 : anchor.getUTCDay();
+    const monday = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() - (anchorDow - 1)));
     let w = 0, i = 0;
     return () => {
-      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + w * 7 + (days[i] - 1), h, mi, se, ms);
+      const d = at(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate() + w * 7 + (days[i] - 1));
       i++;
       if (i >= days.length) { i = 0; w += n; }
       return d;
@@ -219,27 +282,26 @@ function makeRawOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () 
     const wanted = Math.min(31, Math.max(1, rule.monthDay));
     let k = 0;
     return () => {
-      const m0 = anchor.getMonth() + k;
+      const first = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + k, 1));
       k += n;
-      const daysInMonth = new Date(anchor.getFullYear(), m0 + 1, 0).getDate();
-      return new Date(anchor.getFullYear(), m0, Math.min(wanted, daysInMonth), h, mi, se, ms);
+      const y = first.getUTCFullYear(), m0 = first.getUTCMonth();
+      return at(y, m0, Math.min(wanted, daysIn(y, m0)));
     };
   }
   if (rule.freq === "YEAR" && rule.yearMonth != null) {
     const m0 = Math.min(12, Math.max(1, rule.yearMonth)) - 1;
-    const wanted = rule.yearDay != null ? Math.min(31, Math.max(1, rule.yearDay)) : anchor.getDate();
+    const wanted = rule.yearDay != null ? Math.min(31, Math.max(1, rule.yearDay)) : anchor.getUTCDate();
     let k = 0;
     return () => {
-      const y = anchor.getFullYear() + k;
+      const y = anchor.getUTCFullYear() + k;
       k += n;
-      const daysInMonth = new Date(y, m0 + 1, 0).getDate();
-      return new Date(y, m0, Math.min(wanted, daysInMonth), h, mi, se, ms);
+      return at(y, m0, Math.min(wanted, daysIn(y, m0)));
     };
   }
   // Legacy grid: the anchor itself, then plain interval steps.
   let cur: Date | null = null;
   return () => {
-    cur = cur === null ? new Date(anchor) : advanceDate(cur, rule);
+    cur = cur === null ? new Date(anchorInput) : advanceDate(cur, rule);
     return new Date(cur);
   };
 }
@@ -300,7 +362,7 @@ export function occurrencesSince(
     const d = next();
     if (d.getTime() > nowT) break; // grid is monotonic
     if (d.getTime() < fromT) continue;
-    const key = occurrenceKey(d);
+    const key = occurrenceKey(d, rule.tz);
     if (afterKey && key <= afterKey) continue;
     eligible.push({ key, date: d });
     if (eligible.length >= 400) break; // sanity ceiling

@@ -36,6 +36,7 @@ import { notifyTargets, readWatchers } from "@/lib/item-watchers";
 import { usersWhoCanRead } from "@/lib/access/node-access";
 import { linkedListsOf } from "@/lib/list-links-server";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { zonesOf } from "@/lib/user-zone.server";
 
 /**
  * Deep link to the standalone task detail page.
@@ -63,11 +64,23 @@ function statusLabel(board: { statuses?: unknown } | null | undefined, value: st
   return opt?.label ?? humanizeStatus(value);
 }
 
-function formatDue(due: Date | string | null | undefined): string | null {
+/** "Dec 5" on the recipient's clock (pen test V-42), never the server's. */
+export function formatDue(due: Date | string | null | undefined, timeZone = "UTC"): string | null {
   if (!due) return null;
   const d = due instanceof Date ? due : new Date(due);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { timeZone, month: "short", day: "numeric" });
+}
+
+/** The recipients grouped by the due date as each one's clock reads it, so each notice names their day. */
+async function byDueLabel(recipientIds: readonly string[], due: Date | string | null | undefined): Promise<Map<string | null, string[]>> {
+  const groups = new Map<string | null, string[]>();
+  const zones = due ? await zonesOf(recipientIds) : new Map<string, string>();
+  for (const id of recipientIds) {
+    const label = formatDue(due, zones.get(id) ?? "UTC");
+    groups.set(label, [...(groups.get(label) ?? []), id]);
+  }
+  return groups;
 }
 
 interface EmitArgs {
@@ -228,7 +241,7 @@ export async function notifyItemAssigned(args: {
 }): Promise<number> {
   if (!args.ownerId || args.ownerId === args.actorId) return 0;
   const who = await actorName(args.actorId);
-  const due = formatDue(args.item.dueAt);
+  const due = formatDue(args.item.dueAt, (await zonesOf([args.ownerId])).get(args.ownerId));
   return emit({
     organizationId: args.organizationId,
     prefKey: "task_assigned",
@@ -282,18 +295,21 @@ export async function notifyNewAssignees(args: {
   const added = newlyOnTask(args.before, args.after, args.actorId, args.alreadyTold);
   if (added.length === 0) return 0;
   const who = await actorName(args.actorId);
-  const due = formatDue(args.item.dueAt);
-  return emit({
-    organizationId: args.organizationId,
-    prefKey: "task_assigned",
-    type: "task_assigned",
-    recipientIds: added,
-    actorId: args.actorId,
-    title: args.item.title,
-    message: `${who} assigned you this task${due ? ` · due ${due}` : ""}`,
-    link: itemLink(args.item.id),
-    itemId: args.item.id,
-  });
+  let told = 0;
+  for (const [due, recipientIds] of await byDueLabel(added, args.item.dueAt)) {
+    told += await emit({
+      organizationId: args.organizationId,
+      prefKey: "task_assigned",
+      type: "task_assigned",
+      recipientIds,
+      actorId: args.actorId,
+      title: args.item.title,
+      message: `${who} assigned you this task${due ? ` · due ${due}` : ""}`,
+      link: itemLink(args.item.id),
+      itemId: args.item.id,
+    });
+  }
+  return told;
 }
 
 /**

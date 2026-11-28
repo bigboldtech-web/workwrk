@@ -10,9 +10,11 @@ import { personalReminderTemplate } from "@/lib/email-templates";
 import { absoluteUrl } from "@/lib/app-url";
 import { WORK_HOME_HREF } from "./nav/route-hub";
 import { liveSeatWhere, seatIsLive, type SeatRow } from "./access/workspace-seat";
+import { zonesOf } from "./user-zone.server";
 
-function fmtDue(d: Date): string {
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+/** "Dec 5, 9:00 AM" on the recipient's clock (pen test V-42), never the server's. */
+export function fmtDue(d: Date, timeZone: string): string {
+  return d.toLocaleString("en-US", { timeZone, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 type DueReminder = {
@@ -76,7 +78,7 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
     if (item && !item.archivedAt) {
       link = `/item/${r.entityId}`;
       title = item.title || r.title;
-      message = item.dueAt ? `Reminder: due ${fmtDue(item.dueAt)}` : `Reminder: ${r.title}`;
+      message = item.dueAt ? `Reminder: due ${fmtDue(item.dueAt, (await zonesOf([r.userId])).get(r.userId) ?? "UTC")}` : `Reminder: ${r.title}`;
     }
   }
   await prisma.notification.create({
