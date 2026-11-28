@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { fetchPublic, readCapped } from "@/lib/net/public-fetch";
+import { parseHeadMeta } from "@/lib/net/html-head";
 
 /*
  * GET /api/link-preview?url=<encoded>
@@ -14,54 +16,10 @@ import { getSessionOrFail, jsonError, jsonSuccess } from "@/lib/api-helpers";
  * the block always renders something.
  */
 
-function attr(html: string, patterns: RegExp[]): string | null {
-  for (const re of patterns) {
-    const m = html.match(re);
-    if (m && m[1]) return decodeEntities(m[1].trim());
-  }
-  return null;
-}
-
-function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x2F;/g, "/");
-}
-
-// Build OG/meta matchers tolerant of attribute ordering (content before or
-// after the property/name attribute).
-function metaPatterns(key: string, kind: "property" | "name"): RegExp[] {
-  const k = key.replace(/[:]/g, "\\:");
-  return [
-    new RegExp(`<meta[^>]+${kind}=["']${k}["'][^>]+content=["']([^"']*)["']`, "i"),
-    new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+${kind}=["']${k}["']`, "i"),
-  ];
-}
-
-// Block SSRF to internal/private addresses. The unfurl is authenticated and
-// best-effort, but an attacker could otherwise point it at the cloud metadata
-// endpoint (169.254.169.254), loopback, or RFC-1918 hosts.
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
-  if (h === "::1" || h === "::") return true; // IPv6 loopback / unspecified
-  if (/^fe80:/i.test(h) || /^f[cd][0-9a-f]{2}:/i.test(h)) return true; // link-local / unique-local
-  const v4 = h.startsWith("::ffff:") ? h.slice(7) : h; // IPv4-mapped IPv6
-  const m = v4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]), b = Number(m[2]);
-    if (a === 0 || a === 10 || a === 127) return true;        // this-host / RFC1918 / loopback
-    if (a === 169 && b === 254) return true;                  // link-local + cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true;         // RFC1918
-    if (a === 192 && b === 168) return true;                  // RFC1918
-    if (a === 100 && b >= 64 && b <= 127) return true;        // CGNAT
-  }
-  return false;
-}
+// Pen test 2026-11-28: the fetch is the shared public one (V-20: the old
+// host-name block let ::ffff:7f00:1, a trailing dot and any name resolving to
+// a private address through), and the page is read by a one-pass scanner
+// (V-10: twelve backtracking regexes over 256 KB froze the server).
 
 export async function GET(req: NextRequest) {
   const { error } = await getSessionOrFail();
@@ -80,9 +38,6 @@ export async function GET(req: NextRequest) {
     return jsonError("Invalid url", 400);
   }
 
-  if (isBlockedHost(target.hostname)) {
-    return jsonError("URL host is not allowed", 400);
-  }
 
   const hostname = target.hostname.replace(/^www\./, "");
   const fallback = {
@@ -97,61 +52,36 @@ export async function GET(req: NextRequest) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
-    // Follow redirects manually so each hop's host is re-validated — otherwise a
-    // public URL could 30x-redirect into the private network (SSRF guard bypass).
-    let current = target;
-    let res: Response;
-    for (let hop = 0; ; hop++) {
-      res = await fetch(current.toString(), {
+    let html = "";
+    try {
+      const res = await fetchPublic(target.toString(), {
         signal: controller.signal,
-        redirect: "manual",
+        maxRedirects: 3,
         headers: {
           // Some sites gate OG tags behind a real UA.
           "user-agent": "Mozilla/5.0 (compatible; WorkwrKBot/1.0; +https://workwrk.app)",
           accept: "text/html,application/xhtml+xml",
         },
       });
-      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-      if (!location) break;
-      if (hop >= 3) { clearTimeout(timeout); return jsonSuccess(fallback); }
-      let next: URL;
-      try { next = new URL(location, current); } catch { clearTimeout(timeout); return jsonSuccess(fallback); }
-      if ((next.protocol !== "http:" && next.protocol !== "https:") || isBlockedHost(next.hostname)) {
-        clearTimeout(timeout);
-        return jsonSuccess(fallback);
-      }
-      current = next;
-    }
-    clearTimeout(timeout);
-    if (!res.ok) return jsonSuccess(fallback);
-
-    // Only read the first ~256KB — meta tags live in <head>.
-    const reader = res.body?.getReader();
-    let html = "";
-    if (reader) {
-      const decoder = new TextDecoder();
-      let received = 0;
-      while (received < 262_144) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        html += decoder.decode(value, { stream: true });
-        if (html.includes("</head>")) break;
-      }
-      await reader.cancel().catch(() => {});
-    } else {
-      html = await res.text();
+      // Refused (not a public address) or failed: the plain fallback, never
+      // the reason, so the preview is no probe of anyone's network.
+      if (!res.ok || res.status < 200 || res.status >= 300) return jsonSuccess(fallback);
+      // Only the first 256 KB, and only up to </head>: meta tags live there.
+      const { bytes } = await readCapped(res.body, 262_144, (soFar) => soFar.includes("</head>"));
+      html = new TextDecoder().decode(bytes);
+    } finally {
+      clearTimeout(timeout);
+      // Every way out drops the connection: an error answer left unread kept
+      // its socket open, and an endless one kept filling memory (the step 2
+      // review).
+      controller.abort();
     }
 
-    const title =
-      attr(html, metaPatterns("og:title", "property")) ??
-      attr(html, [/<title[^>]*>([^<]*)<\/title>/i]) ??
-      fallback.title;
-    const description =
-      attr(html, metaPatterns("og:description", "property")) ??
-      attr(html, metaPatterns("description", "name"));
-    let image = attr(html, metaPatterns("og:image", "property")) ?? attr(html, metaPatterns("twitter:image", "name"));
-    const siteName = attr(html, metaPatterns("og:site_name", "property")) ?? fallback.siteName;
+    const head = parseHeadMeta(html);
+    const title = head.meta.get("og:title") ?? head.title ?? fallback.title;
+    const description = head.meta.get("og:description") ?? head.meta.get("description") ?? null;
+    let image = head.meta.get("og:image") ?? head.meta.get("twitter:image") ?? null;
+    const siteName = head.meta.get("og:site_name") ?? fallback.siteName;
 
     // Resolve protocol-relative / relative image URLs against the target.
     if (image) {

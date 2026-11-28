@@ -98,11 +98,15 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
   const start = async () => {
     setBusy(true);
     try {
-      await fetch("/api/timers/start", {
+      const res = await fetch("/api/timers/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ entityType, entityId }),
       });
+      // Starting here stopped the timer on another task, and logged it (pen
+      // test 2026-11-28, V-16); a week that could not take those hours says so.
+      const body = res.ok ? await res.json().catch(() => null) : null;
+      setBridgeNote((body?.previous?.timesheet?.message as string | undefined) ?? null);
       load();
     } finally {
       setBusy(false);

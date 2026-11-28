@@ -93,7 +93,10 @@ function resolveUnder(resolve: Resolve, host: string, signal?: AbortSignal): Pro
  * Never throws for a bad address; throws only an AbortError when `signal`
  * stops the lookup.
  */
-export async function checkWebhookTarget(raw: unknown, opts: { signal?: AbortSignal; resolve?: Resolve } = {}): Promise<WebhookTarget> {
+export async function checkWebhookTarget(
+  raw: unknown,
+  opts: { signal?: AbortSignal; resolve?: Resolve; /** Default https only (a webhook); the public fetch also takes http. */ schemes?: readonly ("https:" | "http:")[] } = {},
+): Promise<WebhookTarget> {
   if (typeof raw !== "string") return { ok: false, reason: "invalid" };
   let url: URL;
   try {
@@ -101,7 +104,7 @@ export async function checkWebhookTarget(raw: unknown, opts: { signal?: AbortSig
   } catch {
     return { ok: false, reason: "invalid" };
   }
-  if (url.protocol !== "https:") return { ok: false, reason: "not_https" };
+  if (!(opts.schemes ?? ["https:"]).includes(url.protocol as "https:" | "http:")) return { ok: false, reason: "not_https" };
   if (url.username || url.password) return { ok: false, reason: "userinfo" };
   // The URL parser has already read every spelling of an IPv4 address
   // (0x7f.1, 2130706433) as dotted, and lowered the name.
