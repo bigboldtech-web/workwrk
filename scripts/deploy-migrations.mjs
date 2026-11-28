@@ -529,6 +529,13 @@ const SQL_MANIFEST = [
   // order reads; before the reload, so a second row of one person,
   // workspace and week is refused from the new release's first save.
   "2026-11-04-week-rows-per-workspace.sql",
+  // TimeEntry."itemId", its index and its key to "Item" (pen test
+  // 2026-11-28, V-48): the column came in by hand ("prod pending") and no
+  // file ever created it, so a database without it answers 500 on
+  // /api/time/active and on a timesheet. Every step guarded; the key is
+  // added NOT VALID, so no row is read, changed or deleted. On a database
+  // that has them, nothing happens. Either order reads.
+  "2026-11-28-time-entry-item.sql",
 ];
 
 /**

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { requireConversation } from "@/lib/talk-gate";
+import { keyInWorkspace } from "@/lib/storage-key";
 import { canPost } from "@/lib/talk-access";
 import { presignGetUrl } from "@/lib/s3";
 import { publishToConversation } from "@/lib/realtime-bus";
@@ -38,14 +39,14 @@ const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
  * a read serves it (a removed one blanked, attachments freshly signed), or
  * null when there is none.
  */
-async function alreadySent(conversationId: string, authorId: string, clientId: string) {
+async function alreadySent(conversationId: string, authorId: string, clientId: string, organizationId: string) {
   const row = await prisma.conversationMessage.findFirst({
     where: { conversationId, authorId, clientId },
     include: { author: { select: AUTHOR_SELECT } },
   });
   if (!row) return null;
   const replyCount = await prisma.conversationMessage.count({ where: { parentId: row.id, deletedAt: null } });
-  const [served] = await serveMessages([{ ...row, replyCount }], authorId);
+  const [served] = await serveMessages([{ ...row, replyCount }], authorId, organizationId);
   return served;
 }
 
@@ -73,7 +74,7 @@ async function answerDuplicate(conversationId: string, sent: NonNullable<Awaited
  *    when it was posted (Batch 8, src/lib/talk-updates.ts serveAiUpdate);
  *  - S3-backed attachments carry an s3Key and get a fresh presigned
  *    URL on every read (stored URLs expire after an hour). */
-async function serveMessages<T extends { deletedAt: Date | null; metadata: unknown; body: string }>(rows: T[], viewerId: string): Promise<T[]> {
+async function serveMessages<T extends { deletedAt: Date | null; metadata: unknown; body: string }>(rows: T[], viewerId: string, organizationId: string): Promise<T[]> {
   return Promise.all(rows.map(async (row) => {
     if (row.deletedAt) return { ...row, body: "", metadata: null };
     const m = serveAiUpdate(row, viewerId);
@@ -81,6 +82,8 @@ async function serveMessages<T extends { deletedAt: Date | null; metadata: unkno
     if (!meta?.attachments?.some((a) => a.s3Key)) return m;
     const attachments = await Promise.all(meta.attachments.map(async (a) => {
       if (!a.s3Key) return a;
+      // Only a key of this workspace is signed (V-21); another's stays unsigned.
+      if (!keyInWorkspace(a.s3Key, organizationId)) return { ...a, s3Key: undefined };
       try { return { ...a, url: await presignGetUrl(a.s3Key, 3600) }; }
       catch { return a; }
     }));
@@ -180,7 +183,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const hasNewer = newerAsc.length > HALF;          // unread tail below
     const window = [...olderDesc.slice(0, HALF).reverse(), ...newerAsc.slice(0, HALF)];
     const counts = await replyMeta(id, window.map((m) => m.id));
-    const served = await serveMessages(window, viewerId);
+    const served = await serveMessages(window, viewerId, ctx.gate.organizationId);
     return jsonSuccess({
       messages: withReplies(served, counts),
       hasMore,
@@ -204,8 +207,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       take: 200,
       include: { author: { select: AUTHOR_SELECT } },
     });
-    const [servedParent] = await serveMessages([parentMsg], viewerId);
-    const servedReplies = await serveMessages(replies, viewerId);
+    const [servedParent] = await serveMessages([parentMsg], viewerId, ctx.gate.organizationId);
+    const servedReplies = await serveMessages(replies, viewerId, ctx.gate.organizationId);
     return jsonSuccess({
       parent: { ...servedParent, replyCount: replies.filter((r) => !r.deletedAt).length },
       messages: servedReplies,
@@ -234,7 +237,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { author: { select: AUTHOR_SELECT } },
     });
     const counts = await replyMeta(id, messages.filter((m) => !m.parentId).map((m) => m.id));
-    const served = await serveMessages(messages, viewerId);
+    const served = await serveMessages(messages, viewerId, ctx.gate.organizationId);
     const last = messages[messages.length - 1];
     return jsonSuccess({
       messages: withReplies(served, counts),
@@ -266,20 +269,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const hasMore = page.length > PAGE;
   const window = page.slice(0, PAGE);
   const counts = await replyMeta(id, window.map((m) => m.id));
-  const served = await serveMessages(window, viewerId);
+  const served = await serveMessages(window, viewerId, ctx.gate.organizationId);
   const messages = withReplies(served.reverse(), counts);
   return jsonSuccess({ messages, hasMore });
 }
 
 /* ── validation helpers for metadata riders ─────────────────────── */
 
-function cleanAttachments(raw: unknown): { url: string; name: string; type: string; size: number; s3Key?: string }[] | null {
+function cleanAttachments(raw: unknown, organizationId: string): { url: string; name: string; type: string; size: number; s3Key?: string }[] | null {
   if (!Array.isArray(raw)) return null;
   if (raw.length > MAX_ATTACHMENTS) return null;
   const out: { url: string; name: string; type: string; size: number; s3Key?: string }[] = [];
   for (const a of raw) {
     const url = typeof a?.url === "string" ? a.url.slice(0, 2048) : "";
     if (!url || !(url.startsWith("/") || url.startsWith("https://") || url.startsWith("http://"))) return null;
+    // A storage key only of this workspace (V-21): another's is refused.
+    if (typeof a?.s3Key === "string" && a.s3Key && !keyInWorkspace(a.s3Key, organizationId)) return null;
     out.push({
       url,
       name: (typeof a?.name === "string" ? a.name : "file").slice(0, 200),
@@ -306,7 +311,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const payload = await req.json().catch(() => null);
   const text = typeof payload?.body === "string" ? payload.body.trim() : "";
   const isCallCard = payload?.metadata?.kind === "call";
-  const attachments = payload?.metadata?.attachments !== undefined ? cleanAttachments(payload.metadata.attachments) : [];
+  const attachments = payload?.metadata?.attachments !== undefined ? cleanAttachments(payload.metadata.attachments, ctx.gate.organizationId) : [];
   if (attachments === null) return jsonError("Bad attachments", 400);
   if (!text && !isCallCard && attachments.length === 0) return jsonError("Message can't be empty", 400);
   if (text.length > MAX_BODY) return jsonError("Message is too long", 400);
@@ -317,7 +322,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // never a second ring for everyone in the conversation.
   const clientId = typeof payload?.clientId === "string" && CLIENT_ID.test(payload.clientId) ? payload.clientId : null;
   if (clientId) {
-    const sent = await alreadySent(id, userId, clientId);
+    const sent = await alreadySent(id, userId, clientId, ctx.gate.organizationId);
     if (sent) return answerDuplicate(id, sent);
   }
 
@@ -367,7 +372,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!posted.ok) {
     // Two sends with one key at once: the second insert loses on the unique
     // index and is answered with the first one's message.
-    const sent = clientId ? await alreadySent(id, userId, clientId) : null;
+    const sent = clientId ? await alreadySent(id, userId, clientId, ctx.gate.organizationId) : null;
     if (sent) return answerDuplicate(id, sent);
     throw posted.error;
   }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { isSignedOutAppPath } from "@/lib/nav/public-app-paths";
 import { staffWriteOriginRefused, STAFF_WRITE_ORIGIN_REFUSAL } from "@/lib/admin/staff-write-origin";
+import { appWriteOriginRefused, APP_WRITE_ORIGIN_REFUSAL } from "@/lib/security/app-write-origin";
 import { getToken } from "next-auth/jwt";
 import { MFA_HOLD_PAGE, PASSWORD_HOLD_PAGE, mfaHoldAllowsApi, mfaHoldAllowsPage, passwordHoldAllowsApi } from "@/lib/auth/mfa-hold";
 
@@ -172,6 +173,19 @@ export async function proxy(req: NextRequest) {
   //    see staff-write-origin.ts). Applies with or without the host split.
   if (path.startsWith("/api/admin") && staffWriteOriginRefused(req.method, req.headers)) {
     return NextResponse.json({ error: STAFF_WRITE_ORIGIN_REFUSAL }, { status: 403 });
+  }
+  //    Every other app write that carries the session cookie must come from
+  //    this host too (pen test 2026-11-28, V-22; see app-write-origin.ts).
+  if (
+    path.startsWith("/api/") &&
+    appWriteOriginRefused({
+      method: req.method,
+      path,
+      headers: req.headers,
+      hasSessionCookie: req.cookies.has("next-auth.session-token") || req.cookies.has("__Secure-next-auth.session-token"),
+    })
+  ) {
+    return NextResponse.json({ error: APP_WRITE_ORIGIN_REFUSAL }, { status: 403 });
   }
 
   // 1) Admin host split — opt-in via env.

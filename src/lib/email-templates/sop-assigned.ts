@@ -1,4 +1,5 @@
 import { baseLayout } from "./base";
+import { escapeHtml, safeHref } from "./escape";
 
 interface SOPAssignedVars {
   sopTitle: string;
@@ -11,11 +12,11 @@ export function sopAssignedTemplate(vars: SOPAssignedVars): { subject: string; h
     <h1>New SOP assigned</h1>
     <p>You have been assigned a new Standard Operating Procedure to complete:</p>
     <div style="background: #F6F7F9; border: 1px solid #E4E7EC; border-radius: 8px; padding: 16px; margin: 16px 0;">
-      <p style="margin: 0; color: #1F2430; font-weight: 600;">${vars.sopTitle}</p>
-      ${vars.dueDate ? `<p style="margin: 8px 0 0; font-size: 12px; color: #5C6779;">Due by: ${vars.dueDate}</p>` : ""}
+      <p style="margin: 0; color: #1F2430; font-weight: 600;">${escapeHtml(vars.sopTitle)}</p>
+      ${vars.dueDate ? `<p style="margin: 8px 0 0; font-size: 12px; color: #5C6779;">Due by: ${escapeHtml(vars.dueDate)}</p>` : ""}
     </div>
     <p style="text-align: center;">
-      <a href="${vars.sopLink}" class="btn">View SOP</a>
+      <a href="${safeHref(vars.sopLink)}" class="btn">View SOP</a>
     </p>
   `);
 

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { csvFormulaSafe } from "@/lib/csv";
 import { getSessionOrFail, getOrgId, jsonError } from "@/lib/api-helpers";
 import { buildPolicyLedger } from "@/lib/policy-ledger";
 import { personScope } from "@/lib/process-scope";
@@ -20,8 +21,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const ledger = await buildPolicyLedger(id, getOrgId(session), scope.orgWide ? null : scope.userIds);
   if (!ledger) return jsonError("Policy not found", 404);
 
+  // A typed value never runs as a spreadsheet formula (pen test 2026-11-28, V-29).
   const esc = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    const s = csvFormulaSafe(v === null || v === undefined ? "" : String(v));
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const header = ["name", "email", "department", "required", "mandatory", "status", "version_acked", "acknowledged_at", "ip_address", "user_agent", "attestation", "content_hash", "due_date", "days_overdue"];

@@ -5,6 +5,7 @@ import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { filterConnectors } from "@/lib/integrations/registry";
 import { isGoogleEnabled } from "@/services/googleCalendar";
+import { webhookConfigRefusal } from "@/lib/webhooks";
 
 /**
  * GET /api/integrations: the connector catalogue (spec-tools-misc 2.6).
@@ -156,6 +157,9 @@ export async function POST(req: NextRequest) {
   if (!name || !type) {
     return jsonError("Name and type are required");
   }
+  // A webhook address only to a public https receiver (pen test 2026-11-28, V-26).
+  const badUrl = await webhookConfigRefusal(config);
+  if (badUrl) return jsonError(badUrl, 400);
 
   // Check if integration of this type already exists
   const existing = await prisma.integration.findUnique({

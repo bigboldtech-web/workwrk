@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { keyInWorkspace } from "@/lib/storage-key";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { jsonSuccess } from "@/lib/api-helpers";
@@ -72,7 +73,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!Array.isArray(meta?.attachments)) continue;
     for (const a of meta.attachments) {
       let url = a.url;
-      if (a.s3Key) {
+      // Only a key of this workspace is signed (pen test 2026-11-28, V-21).
+      if (a.s3Key && keyInWorkspace(a.s3Key, ctx.gate.organizationId)) {
         try { url = await presignGetUrl(a.s3Key, 3600); } catch { /* the stored URL is the fallback */ }
       }
       flat.push({

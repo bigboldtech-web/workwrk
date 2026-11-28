@@ -10,6 +10,7 @@
 // Falls through cleanly when S3 isn't configured (dev fallback).
 
 import { isS3Configured, presignGetUrl } from "./s3";
+import { keyInWorkspace } from "@/lib/storage-key";
 
 export type EnrichableContent = unknown;
 
@@ -23,7 +24,7 @@ interface ImageOrFileBlock {
   [k: string]: unknown;
 }
 
-export async function presignBlocksImagesAndFiles(content: EnrichableContent): Promise<EnrichableContent> {
+export async function presignBlocksImagesAndFiles(content: EnrichableContent, organizationId: string): Promise<EnrichableContent> {
   if (!isS3Configured()) return content;
   if (!content || typeof content !== "object") return content;
   const c = content as { blocks?: unknown[]; bnDoc?: unknown[] };
@@ -31,13 +32,13 @@ export async function presignBlocksImagesAndFiles(content: EnrichableContent): P
   // Phase A — legacy `blocks` array (still populated as the BN-derived
   // mirror; preserved legacy image/file blocks carry s3Key, so this is
   // the workhorse path).
-  const nextBlocks = await refreshLegacyImageBlocks(c.blocks);
+  const nextBlocks = await refreshLegacyImageBlocks(c.blocks, organizationId);
 
   // Phase B — BlockNote's native `bnDoc` array. No-op today because the
   // default BN image block doesn't carry s3Key; included so when we wire
   // BN's uploader through our S3 layer, the per-read presign Just Works
   // without touching the API route.
-  const nextBnDoc = await refreshBnDocImageBlocks(c.bnDoc);
+  const nextBnDoc = await refreshBnDocImageBlocks(c.bnDoc, organizationId);
 
   if (nextBlocks === c.blocks && nextBnDoc === c.bnDoc) return content;
   return {
@@ -47,14 +48,15 @@ export async function presignBlocksImagesAndFiles(content: EnrichableContent): P
   };
 }
 
-async function refreshLegacyImageBlocks(blocks: unknown[] | undefined): Promise<unknown[] | undefined> {
+async function refreshLegacyImageBlocks(blocks: unknown[] | undefined, organizationId: string): Promise<unknown[] | undefined> {
   if (!Array.isArray(blocks)) return blocks;
   const toRefresh: { idx: number; key: string }[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
     if (!b || typeof b !== "object") continue;
     const block = b as ImageOrFileBlock;
-    if ((block.kind === "image" || block.kind === "file") && typeof block.s3Key === "string" && block.s3Key) {
+    // Only a key of the doc's own workspace is signed (pen test 2026-11-28, V-21).
+    if ((block.kind === "image" || block.kind === "file") && keyInWorkspace(block.s3Key, organizationId)) {
       toRefresh.push({ idx: i, key: block.s3Key });
     }
   }
@@ -79,14 +81,14 @@ async function refreshLegacyImageBlocks(blocks: unknown[] | undefined): Promise<
 // We treat s3Key as an optional escape hatch — when the upload pipeline
 // sets it, the presigner refreshes it. Default BN blocks won't trigger
 // any rewrite.
-async function refreshBnDocImageBlocks(bnDoc: unknown[] | undefined): Promise<unknown[] | undefined> {
+async function refreshBnDocImageBlocks(bnDoc: unknown[] | undefined, organizationId: string): Promise<unknown[] | undefined> {
   if (!Array.isArray(bnDoc)) return bnDoc;
   const toRefresh: { idx: number; key: string }[] = [];
   for (let i = 0; i < bnDoc.length; i++) {
     const b = bnDoc[i];
     if (!b || typeof b !== "object") continue;
     const block = b as { type?: string; props?: { s3Key?: unknown } };
-    if ((block.type === "image" || block.type === "file") && block.props && typeof block.props.s3Key === "string" && block.props.s3Key) {
+    if ((block.type === "image" || block.type === "file") && block.props && keyInWorkspace(block.props.s3Key, organizationId)) {
       toRefresh.push({ idx: i, key: block.props.s3Key });
     }
   }

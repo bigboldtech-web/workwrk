@@ -115,7 +115,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // stored URL is a 1-hour signature; re-signing per read keeps doc
   // viewing fast and the URL always usable, mirroring the SOP
   // screenshot enrichment pattern.
-  const enriched = { ...doc, content: await presignBlocksImagesAndFiles(doc.content) };
+  const enriched = { ...doc, content: await presignBlocksImagesAndFiles(doc.content, ctx.orgId) };
 
   // Lock page (change request A4): while lockedById is set everyone below
   // Full access reads as view-only on the CONTENT; comments keep working, which

@@ -81,7 +81,7 @@ export async function GET(
   const enriched = await enrichScribeScreenshots(sop as Parameters<typeof enrichScribeScreenshots>[0]);
   // For blocks-format WRITTEN SOPs, also refresh image / file URLs.
   const final = enriched && enriched.content
-    ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content) }
+    ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content, orgId) }
     : enriched;
   return jsonSuccess({
     ...final,

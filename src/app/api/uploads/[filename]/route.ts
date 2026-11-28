@@ -32,11 +32,18 @@ export async function GET(
     const buffer = await readUpload(filename);
     if (!buffer) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
+    // Images (avatars, logos, pictures in a page) stay cacheable anywhere. A
+    // file is someone's attachment: no shared cache keeps a copy, and no
+    // browser keeps it past an hour (pen test 2026-11-28, V-23: every file
+    // here was "public, immutable" for a year, so a proxy or CDN could serve
+    // it long after the person lost access or the file was trashed).
+    const image = !!MIME_TYPES[ext];
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=31536000, immutable",
-        ...(MIME_TYPES[ext] ? {} : { "Content-Disposition": "attachment" }),
+        "Cache-Control": image ? "public, max-age=31536000, immutable" : "private, max-age=3600",
+        "X-Robots-Tag": "noindex",
+        ...(image ? {} : { "Content-Disposition": "attachment" }),
       },
     });
   } catch {
