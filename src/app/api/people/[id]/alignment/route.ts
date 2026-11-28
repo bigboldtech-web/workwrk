@@ -5,7 +5,7 @@
 // line, the People team and org-wide levels. Peers get a 404, not a peek.
 
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { alignmentPersonCard } from "@/lib/people/alignment-card.server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
 import { buildPersonAlignment } from "@/lib/person-alignment";
@@ -25,28 +25,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return jsonError("Not found", 404);
   }
 
-  const person = await prisma.user.findFirst({
-    where: { id, organizationId: orgId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      // The JD, Role.description is the mission the career home renders
-      // under "My role"; level + department frame it.
-      role: {
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          level: true,
-          department: { select: { id: true, name: true } },
-        },
-      },
-      manager: { select: { id: true, firstName: true, lastName: true } },
-    },
-  });
-  if (!person) return jsonError("User not found", 404);
+  // The person by the seat they hold HERE (pen test 2026-11-28, V-43): job
+  // title, department and manager are that seat's (alignment-card.server.ts).
+  const card = await alignmentPersonCard(orgId, id);
+  if (!card) return jsonError("User not found", 404);
+  const person = card;
 
   const quarter = new URL(req.url).searchParams.get("quarter");
   const alignment = await buildPersonAlignment(orgId, id, { quarter });

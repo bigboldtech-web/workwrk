@@ -10,6 +10,7 @@
 // Server-only.
 
 import { prisma } from "@/lib/prisma";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { parseKpiNumber } from "@/lib/kpi-record-status";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import { dispatchEvent } from "@/services/webhookDispatcher";
@@ -143,6 +144,8 @@ export async function recordIntegrationKpi(
   if ("record" in answer && answer.changed) {
     // Non-blocking fan-out, only for a reading that changed something.
     triggerRecalculation(userId, organizationId);
+    // The goals this KPI feeds, as every other number writer does (V-32).
+    refreshGoalsFedBy(organizationId, [kpiId]);
     dispatchEvent({ organizationId, event: "kpi.recorded", payload: answer.record }).catch(() => {});
   }
   return answer;

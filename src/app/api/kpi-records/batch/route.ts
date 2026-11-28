@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { personHere } from "@/lib/access/seated-here";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
@@ -25,11 +27,9 @@ export async function POST(req: NextRequest) {
     return jsonError("Numbers can only be recorded for this month or last month.", 400);
   }
 
-  // Verify user belongs to org
-  const user = await prisma.user.findFirst({
-    where: { id: userId, organizationId: orgId },
-    select: { id: true },
-  });
+  // A person by the seat they hold here, a membership one too (pen test
+  // 2026-11-28, V-43, the step 4c review).
+  const user = await personHere(orgId, String(userId), "kept");
   if (!user) return jsonError("User not found", 404);
 
   // A manager records numbers for their own report tree only; org-wide
@@ -133,6 +133,8 @@ export async function POST(req: NextRequest) {
 
   // Recalculate performance score once
   triggerRecalculation(userId, orgId);
+  // The stored progress of every goal these KPIs feed (V-32).
+  refreshGoalsFedBy(orgId, rows.map((r) => r.kpiId));
   if (!isSelf) void notifyKpiRecordedForYou({ userId, actorId, period, count: newlyApproved });
 
   return jsonSuccess({ saved: results.length, period });

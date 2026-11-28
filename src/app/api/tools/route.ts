@@ -6,6 +6,8 @@
 // POST /api/tools: add a tool (a manager or above, unchanged).
 
 import { NextRequest } from "next/server";
+import type { Prisma } from "@/generated/prisma";
+import { openLogin, sealLegacyLogins, sealLogin } from "@/lib/tools/tool-credentials";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity, logAuditEvent } from "@/lib/activity";
@@ -46,6 +48,11 @@ export async function GET(req: NextRequest) {
     take: 500,
   });
 
+  // A login saved before the seal is sealed now, every one this list holds,
+  // in the background (V-27, the step 4c review: a login nobody opened stayed
+  // plain, and an empty one is cleared).
+  void sealLegacyLogins(tools.map((t) => ({ id: t.id, credentials: t.credentials })));
+
   const peopleIds = [...new Set(tools.flatMap((t) => [t.addedBy, ...t.shares.map((s) => s.userId)]))];
   const people = peopleIds.length
     ? await prisma.user.findMany({ where: { id: { in: peopleIds }, organizationId: v.orgId }, select: { id: true, firstName: true, lastName: true, avatar: true } })
@@ -58,7 +65,7 @@ export async function GET(req: NextRequest) {
       const manage = canShareTool(v, t, share);
       return {
         ...t,
-        hasLogin: hasLogin(credentials),
+        hasLogin: hasLogin(openLogin(credentials)),
         // canManage: share and delete it. With the roles on (the flag),
         // canEdit: change it (category, fields, login).
         canManage: manage,
@@ -85,7 +92,9 @@ export async function POST(req: NextRequest) {
   const name = typeof body?.name === "string" ? body.name.trim().slice(0, 120) : "";
   if (!name) return jsonError("Tool name is required");
   const str = (x: unknown, max: number) => (typeof x === "string" && x.trim() ? x.trim().slice(0, max) : null);
-  const credentials = body?.credentials && typeof body.credentials === "object" && hasLogin(body.credentials) ? body.credentials : undefined;
+  const typed = body?.credentials && typeof body.credentials === "object" && !Array.isArray(body.credentials) && hasLogin(body.credentials) ? body.credentials : undefined;
+  // Kept sealed (pen test 2026-11-28, V-27).
+  const credentials = typed ? sealLogin(typed) : undefined;
 
   const tool = await prisma.tool.create({
     data: {
@@ -94,7 +103,7 @@ export async function POST(req: NextRequest) {
       url: str(body?.url, 500),
       icon: str(body?.icon, 16),
       category: str(body?.category, 60),
-      credentials,
+      credentials: credentials as Prisma.InputJsonValue | undefined,
       addedBy: v.userId,
       organizationId: v.orgId,
     },

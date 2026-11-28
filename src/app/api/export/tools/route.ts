@@ -6,6 +6,7 @@
 // product in a file.
 
 import { NextRequest } from "next/server";
+import { openLogin } from "@/lib/tools/tool-credentials";
 import { prisma } from "@/lib/prisma";
 import { jsonError } from "@/lib/api-helpers";
 import { csvFilename, csvFormulaSafe, toCsv, type CsvCell } from "@/lib/csv";
@@ -43,13 +44,13 @@ export async function GET(req: NextRequest) {
   const name = new Map(people.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim()]));
   const text = (x: string | null | undefined) => (x ? csvFormulaSafe(x) : "");
   const data: Record<string, CsvCell>[] = tools
-    .filter((t) => wantLogin === "yes" ? hasLogin(t.credentials) : wantLogin === "no" ? !hasLogin(t.credentials) : true)
+    .filter((t) => wantLogin === "yes" ? hasLogin(openLogin(t.credentials)) : wantLogin === "no" ? !hasLogin(openLogin(t.credentials)) : true)
     .map((t) => ({
       Name: text(t.name),
       Category: text(t.category),
       Website: text(t.url),
       Description: text(t.description),
-      Login: hasLogin(t.credentials) ? "Saved" : "None",
+      Login: hasLogin(openLogin(t.credentials)) ? "Saved" : "None",
       "Shared with": t.shares.length,
       "Added by": text(name.get(t.addedBy) ?? ""),
       Added: t.createdAt.toISOString().slice(0, 10),

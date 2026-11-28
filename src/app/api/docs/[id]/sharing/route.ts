@@ -20,6 +20,7 @@
 // Changing either switch needs Can edit or higher (today's doc sharing rule).
 
 import { NextResponse } from "next/server";
+import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { docAccess } from "@/lib/doc-access";
@@ -36,12 +37,20 @@ const patchSchema = z.object({
   publicLink: z.boolean().optional(),
 });
 
-function sharingPayload(entry: DocSharingFact | undefined, docId: string, canShare: boolean) {
+function sharingPayload(entry: DocSharingFact | undefined, docId: string, canShare: boolean, publicLinksAllowed: boolean) {
   return {
     restricted: !!entry?.restricted,
     members: entry?.members ?? {},
     publicUrl: canShare && entry?.publicSecret ? `/share/doc/${docId}.${entry.publicSecret}` : null,
+    // The workspace's Public links switch (Settings): off, no doc may turn
+    // one on (pen test 2026-11-28, V-31).
+    publicLinksAllowed,
   };
+}
+
+async function publicLinksAllowedIn(orgId: string): Promise<boolean> {
+  const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+  return orgPublicLinksAllowed(org?.settings);
 }
 
 /** Two members maps say the same thing, the creator's own row aside (the older server stripped it). */
@@ -71,7 +80,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const entry = (await docSharingEntries(ctx.organizationId, [doc.id])).get(doc.id);
 
   return NextResponse.json(
-    { sharing: sharingPayload(entry, doc.id, access.canShare), myRole: access.legacy, createdById: doc.createdById },
+    { sharing: sharingPayload(entry, doc.id, access.canShare, await publicLinksAllowedIn(ctx.organizationId)), myRole: access.legacy, createdById: doc.createdById },
     { headers: NO_STORE },
   );
 }
@@ -102,6 +111,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   const { restricted, publicLink } = parsed.data;
+  // With Public links off for the workspace, none is turned on (pen test
+  // 2026-11-28, V-31: the switch minted a secret and handed out a link that
+  // did not open, and every secret minted while off went live the day the
+  // admin turned links back on). Turning one off always works.
+  const linksAllowed = await publicLinksAllowedIn(ctx.organizationId);
+  if (publicLink === true && !linksAllowed) {
+    const message = "Public links are off for this workspace. An admin can turn them on in Settings.";
+    return NextResponse.json({ error: "public_links_off", message }, { status: 403, headers: NO_STORE });
+  }
   if (restricted !== undefined || publicLink !== undefined) {
     try {
       await setDocGeneral(ctx, doc.id, { restricted, publicLink });
@@ -117,7 +135,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const entry = (await docSharingEntries(ctx.organizationId, [doc.id])).get(doc.id);
   return NextResponse.json(
-    { sharing: sharingPayload(entry, doc.id, true), myRole: access.legacy, createdById: doc.createdById },
+    { sharing: sharingPayload(entry, doc.id, true, linksAllowed), myRole: access.legacy, createdById: doc.createdById },
     { headers: NO_STORE },
   );
 }

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { goalsFedBy, refreshGoals, refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
@@ -158,6 +159,8 @@ export async function PATCH(req: NextRequest) {
     },
   });
 
+  // A KPI's target or direction feeds the goals it measures (V-32).
+  refreshGoalsFedBy(getOrgId(session), [id]);
   return jsonSuccess(kpi);
 }
 
@@ -185,7 +188,10 @@ export async function DELETE(req: NextRequest) {
     return jsonError("This KPI has recorded values or feeds a goal. Only an Admin, the Owner, HR or an executive can delete it.", 403);
   }
 
+  // The goals it feeds, read before the delete unlinks them, re-saved after (V-32).
+  const fedGoals = await goalsFedBy(getOrgId(session), [id]);
   await prisma.kPI.delete({ where: { id } });
+  await refreshGoals(getOrgId(session), fedGoals);
 
   return jsonSuccess({ message: "KPI deleted" });
 }

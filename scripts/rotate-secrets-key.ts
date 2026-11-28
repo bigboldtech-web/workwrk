@@ -61,6 +61,10 @@
 //   TeammateTokenRevocation.tokenSealed          a revoke Google has not confirmed yet
 //   WebhookSubscription.secretSealed             a webhook's signing secret (may be
 //                                                empty on an older subscription)
+//   Tool.credentials                             a tool's saved login (pen test V-27; may
+//                                                be empty; a login saved before the seal
+//                                                is plain JSON, and --write seals it with
+//                                                the new key)
 // The plan is worked out by scripts/lib/rotation-plan.ts planRotation, which
 // rotation-plan.test.ts holds to every column.
 

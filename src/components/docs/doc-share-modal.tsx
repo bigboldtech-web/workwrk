@@ -37,6 +37,8 @@ interface SharingState {
   restricted: boolean;
   members: Record<string, DocRole>;
   publicUrl: string | null;
+  /** The workspace's Public links switch (V-31); a link already on can still be turned off. */
+  publicLinksAllowed: boolean;
 }
 
 interface Props {
@@ -84,6 +86,7 @@ export function DocShareModal({
           restricted: !!d.sharing?.restricted,
           members: d.sharing?.members ?? {},
           publicUrl: d.sharing?.publicUrl ?? null,
+          publicLinksAllowed: d.sharing?.publicLinksAllowed !== false,
         });
       } catch { /* panel stays in loading state */ }
     })();
@@ -156,6 +159,7 @@ export function DocShareModal({
         restricted: !!d.sharing.restricted,
         members: d.sharing.members ?? {},
         publicUrl: d.sharing.publicUrl ?? null,
+        publicLinksAllowed: d.sharing.publicLinksAllowed !== false,
       };
     } catch {
       return null;
@@ -255,11 +259,14 @@ export function DocShareModal({
                 </span>
                 <Switch
                   checked={!!sharing?.publicUrl}
-                  disabled={!sharing}
+                  disabled={!sharing || (!sharing.publicUrl && !sharing.publicLinksAllowed)}
                   onChange={(next) => void togglePublic(next)}
                   aria-label="Public share link"
                 />
               </div>
+              {sharing && !sharing.publicLinksAllowed && !sharing.publicUrl ? (
+                <p className="mt-1 text-xs text-ink-3">Public links are off for this workspace. An admin can turn them on in Settings.</p>
+              ) : null}
               {sharing?.publicUrl ? (
                 <>
                   <button
