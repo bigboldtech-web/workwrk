@@ -677,7 +677,18 @@ const REGISTRY: Record<TrashType, Entry> = {
       };
     },
     restore: async (s, db = prisma) => {
-      const tree = [s.row, ...(s.children?.subtasks ?? [])];
+      // A subtask's parent (pen test 2026-11-28, V-55): restored first while
+      // it sits in Trash (the refusal names it), and gone for good, the task
+      // comes back on its own in its List instead of failing on the missing
+      // parent forever.
+      const root = { ...(s.row as Record<string, unknown>) };
+      const parentId = typeof root.parentItemId === "string" ? root.parentItemId : null;
+      if (parentId && !(await db.item.findUnique({ where: { id: parentId }, select: { id: true } }))) {
+        const parked = await prisma.trashItem.findFirst({ where: { entityType: "item", entityId: parentId }, select: { id: true } });
+        if (parked) throw new Error(PARENT_TASK_IN_TRASH);
+        root.parentItemId = null;
+      }
+      const tree = [root as Row, ...(s.children?.subtasks ?? [])];
       await createItemsParentsFirst(tree, db);
       // Back on the home each task comes back to ("Restore to..." moves it).
       const homeOf = new Map(tree.map((r) => [String(r.id), String(r.boardId)]));
@@ -1264,6 +1275,8 @@ export async function restoreFromTrash(
 
 /** What a restore throws when the row was taken first (a purge, or another person's restore). */
 export const NO_LONGER_IN_TRASH = "This item is no longer in Trash.";
+/** A subtask whose parent task is itself in Trash (pen test V-55). */
+export const PARENT_TASK_IN_TRASH = "Its parent task is in Trash. Restore that task first.";
 
 // Permanently delete trash older than 60 days for an org, freeing file blobs.
 export async function purgeExpiredTrash(organizationId: string): Promise<void> {

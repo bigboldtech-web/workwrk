@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { quarterRange } from "@/lib/goals/quarter-range";
 import { settleOnRead } from "@/lib/goals/goal-periods.server";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, enrichKeyResultGroups, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
@@ -49,7 +50,26 @@ export async function GET(req: Request) {
   // Resolved membership: goals assigned to me, my department, or my role.
   const myTagIds = await getUserTagIds(orgId, userId);
   or.push(...memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
-  const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
+  // In this quarter (pen test 2026-11-28, V-62): goals labelled with it, and
+  // goals with no quarter label whose dates touch it, or that have no dates
+  // at all. Only the exact label counted before, so every goal made from the
+  // goal modal (dates, no quarter) was missing here.
+  const range = quarterRange(quarter);
+  const inQuarter: Prisma.OKRWhereInput = range
+    ? {
+        OR: [
+          { quarter },
+          {
+            quarter: null,
+            AND: [
+              { OR: [{ startDate: null }, { startDate: { lt: range.end } }] },
+              { OR: [{ endDate: null }, { endDate: { gte: range.start } }] },
+            ],
+          },
+        ],
+      }
+    : { quarter };
+  const where: Prisma.OKRWhereInput = { organizationId: orgId, AND: [inQuarter, { OR: or }] };
 
   // Repeating goals in this set open any period they are missing first (docs/plans/recurring-goals.md B3).
   const repeating = await prisma.oKR.findMany({ where: { ...where, repeat: { not: null } }, select: { id: true } });

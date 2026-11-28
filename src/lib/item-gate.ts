@@ -142,7 +142,7 @@ async function loadItem(itemId: string) {
 }
 
 /** Rule 5: the creator, read back from the CREATED activity row. */
-async function creatorIdOf(organizationId: string, itemId: string): Promise<string | null> {
+export async function creatorIdOf(organizationId: string, itemId: string): Promise<string | null> {
   try {
     const row = await prisma.itemActivity.findFirst({
       where: { organizationId, entityType: "BOARD_ITEM", entityId: itemId, action: "CREATED" },

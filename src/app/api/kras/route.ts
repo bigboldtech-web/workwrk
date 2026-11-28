@@ -1,5 +1,5 @@
 import { orgRoleOf } from "@/lib/access/org-role";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
@@ -272,8 +272,22 @@ export async function DELETE(req: NextRequest) {
   if ((existing._count.assignments > 0 || existing._count.kpis > 0) && !isOrgWideAlignment(session)) {
     return jsonError("This KRA is assigned to people or has KPIs. Only an Admin, the Owner, HR or an executive can delete it.", 403);
   }
+  // Its KPIs would be left with no KRA, their records with them, on no
+  // screen at all (pen test 2026-11-28, V-60). They are moved or deleted
+  // first, where they can be seen; then the KRA goes.
+  if (existing._count.kpis > 0) {
+    const n = existing._count.kpis;
+    const message = `This KRA has ${n} KPI${n === 1 ? "" : "s"}. Move ${n === 1 ? "it" : "them"} to another KRA or delete ${n === 1 ? "it" : "them"} first.`;
+    return NextResponse.json({ error: message, code: "kra_has_kpis", message }, { status: 409 });
+  }
 
-  await prisma.kRA.delete({ where: { id } });
+  await prisma.$transaction([
+    prisma.kRA.delete({ where: { id } }),
+    // The links that named it (a goal's "aligned to" KRA) and the tasks
+    // tagged with it go with it, instead of pointing at nothing.
+    prisma.entityLink.deleteMany({ where: { organizationId: getOrgId(session), OR: [{ sourceType: "KRA", sourceId: id }, { targetType: "KRA", targetId: id }] } }),
+    prisma.$executeRaw`UPDATE "Item" SET metadata = metadata - 'kraId' WHERE "organizationId" = ${getOrgId(session)} AND metadata->>'kraId' = ${id}`,
+  ]);
 
   return jsonSuccess({ message: "KRA deleted" });
 }

@@ -36,6 +36,7 @@ import { notifyTargets, readWatchers } from "@/lib/item-watchers";
 import { usersWhoCanRead } from "@/lib/access/node-access";
 import { linkedListsOf } from "@/lib/list-links-server";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { creatorIdOf } from "@/lib/item-gate";
 import { zonesOf } from "@/lib/user-zone.server";
 
 /**
@@ -368,7 +369,19 @@ export async function notifyItemStatusChanged(args: {
   // the thread (watchers, past commenters) under "Status changes on tasks I
   // follow" (decided addition c). One person is in one group only.
   const mine = [args.ownerId].filter(keep);
-  const followed = [...participants, ...watchers].filter((id) => keep(id) && id !== args.ownerId);
+  // The person who asked for the task hears when someone else finishes it
+  // (pen test 2026-11-28, V-56): the creator is not auto-watched, so the
+  // requester heard nothing when the assignee closed it.
+  const nowDone = isDoneStatus(getBoardStatuses(args.board), args.status) && !isDoneStatus(getBoardStatuses(args.board), args.previousStatus);
+  let creator: string | null = null;
+  if (nowDone) {
+    try {
+      creator = await creatorIdOf(args.organizationId, args.item.id);
+    } catch {
+      // Best effort: the owner and the followers are still told.
+    }
+  }
+  const followed = [...new Set([...participants, ...watchers, ...(creator && creator !== args.actorId ? [creator] : [])])].filter((id) => keep(id) && id !== args.ownerId);
   const base = {
     organizationId: args.organizationId,
     type: "task_status_changed",

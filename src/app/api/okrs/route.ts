@@ -472,7 +472,12 @@ export async function POST(req: NextRequest) {
   // Door 1: an employee's objective is their OWN, they can't file goals
   // under someone else's name. Managers may assign anyone in the org.
   // A cross-org or unknown ownerId is a bad request body → 400.
-  const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
+  // A personal goal always has an owner (pen test 2026-11-28, V-62): a
+  // manager's INDIVIDUAL goal with no ownerId was stored owned by nobody and
+  // reached no one's Home. It is the creator's unless they name someone.
+  const effectiveOwnerId = isManager(session)
+    ? (ownerId || ((normalizeGoalLevel(level) ?? "INDIVIDUAL") === "INDIVIDUAL" ? getUserId(session) : null))
+    : getUserId(session);
   if (effectiveOwnerId) {
     // A seat here: anchored here as before, or here through a membership
     // whose seat here is live (E12, step 6, and its review M2), since the
