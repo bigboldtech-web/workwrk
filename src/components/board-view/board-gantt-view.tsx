@@ -112,6 +112,17 @@ function dayKeyAfter(d: Date, deltaDays: number): string {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * The column of the calendar day `d` falls on, counted from the window's first
+ * day (local midnight). Whole calendar days, rounded: a day after a
+ * spring-forward change is 23 hours on, and a floor of the hours put a date
+ * stored at local midnight in the column before (the step 6 review).
+ */
+export function dayColumn(d: Date, anchor: Date): number {
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((day - anchor.getTime()) / MS_PER_DAY);
+}
+
 /** Midnight, where the viewer is, of the day `deltaDays` after `d`, as an ISO instant. */
 function shiftToIso(d: Date, deltaDays: number): string {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + deltaDays).toISOString();
@@ -271,9 +282,7 @@ export function BoardGanttView({
 
   const totalDays = weekCount * 7;
   const windowEnd = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + totalDays);
-  const todayCol = Math.floor(
-    (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - anchor.getTime()) / MS_PER_DAY,
-  );
+  const todayCol = dayColumn(today, anchor);
   const todayInWindow = todayCol >= 0 && todayCol < totalDays;
 
   // ── Drag / resize ────────────────────────────────────────────────
@@ -813,8 +822,8 @@ export function BoardGanttView({
                       </button>
                     );
                   }
-                  const startDay = Math.max(0, Math.floor((s.getTime() - anchor.getTime()) / MS_PER_DAY));
-                  const endDay = Math.min(totalDays - 1, Math.floor((e.getTime() - anchor.getTime()) / MS_PER_DAY));
+                  const startDay = Math.max(0, dayColumn(s, anchor));
+                  const endDay = Math.min(totalDays - 1, dayColumn(e, anchor));
                   const startCol = startDay;
                   const spanCols = Math.max(1, endDay - startDay + 1);
 

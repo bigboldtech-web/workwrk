@@ -69,3 +69,41 @@ describe("the rule's zone on the wire", () => {
     expect(occurrenceKey(due)).toBe(`${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`);
   });
 });
+
+describe("a time a DST change skips or repeats (the step 6 review)", () => {
+  const daysOf2027 = Array.from({ length: 365 }, (_, i) => new Date(Date.UTC(2027, 0, 1 + i, 12)));
+  const key = (d: Date) => d.toISOString().slice(0, 10);
+
+  it("midnight lands on its own day in zones that change their clocks at midnight", () => {
+    for (const tz of ["Asia/Beirut", "Africa/Cairo", "America/Santiago", "America/Havana", "America/Asuncion"]) {
+      const r = rule({ atTime: "00:00", tz });
+      for (const noon of daysOf2027) {
+        const day = occurrenceKey(noon, tz);
+        expect(occurrenceKey(applyTimeOfDay(noon, r), tz), `${tz} ${key(noon)}`).toBe(day);
+      }
+    }
+  });
+
+  it("02:30 on a spring-forward night in Berlin is 03:30 that day, every other day 02:30", () => {
+    const r = rule({ atTime: "02:30", tz: "Europe/Berlin" });
+    const clock = (d: Date) => new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+    for (const noon of daysOf2027) {
+      const at = applyTimeOfDay(noon, r);
+      expect(occurrenceKey(at, "Europe/Berlin"), key(noon)).toBe(occurrenceKey(noon, "Europe/Berlin"));
+      expect(clock(at), key(noon)).toBe(key(noon) === "2027-03-28" ? "03:30" : "02:30");
+    }
+  });
+
+  it("a daily rule stepping through a midnight gap keeps its day and its midnight", () => {
+    const r = rule({ tz: "Asia/Beirut" });
+    let d = applyTimeOfDay(new Date("2027-03-20T12:00:00Z"), rule({ atTime: "00:00", tz: "Asia/Beirut" }));
+    const keys: string[] = [];
+    for (let i = 0; i < 14; i += 1) {
+      d = advanceDate(d, r);
+      keys.push(occurrenceKey(d, "Asia/Beirut"));
+    }
+    expect(new Set(keys).size).toBe(14);
+    expect(keys[0]).toBe("2027-03-21");
+    expect(keys[13]).toBe("2027-04-03");
+  });
+});

@@ -69,7 +69,7 @@ export const TASK_STRIP_IDS = [
  */
 export const TASK_METADATA_KEYS: readonly string[] = [
   ...TASK_LEVEL_METADATA_KEYS,
-  "recurrence", "recurrenceKey", "recurrenceSourceId", "lastSpawnedKey", "skippedOccurrences",
+  "recurrence", "recurrenceKey", "recurrenceSourceId", "recurrenceZone", "lastSpawnedKey", "skippedOccurrences",
   "legacyTask", "legacyTaskId",
   LISTS_NS, CONNECT_KEYS_META,
 ];

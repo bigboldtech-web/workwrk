@@ -594,7 +594,7 @@ function RepeatTab({
   const [interval, setIntervalN] = useState<number>(rule?.interval ?? 1);
   const [trigger, setTrigger] = useState<RecurTrigger>(rule?.trigger === "ON_COMPLETE" ? "ON_COMPLETE" : "SCHEDULE");
   const [weekdays, setWeekdays] = useState<number[]>(
-    rule?.weekdays?.length ? [...rule.weekdays].sort((a, b) => a - b) : [isoWeekday(dueDate, rule?.tz)],
+    rule?.weekdays?.length ? [...rule.weekdays].sort((a, b) => a - b) : [isoWeekday(dueDate, browserZone())],
   );
   const [monthDay, setMonthDay] = useState<number>(rule?.monthDay ?? dueDate.getDate());
   const [yearMonth, setYearMonth] = useState<number>(rule?.yearMonth ?? dueDate.getMonth() + 1);

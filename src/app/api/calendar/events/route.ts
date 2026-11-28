@@ -95,13 +95,14 @@ interface CalEvent {
   /**
    * The day column an ALL-DAY row belongs to, "YYYY-MM-DD", already decided.
    *
-   * A date-only task carries a CALENDAR DAY and not an instant: the column
-   * stores it at 00:00 UTC, the same way `TimeEntry.day` does. Bucketing that
-   * instant in the viewer's zone moves it a day earlier for anyone west of
-   * UTC, which is how a task due on the 25th rendered as a one-hour block at
-   * 8pm on the 24th. So the server sends the day it NAMES and the client uses
-   * it verbatim. Absent on timed rows, which are instants and are bucketed in
-   * the viewer's zone as before.
+   * A date-only task carries a CALENDAR DAY and not an instant: it is stored
+   * as midnight where the person who picked it was (src/lib/item-date.ts
+   * hasTimeOfDay), and it is all-day here when it is midnight in the zone the
+   * Planner draws in (?tz=, pen test V-41). The server sends the day it reads
+   * as there and the client uses it verbatim. Absent on timed rows, which are
+   * instants and are bucketed in the viewer's zone as before. (Dates the
+   * Gantt wrote at 00:00 UTC before V-41 read as timed outside UTC, on the
+   * same day the List Calendar files them under.)
    */
   dayKey?: string;
   /** A teammate's row whose title must not be sent (Team view). */

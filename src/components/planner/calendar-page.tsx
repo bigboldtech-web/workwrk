@@ -83,6 +83,15 @@ type OpenPopover =
   | { kind: "reminder"; event: CalEvent; anchor: DOMRect }
   | { kind: "day"; dayKey: string; anchor: DOMRect };
 
+/** The browser's IANA zone, the grid's own fallback, or null where Intl cannot say. */
+function browserZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 export function CalendarPage() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -177,9 +186,11 @@ export function CalendarPage() {
     });
     if (showDeclined) qs.set("declined", "1");
     if (wantTeam) qs.set("calendar", "team");
-    // The zone this grid reads in, so a task date at midnight here is all-day
-    // and on the day the List Calendar shows it (pen test V-41).
-    if (locale.timezone) qs.set("tz", locale.timezone);
+    // The zone this grid draws in (the preferred one, else the browser's, as
+    // the grid itself resolves it), so a task date at midnight here is
+    // all-day and on the day the List Calendar shows it (pen test V-41).
+    const gridZone = locale.timezone ?? browserZone();
+    if (gridZone) qs.set("tz", gridZone);
     const r = await apiFetch<FeedResponse>(`/api/calendar/events?${qs.toString()}`);
     if (r.ok) {
       setFeed(r.data);

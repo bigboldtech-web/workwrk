@@ -20,6 +20,7 @@ export const INTERNAL_METADATA_KEYS: readonly string[] = [
   "skippedOccurrences",
   "recurrenceSourceId",
   "recurrenceKey",
+  "recurrenceZone",
   "watchers",
   "unwatchers",
   "followers",

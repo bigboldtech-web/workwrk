@@ -99,19 +99,32 @@ function wallOf(instant: Date, zone: string | null | undefined): Date {
   return new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second), instant.getUTCMilliseconds()));
 }
 
-/** The instant whose wall clock in `zone` reads as `wall`'s UTC fields. A wall time a DST jump skips lands just after it. */
+/** How far `zone`'s wall clock is ahead of UTC at this instant, in ms. */
+function offsetAt(ms: number, zone: string): number {
+  return wallOf(new Date(ms), zone).getTime() - ms;
+}
+
+/**
+ * The instant whose wall clock in `zone` reads as `wall`'s UTC fields. A wall
+ * time a DST change repeats takes the later one; one a change skips moves on
+ * by the jump (02:30 on a spring-forward night is 03:30), as a JS Date does,
+ * in every zone, east or west of UTC (the step 6 review: an iterated guess
+ * swung across the gap and could land on the day before).
+ */
 function instantOf(wall: Date, zone: string | null | undefined): Date {
   if (!zone) {
     return new Date(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), wall.getUTCHours(), wall.getUTCMinutes(), wall.getUTCSeconds(), wall.getUTCMilliseconds());
   }
   const wanted = wall.getTime();
-  let guess = wanted;
-  for (let i = 0; i < 3; i += 1) {
-    const drift = wanted - wallOf(new Date(guess), zone).getTime();
-    if (drift === 0) break;
-    guess += drift;
-  }
-  return new Date(guess);
+  const o1 = offsetAt(wanted, zone);
+  const t1 = wanted - o1;
+  const o2 = offsetAt(t1, zone);
+  if (o2 === o1) return new Date(t1);
+  const t2 = wanted - o2;
+  if (offsetAt(t2, zone) === o2) return new Date(t2);
+  // Neither offset reads back: the wall time falls in a gap. The offset in
+  // force before the change (the smaller) carries it past the gap.
+  return new Date(wanted - Math.min(o1, o2));
 }
 
 // "HH:MM" 24-hour. parseRecurrence + applyTimeOfDay both gate on this so a
