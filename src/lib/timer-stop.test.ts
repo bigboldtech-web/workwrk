@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TimerSession } from "@/generated/prisma";
 
 // Pen test 2026-11-28 (V-16): starting a timer on a second task stopped the
 // first with a bare update and never logged it, so a task switch dropped the
 // earlier hours from the person's week.
 
-type Session = { id: string; organizationId: string; userId: string; entityType: string; entityId: string; startedAt: Date; stoppedAt: Date | null; durationMs: number | null };
+type Session = TimerSession;
 const sessions = new Map<string, Session>();
 const items = new Map<string, { id: string; title: string; organizationId: string }>();
 const logged: Array<{ itemId: string; durationMs: number }> = [];
@@ -33,7 +34,7 @@ const { stopTimerSession } = await import("./timer-stop");
 
 const ctx = { orgId: "org", userId: "u" };
 const running = (id: string, entityId: string, startedAt: Date): Session => {
-  const s = { id, organizationId: "org", userId: "u", entityType: "BOARD_ITEM", entityId, startedAt, stoppedAt: null, durationMs: null };
+  const s: Session = { id, organizationId: "org", userId: "u", entityType: "BOARD_ITEM", entityId, startedAt, stoppedAt: null, durationMs: 0, notes: null, createdAt: startedAt, updatedAt: startedAt };
   sessions.set(id, s);
   return { ...s };
 };
