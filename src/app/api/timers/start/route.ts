@@ -28,6 +28,9 @@ export async function POST(req: Request) {
   // A task's timer only on a task this person can open (pen test 2026-11-28,
   // V-24 and V-59): a timer on any id, another company's or a private task's,
   // was accepted, and the timesheet then showed that task's title.
+  // A timer runs on a task, and only on a task: any other target was taken as
+  // is and its time was lost on stop (V-59). Every timer in the product is a task's.
+  if (parsed.data.entityType !== "BOARD_ITEM") return NextResponse.json({ error: "A timer runs on a task." }, { status: 400 });
   const refused = await taskTimerRefusal(parsed.data.entityType, parsed.data.entityId);
   if (refused) return refused;
 

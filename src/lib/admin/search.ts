@@ -9,6 +9,7 @@
 
 import type { Prisma } from "@/generated/prisma";
 import { planLabel, statusLabel } from "@/lib/staff-audit-helpers";
+import { escapeLike } from "@/lib/like-escape";
 
 export const SEARCH_TYPES = ["companies", "staff", "codes"] as const;
 export type SearchType = (typeof SEARCH_TYPES)[number];
@@ -57,9 +58,7 @@ export function boundedInt(raw: string | null | undefined, fallback: number, min
  * every company and "_" in a code matched any character, breaking the
  * exact-or-prefix promise. Backslash is Postgres's default LIKE escape.
  */
-export function escapeLike(q: string): string {
-  return q.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
+export { escapeLike };
 
 /**
  * Companies by name, slug or sign-in domain, case-insensitive substring.

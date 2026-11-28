@@ -32,6 +32,9 @@ export function videoEmbedSrc(raw: string): string | null {
   const candidate = (iframeSrc ?? raw).trim();
   let u: URL;
   try { u = new URL(candidate); } catch { return null; }
+  // https only: a framed page never comes over plain http (pen test
+  // 2026-11-28, V-51).
+  if (u.protocol !== "https:") return null;
   const host = u.hostname.replace(/^www\./, "").toLowerCase();
 
   // YouTube (watch, short link, shorts, embed)
@@ -105,9 +108,15 @@ function VideoPlayer({ url }: { url: string }) {
   if (src) {
     return (
       <div className="my-1.5 relative w-full max-w-[720px] rounded-lg overflow-hidden bg-black" style={{ aspectRatio: "16 / 9" }}>
+        {/* Sandboxed (pen test 2026-11-28, V-51): a pasted embed or any
+            "/embed/" URL is a third-party page inside a doc, and a public doc
+            share. It may run its player and open its own links in a new tab,
+            never navigate this page, submit a form or show a dialog. */}
         <iframe
           src={src}
           className="absolute inset-0 w-full h-full"
+          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
+          referrerPolicy="strict-origin-when-cross-origin"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowFullScreen
           title="Embedded video"
