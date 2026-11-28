@@ -5,7 +5,7 @@ import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
-import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
+import { ORG_WIDE_ALIGNMENT_LEVELS, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { logActivity } from "@/lib/activity";
 import { KPI_ORDER } from "@/lib/alignment";
 import type { Prisma } from "@/generated/prisma";
@@ -262,8 +262,16 @@ export async function DELETE(req: NextRequest) {
 
   const existing = await prisma.kRA.findFirst({
     where: { id, organizationId: getOrgId(session) },
+    select: { id: true, _count: { select: { assignments: true, kpis: true } } },
   });
   if (!existing) return jsonError("KRA not found", 404);
+  // A delete removes every person's assignment of it and leaves its KPIs
+  // without a KRA (pen test 2026-11-28, V-12: any team lead or manager did
+  // it, with no undo). Assigned or measured, only the org-wide roles may
+  // (Admin, Owner, HR, executives: the roles trusted with anyone's KRAs).
+  if ((existing._count.assignments > 0 || existing._count.kpis > 0) && !isOrgWideAlignment(session)) {
+    return jsonError("This KRA is assigned to people or has KPIs. Only an Admin, the Owner, HR or an executive can delete it.", 403);
+  }
 
   await prisma.kRA.delete({ where: { id } });
 

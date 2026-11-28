@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { canCreateDocAt, docAccess, docAccessible } from "@/lib/doc-access";
-import { requireDocRole } from "@/lib/doc-sharing";
+import { docStandingNow } from "@/lib/doc-sharing";
 import { nodeCtxFromLevel } from "@/lib/access/node-access";
 import { roleAtLeast } from "@/lib/access/node-rules";
 import { moveDestinations } from "@/lib/access/node-placement";
@@ -188,9 +188,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  const role = await requireDocRole(ctx, { id, createdById: existing.createdById });
-  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
+  // Move to Trash is Full access, as the menu offers it (pen test
+  // 2026-11-28, V-14: any Can edit member trashed a doc through the API, a
+  // locked one included, though the menu offers it to Full only).
+  const standing = await docStandingNow(ctx, { id });
+  if (!roleAtLeast(standing.unlockedRole, "VIEW")) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!standing.canManage) {
+    const message = "Only someone with Full access can move this doc to Trash.";
+    return NextResponse.json({ error: message, code: "forbidden", message }, { status: 403 });
+  }
   if (existing.archivedAt) return NextResponse.json({ ok: true, alreadyArchived: true });
 
   // Soft-archive only — the row stays, versions stay.

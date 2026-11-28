@@ -28,7 +28,7 @@
 // FUTURE doc subroute must do the same.
 
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { docRoleFor, nodeCtxFromLevel, type NodeCtx } from "@/lib/access/node-access";
+import { docRoleFor, nodeCtxFromLevel, type DocRoleInfo, type NodeCtx } from "@/lib/access/node-access";
 
 export type DocRole = "edit" | "view";
 
@@ -92,6 +92,20 @@ export async function requireDocRole(
 ): Promise<DocRole | null> {
   const info = await docRoleFor(nodeCtxFromLevel(viewer.userId, viewer.orgId, viewer.accessLevel), doc.id);
   return info.legacy;
+}
+
+/**
+ * The viewer's standing on the page right now, from the one resolver: `role`
+ * has the page lock applied, `canManage` is Full access. For the doc writes
+ * the legacy role let past a lock (pen test 2026-11-28, V-14: a member the
+ * lock left on Can comment still trashed the doc or restored an old version
+ * over it).
+ */
+export async function docStandingNow(
+  viewer: { orgId: string; userId: string; accessLevel: string | null | undefined },
+  doc: { id: string },
+): Promise<DocRoleInfo> {
+  return docRoleFor(nodeCtxFromLevel(viewer.userId, viewer.orgId, viewer.accessLevel), doc.id);
 }
 
 /**

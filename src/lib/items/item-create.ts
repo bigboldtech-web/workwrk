@@ -23,7 +23,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { canContributeBoard, getBoardForReader } from "@/lib/board";
 import { createBoardItem, getBoardItemRow, PRIORITY_OPTIONS } from "@/lib/board-items";
-import { notifyItemAssigned } from "@/lib/notify-item";
+import { notifyItemAssigned, notifyNewAssignees } from "@/lib/notify-item";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { unknownUserIds } from "@/lib/assignable";
 import { prisma } from "@/lib/prisma";
@@ -209,12 +209,23 @@ export async function createItemAs(c: ItemCreateCtx, id: string, body: unknown):
     // defaults chose the people (the client sent none), the person they chose
     // hears about it exactly as if the creator had picked them.
     const peopleSent = sentKeys.has("assigneeIds") || sentKeys.has("ownerId");
+    const ownerTold = parsed.data.ownerId ?? (peopleSent ? null : item.ownerId ?? null);
     await notifyItemAssigned({
       organizationId: c.organizationId,
       item: { id: item.id, title: item.title, dueAt: item.dueAt ?? null },
-      ownerId: parsed.data.ownerId ?? (peopleSent ? null : item.ownerId ?? null),
+      ownerId: ownerTold,
       actorId: c.userId,
     });
+    // Everyone else the new task was given to (V-15: a create with
+    // assigneeIds, from MCP, an AI teammate or the API, told no one).
+    await notifyNewAssignees({
+      organizationId: c.organizationId,
+      item: { id: item.id, title: item.title, dueAt: item.dueAt ?? null },
+      before: { ownerId: null, assigneeIds: [] },
+      after: { ownerId: item.ownerId ?? null, assigneeIds: item.assigneeIds },
+      actorId: c.userId,
+      alreadyTold: [ownerTold],
+    }).catch(() => 0);
     // The automation event for a task made in the app (until now only the
     // v1 API and the ingest route emitted it, so "When a task is created"
     // never fired for a task made in a List). Flat payload, the same fields

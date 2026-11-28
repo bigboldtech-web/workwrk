@@ -2393,7 +2393,12 @@ function VersionHistoryPanel({ docId, onClose, onRestore, restoreBlocked = null 
     setRestoring(true);
     try {
       const res = await fetch(`/api/docs/${docId}/versions/${selectedId}`, { method: "POST" });
-      if (!res.ok) { toast("Restore failed"); return; }
+      if (!res.ok) {
+        // The server's reason (a locked page, a read-only seat), not a bare "failed".
+        const d = await res.json().catch(() => null);
+        toast(typeof d?.message === "string" ? `Couldn't restore: ${d.message}` : "Restore failed");
+        return;
+      }
       onRestore(preview.blocks, preview.meta, preview.title);
       toast("Version restored");
     } catch { toast("Restore failed"); }

@@ -1,6 +1,25 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { isOrgWideAlignment } from "@/lib/alignment-scope";
+import { getTeamUserIds } from "@/lib/team";
+
+/**
+ * Changing or removing someone's KRA assignment follows the rule that giving
+ * one does (POST /api/kra-assignments): an org-wide role anywhere, a manager
+ * or team lead only for the people in their own report tree (pen test
+ * 2026-11-28, V-13: any team lead rewrote or removed the KRA weights of
+ * anyone, executives and other managers' reports included, and the weights
+ * feed the performance score).
+ */
+async function mayChangeAssignmentOf(session: unknown, orgId: string, personId: string): Promise<boolean> {
+  if (isOrgWideAlignment(session)) return true;
+  // Never one's own: the report tree starts at the caller, and changing one's
+  // own weights moves one's own performance score (the step 3 review).
+  if (personId === getUserId(session)) return false;
+  const teamIds = await getTeamUserIds(orgId, getUserId(session));
+  return teamIds.includes(personId);
+}
 
 export async function PUT(
   req: NextRequest,
@@ -20,6 +39,9 @@ export async function PUT(
     where: { id, kra: { organizationId: orgId } },
   });
   if (!existing) return jsonError("Assignment not found", 404);
+  if (!(await mayChangeAssignmentOf(session, orgId, existing.userId))) {
+    return jsonError("You can only change KRAs of people who report to you.", 403);
+  }
 
   // The person's other KRA weights in this period (for the soft over-100
   // signal below). Zero unless the weightage is actually changing.
@@ -86,6 +108,9 @@ export async function DELETE(
     where: { id, kra: { organizationId: orgId } },
   });
   if (!existing) return jsonError("Assignment not found", 404);
+  if (!(await mayChangeAssignmentOf(session, orgId, existing.userId))) {
+    return jsonError("You can only remove KRAs of people who report to you.", 403);
+  }
 
   await prisma.kRAAssignment.delete({ where: { id } });
 

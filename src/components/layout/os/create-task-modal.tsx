@@ -387,7 +387,7 @@ export function CreateTaskModal() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Templates: org-shared task presets.
-  type TemplateRow = { id: string; name: string; config: Record<string, unknown> };
+  type TemplateRow = { id: string; name: string; config: Record<string, unknown>; canEdit?: boolean };
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [tplMode, setTplMode] = useState<"root" | "use" | "instant" | "update" | "save">("root");
   const [tplNameDraft, setTplNameDraft] = useState("");
@@ -961,15 +961,19 @@ export function CreateTaskModal() {
   };
 
   const updateTemplate = async (tpl: TemplateRow) => {
-    await fetch(`/api/item-templates/${tpl.id}`, {
+    const res = await fetch(`/api/item-templates/${tpl.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ config: serializeConfig() }),
-    }).catch(() => {});
+    }).catch(() => null);
     await refreshTemplates();
     setTplMode("root");
     setOpenMenu(null);
-    setNotice(`Updated template “${tpl.name}”`);
+    // Said only when it landed (the step 3 review: a refused update read
+    // "Updated" and changed nothing).
+    if (res?.ok) { setNotice(`Updated template “${tpl.name}”`); return; }
+    const d = res ? await res.json().catch(() => null) : null;
+    setNotice(typeof d?.error === "string" ? d.error : `Couldn't update “${tpl.name}”. Try again.`);
   };
 
   // Build a create-item payload straight from a template config (used by
@@ -1732,8 +1736,10 @@ export function CreateTaskModal() {
                       <div className="max-h-[240px] overflow-y-auto">
                         {templates.length === 0 ? (
                           <div className="px-4 py-5 text-center text-base text-zinc-400">No templates yet.<br />Save one with “Save as template”.</div>
+                        ) : tplMode === "update" && !templates.some((t) => t.canEdit !== false) ? (
+                          <div className="px-4 py-5 text-center text-base text-zinc-400">Only the person who saved a template, an Admin or the Owner can update it.</div>
                         ) : (
-                          templates.map((tpl) => (
+                          (tplMode === "update" ? templates.filter((t) => t.canEdit !== false) : templates).map((tpl) => (
                             <button
                               key={tpl.id}
                               type="button"

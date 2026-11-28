@@ -349,7 +349,7 @@ export const kudosMock = {
 // ── The rest createItemAs reaches ──
 
 export const quietMocks = {
-  notifyItem: { notifyItemAssigned: async () => undefined, notifyItemStatusChanged: async () => undefined, notifyItemCommented: async () => undefined },
+  notifyItem: { notifyItemAssigned: async () => undefined, notifyNewAssignees: async () => 0, notifyItemStatusChanged: async () => undefined, notifyItemCommented: async () => undefined },
   dispatcher: { dispatchEvent: async () => undefined },
   assignable: {
     unknownUserIds: async (ids: string[], organizationId: string) => {
