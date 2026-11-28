@@ -150,3 +150,36 @@ describe("the people a description tags", () => {
     expect(h.announced).toEqual([]);
   });
 });
+
+// Pen test 2026-11-28, V-33: two people on one task at once. The admin saved
+// first; the manager's save was made from the old state.
+describe("two people editing a task's description or checklist at once", () => {
+  it("a description typed over an older text is merged with what is stored: both paragraphs stay", async () => {
+    h.stored = { description: "Old\n\nadmin wrote this paragraph" };
+    const r = await send({ metadataPatch: { description: "Old\n\nmanager text" }, descriptionBase: "Old" });
+    expect(r.status).toBe(200);
+    expect(h.stored).toMatchObject({ description: "Old\n\nadmin wrote this paragraph\n\nmanager text" });
+    expect(h.writes[0]).not.toHaveProperty("descriptionBase");
+  });
+
+  it("guard: typed over the text still stored, the save is exactly the editor's text", async () => {
+    expect((await send({ metadataPatch: { description: "Old, edited" }, descriptionBase: "Old" })).status).toBe(200);
+    expect(h.stored).toMatchObject({ description: "Old, edited" });
+  });
+
+  it("a checklist change lands on the list as stored, whatever list the body carries", async () => {
+    h.stored = { checklist: [{ text: "a1", done: false }], description: "Old" };
+    const r = await send({ metadataPatch: { checklist: [{ text: "b1", done: false }] }, checklistOp: { kind: "add", text: "b1" } });
+    expect(r.status).toBe(200);
+    expect(h.stored).toMatchObject({ checklist: [{ text: "a1", done: false }, { text: "b1", done: false }], description: "Old" });
+    expect(h.writes[0]).not.toHaveProperty("checklistOp");
+    // A tick made from a list that did not yet show "b1" still finds its item.
+    await send({ checklistOp: { kind: "toggle", index: 0, text: "a1", done: true } });
+    expect(h.stored.checklist).toEqual([{ text: "a1", done: true }, { text: "b1", done: false }]);
+  });
+
+  it("refuses a checklist change of an unknown kind", async () => {
+    expect((await send({ checklistOp: { kind: "rename", index: 0, text: "x" } })).status).toBe(400);
+    expect(h.writes).toEqual([]);
+  });
+});

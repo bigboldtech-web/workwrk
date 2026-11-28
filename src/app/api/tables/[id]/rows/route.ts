@@ -161,50 +161,52 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const rowId = typeof body.id === "string" ? body.id : null;
   if (!rowId) return jsonError("row id required");
 
-  const existing = await prisma.dataTableRow.findFirst({
-    where: { id: rowId, tableId: id, deletedAt: null },
-    select: { id: true, values: true },
-  });
-  if (!existing) return jsonError("row not found", 404);
-
-  // Phase 5c cross-client guard. An optional `expect` map ({ colId:
-  // previousStoredValue }) makes this PATCH conditional: it is compared
-  // against the row read above, the SAME read the merge below uses, so the
-  // check costs no extra query and check+merge see one snapshot. On any
-  // mismatch NOTHING is written (not even body.position) and the 409 hands
-  // back the row's live values so the losing client absorbs them instead of
-  // silently overwriting the other author's cell. No expect = today's
-  // unconditional merge, which paste/fill/undo rely on: overwriting a range
-  // is intentional there. A concurrent write can still land in the
-  // microseconds between this read and the update below, the guard shrinks
-  // the silent-loss window, it does not (and cannot, without row locks this
-  // path doesn't otherwise need) close it; realtime sync is SSE-gated
-  // future work.
   const expected =
     typeof body.expect === "object" && body.expect !== null && !Array.isArray(body.expect)
       ? (body.expect as Record<string, unknown>)
       : null;
-  if (expected) {
-    // ?? {}: this codebase always writes an object, but a legacy/hand-edited
-    // row with Json null must degrade to "every cell absent", not a 500.
-    const conflictCols = expectConflicts((existing.values ?? {}) as Record<string, unknown>, expected);
-    if (conflictCols.length > 0) {
+  const incoming = typeof body.values === "object" && body.values !== null ? body.values : null;
+
+  // The read, the check and the merge run on the LOCKED row (pen test
+  // 2026-11-28, V-35): two people editing different cells of one row each
+  // merged into the row as they had read it, and the later write put the
+  // other's cell back, while both got 200. Now the second waits for the
+  // first and merges onto its write.
+  const outcome = await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM "DataTableRow" WHERE id = ${rowId} AND "tableId" = ${id} AND "deletedAt" IS NULL FOR UPDATE`;
+    if (locked.length === 0) return { kind: "missing" as const };
+    const existing = await tx.dataTableRow.findUnique({ where: { id: rowId }, select: { id: true, values: true } });
+    if (!existing) return { kind: "missing" as const };
+
+    // Phase 5c cross-client guard. An optional `expect` map ({ colId:
+    // previousStoredValue }) makes this PATCH conditional: it is compared
+    // against the row read above, the SAME read the merge below uses. On any
+    // mismatch NOTHING is written (not even body.position) and the 409 hands
+    // back the row's live values so the losing client absorbs them instead of
+    // silently overwriting the other author's cell. No expect = an
+    // unconditional merge, which paste/fill/undo rely on: overwriting a range
+    // is intentional there. The row lock closes the window between the
+    // check and the write.
+    if (expected) {
+      // ?? {}: this codebase always writes an object, but a legacy/hand-edited
+      // row with Json null must degrade to "every cell absent", not a 500.
+      const conflictCols = expectConflicts((existing.values ?? {}) as Record<string, unknown>, expected);
       // `existing` was read scoped to THIS table (and the table to this org)
       // above, so `current` can never leak another table's row.
-      return jsonSuccess({ conflict: true, current: existing.values, conflictCols }, 409);
+      if (conflictCols.length > 0) return { kind: "conflict" as const, current: existing.values, conflictCols };
     }
-  }
 
-  const incoming = typeof body.values === "object" && body.values !== null ? body.values : null;
-  const data: Record<string, unknown> = {};
-  if (incoming) {
-    const merged = { ...((existing.values ?? {}) as Record<string, unknown>), ...incoming };
-    data.values = merged as Prisma.InputJsonValue;
-  }
-  if (typeof body.position === "number") data.position = body.position;
-
-  const updated = await prisma.dataTableRow.update({ where: { id: rowId }, data });
-  return jsonSuccess(updated);
+    const data: Record<string, unknown> = {};
+    if (incoming) {
+      const merged = { ...((existing.values ?? {}) as Record<string, unknown>), ...incoming };
+      data.values = merged as Prisma.InputJsonValue;
+    }
+    if (typeof body.position === "number") data.position = body.position;
+    return { kind: "updated" as const, row: await tx.dataTableRow.update({ where: { id: rowId }, data }) };
+  });
+  if (outcome.kind === "missing") return jsonError("row not found", 404);
+  if (outcome.kind === "conflict") return jsonSuccess({ conflict: true, current: outcome.current, conflictCols: outcome.conflictCols }, 409);
+  return jsonSuccess(outcome.row);
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

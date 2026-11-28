@@ -73,7 +73,7 @@ export interface TaskContext {
 }
 
 /** What a write answered, for the one caller that must know (a Connect cell). */
-export type TaskPatchResult = { ok: true } | { ok: false; status: number; payload: unknown };
+export type TaskPatchResult = { ok: true; payload: unknown } | { ok: false; status: number; payload: unknown };
 
 export interface UseTask {
   item: BoardItemRow | null;
@@ -294,7 +294,7 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
         } else {
           await reload();
         }
-        return res.ok ? { ok: true } : { ok: false, status: res.status, payload };
+        return res.ok ? { ok: true, payload } : { ok: false, status: res.status, payload };
       } catch {
         setSaveStatus("error");
         await reload();

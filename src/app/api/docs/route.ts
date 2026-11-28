@@ -111,14 +111,20 @@ async function pagedList(req: Request, ctx: SuiteCtx) {
   // The views row's counts, from the same gated set the rows come from
   // (spec-docs-knowledge section 2: "the sidebar badge counts and the page
   // counts come from the same query"). Sub-docs follow the same Include rule.
-  const counts = {
-    all: 0, recent: 0, my: 0, shared: 0, favorites: 0,
-  } as Record<"all" | "recent" | "my" | "shared" | "favorites", number>;
+  //
+  // `badgeCounts` are the same counts by the page's DEFAULT rule (sub-docs
+  // left out), whatever this request asked: the sidebar reads the whole tree
+  // (sub-docs included) and showed those counts as its badges, so its "Shared
+  // with me" said 33 where the page's tab said 31 (pen test 2026-11-28, V-46).
+  type Counts = Record<"all" | "recent" | "my" | "shared" | "favorites", number>;
+  const counts: Counts = { all: 0, recent: 0, my: 0, shared: 0, favorites: 0 };
+  const badgeCounts: Counts = { all: 0, recent: 0, my: 0, shared: 0, favorites: 0 };
   for (const d of gated) {
     const row: DocsCandidate = { ...d, sharedWithMe: !!sharing[d.id]?.members?.[ctx.userId] };
-    if (!q.includeChildren && row.parentId) continue;
-    for (const v of Object.keys(counts) as (keyof typeof counts)[]) {
-      if (matchesView(row, v, facts)) counts[v] += 1;
+    for (const v of Object.keys(counts) as (keyof Counts)[]) {
+      if (!matchesView(row, v, facts)) continue;
+      if (q.includeChildren || !row.parentId) counts[v] += 1;
+      if (!row.parentId) badgeCounts[v] += 1;
     }
   }
 
@@ -190,7 +196,7 @@ async function pagedList(req: Request, ctx: SuiteCtx) {
     };
   });
 
-  return NextResponse.json({ data, total: sorted.length, nextCursor, counts });
+  return NextResponse.json({ data, total: sorted.length, nextCursor, counts, badgeCounts });
 }
 
 export async function GET(req: Request) {

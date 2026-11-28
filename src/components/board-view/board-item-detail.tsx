@@ -58,13 +58,17 @@ import { Picker, PickerFooterRow, type PickerSectionDef } from "@/components/ui/
 import { Avatar, AvatarStack, personLabel, type AvatarPerson } from "@/components/ui/avatar-stack";
 import { LightEditor } from "@/components/ui/light-editor";
 import {
+  draftValue,
   initAutosave,
   onSent,
+  onSaved,
   onServerValue,
   onTyped,
   retryDelayMs,
+  savedDescriptionOf,
   shouldCommit,
 } from "@/lib/autosave-field";
+import type { ChecklistOp } from "@/lib/items/checklist-op";
 import { Dots } from "@/components/ui/dots";
 import { CommentThread } from "@/components/comments/comment-thread";
 import { useItemFields } from "@/hooks/use-item-fields";
@@ -95,6 +99,10 @@ export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   watcherIds?: string[];
   /** Who this save's description tags; the server tells the newly named. */
   mentionedUserIds?: string[];
+  /** The description this edit was typed over: the server merges, never erases (pen test V-33). */
+  descriptionBase?: string;
+  /** One checklist change, applied by the server to the list as stored (pen test V-33). */
+  checklistOp?: ChecklistOp;
   /** Phase 2, "Move to list…". */
   boardId?: string;
 };
@@ -131,7 +139,8 @@ interface BoardItemDetailProps {
   currentUserId: string | null;
   customFields: FieldDef[];
   statusOptions: StatusOption[];
-  onPatch: (body: DetailPatch, optimistic?: Partial<BoardItemRow>) => void;
+  /** The write's answer, when the host has one (use-task's patch): the description reads the text the server saved. */
+  onPatch: (body: DetailPatch, optimistic?: Partial<BoardItemRow>) => void | Promise<unknown>;
   /** Three hosts, one prop (spec section 0, Cross-unit conflicts). */
   host?: DetailHost;
   /** `?comment=<updateId>`, anchor the thread on one comment. */
@@ -448,7 +457,9 @@ export function BoardItemDetail({
           canEdit={canEdit}
           draft={descriptionDraft}
           onDraftChange={(v) => onDraftChange?.({ description: v })}
-          onSave={(desc, tagged) => onPatch({ metadataPatch: metadataPatch({ description: desc }), ...(tagged.length ? { mentionedUserIds: tagged } : {}) })}
+          onSave={(desc, tagged, base) =>
+            onPatch({ metadataPatch: metadataPatch({ description: desc }), descriptionBase: base, ...(tagged.length ? { mentionedUserIds: tagged } : {}) })
+          }
         />
       </section>
 
@@ -527,7 +538,7 @@ export function BoardItemDetail({
 
       {/* 6, checklist */}
       {showChecklist ? (
-        <ItemChecklist item={item} canEdit={canEdit} onSave={(checklist) => onPatch({ metadataPatch: metadataPatch({ checklist }) })} />
+        <ItemChecklist item={item} canEdit={canEdit} onSave={(checklist, op) => onPatch({ metadataPatch: metadataPatch({ checklist }), checklistOp: op })} />
       ) : null}
 
       {/* 7 and 8, attachments and Related, sectioned by kind (d) */}
@@ -1519,7 +1530,8 @@ function DescriptionField({
   canEdit: boolean;
   draft: string | null;
   onDraftChange: (v: string) => void;
-  onSave: (description: string, mentionedUserIds: string[]) => void;
+  /** `base` is the stored text the edit was typed over; the answer, when there is one, carries the text saved. */
+  onSave: (description: string, mentionedUserIds: string[], base: string) => void | Promise<unknown>;
 }) {
   const stored = typeof item.metadata?.description === "string" ? (item.metadata.description as string) : "";
   const [editing, setEditing] = useState(false);
@@ -1544,6 +1556,17 @@ function DescriptionField({
   useEffect(() => {
     if (confirmed) onDraftChange("");
   }, [confirmed, onDraftChange]);
+  // A save the server answered with a merged text (V-33) is taken in the
+  // answer, not in the render, so the draft store follows here: cleared when
+  // the field is clean, the words carried onto the merge when it is not.
+  const [adopted, setAdopted] = useState(0);
+  const handledAdopt = useRef(0);
+  const draftNow = draftValue(reconciled);
+  useEffect(() => {
+    if (adopted === handledAdopt.current) return;
+    handledAdopt.current = adopted;
+    onDraftChange(draftNow);
+  }, [adopted, draftNow, onDraftChange]);
 
   // Who the typeahead has put in this text so far: every save sends the ones
   // still named, and the server tells only those the saved text newly names.
@@ -1554,8 +1577,20 @@ function DescriptionField({
 
   const commit = useCallback(() => {
     if (!shouldCommit(reconciled, value, stored)) return;
-    setSave((s) => onSent(s, value));
-    onSave(value, surviving(taggedRef.current, value));
+    const sent = value;
+    setSave((s) => onSent(s, sent));
+    // Typed over `synced`, the server value this edit started from. When
+    // somebody saved meanwhile, the server merges the two (pen test V-33) and
+    // answers with the merged text, which this field then holds as saved.
+    const answer = onSave(sent, surviving(taggedRef.current, sent), reconciled.synced);
+    if (answer && typeof (answer as Promise<unknown>).then === "function") {
+      void (answer as Promise<unknown>).then((r) => {
+        const saved = savedDescriptionOf(r);
+        if (saved === null) return;
+        setSave((s) => onSaved(s, sent, saved));
+        setAdopted((n) => n + 1);
+      });
+    }
   }, [reconciled, value, stored, onSave]);
 
   // Autosave 2s after the last keystroke, and on blur (design-system 5.17),

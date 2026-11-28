@@ -21,7 +21,15 @@
 // replace them. The only thing that ever overwrites local text is a server
 // value arriving while nothing is unconfirmed.
 //
-// Pure module: no imports, no React, no clock.
+// Pure module: no React, no clock; its one import (the text merge) is pure too.
+//
+// TWO PEOPLE AT ONCE (pen test 2026-11-28, V-33). A save carries the server
+// text it was typed over; when somebody saved in between, the server merges
+// the two and answers with the merged text, which is not what was sent. The
+// field then takes the merged text as saved (onSaved), or, when the person
+// kept typing meanwhile, carries what they typed since onto it.
+
+import { mergeText } from "./text-merge";
 
 export interface AutosaveState {
   /** What the person can see in the box. */
@@ -69,6 +77,31 @@ export function onServerValue(state: AutosaveState, stored: string): AutosaveSta
     return { ...state, local: stored, synced: stored };
   }
   return state;
+}
+
+/**
+ * The server answered a save of `sent` with the text it stored, `saved`: the
+ * same when nobody else wrote, a merge when somebody did. Untouched since the
+ * send, the field takes `saved` and is clean; typed on since, it keeps what
+ * was typed, carried onto `saved`, and saves that next. An answer to an older
+ * send (a newer one is out) changes nothing.
+ */
+export function onSaved(state: AutosaveState, sent: string, saved: string): AutosaveState {
+  if (state.sent !== sent) return state;
+  if (state.local === sent) return { local: saved, synced: saved, dirty: false, sent: null, attempt: 0 };
+  return { local: mergeText(sent, state.local, saved), synced: saved, dirty: true, sent: null, attempt: 0 };
+}
+
+/** The description a task write's answer says is stored, or null when the answer carries none. */
+export function savedDescriptionOf(answer: unknown): string | null {
+  if (!answer || typeof answer !== "object") return null;
+  const a = answer as { ok?: unknown; payload?: { item?: { metadata?: unknown } } };
+  if (a.ok !== true) return null;
+  const metadata = a.payload?.item?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const d = (metadata as { description?: unknown }).description;
+  // A key the answer leaves out says nothing (a lean row must never empty the box).
+  return typeof d === "string" ? d : d === null ? "" : null;
 }
 
 /** Is there anything worth sending? A no-op save is not a save. */
