@@ -11,6 +11,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { tablePublicRef } from "@/lib/tables/public-link";
 import { moveToTrash } from "@/lib/trash";
 import {
   getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
@@ -52,6 +53,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ...table,
     rowCount: table._count.rows,
     canManage: roleAtLeast(gate.role, "FULL"),
+    // The public link's address (pen test V-30: the id and its signature),
+    // for the people who manage the link; nobody else needs to copy it.
+    publicRef: table.isPublic && roleAtLeast(gate.role, "FULL") ? tablePublicRef(table) : null,
     // Can view reads only (R7b): the grid shows a read only table.
     canEdit: roleAtLeast(gate.role, "EDIT"),
     publicLinksAllowed: orgPublicLinksAllowed(org?.settings),
@@ -90,6 +94,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!roleAtLeast(gate.role, "FULL")) return jsonError(MANAGE_REFUSAL.publish, 403);
     data.isPublic = body.isPublic;
     publicChange = body.isPublic;
+    // Each time the link is turned on it is a NEW link (pen test V-30): the
+    // generation it is signed with goes up, so a link from before stops working.
+    if (body.isPublic) data.publicEpoch = (existing.publicEpoch ?? 0) + 1;
+  }
+  // Reset the link: a new one while it stays on, every older one ended. A
+  // table made public before V-30 moves from its bare-id link to a signed one.
+  let publicReset = false;
+  if (body.resetPublicLink === true) {
+    if (!roleAtLeast(gate.role, "FULL")) return jsonError(MANAGE_REFUSAL.publish, 403);
+    if (!existing.isPublic) return jsonError("The public link is off. Turn it on to get a new link.", 409);
+    data.publicEpoch = (existing.publicEpoch ?? 0) + 1;
+    publicReset = true;
   }
   // Move to Space (the row menu's Move to Space..., the File menu's). null =
   // No Space. The placement rule (node-rules P2 and P3) through its one move
@@ -145,6 +161,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } else {
     updated = await prisma.dataTable.update({ where: { id }, data });
   }
+  if (publicReset) {
+    void logAuditEvent({
+      type: "access.public_link.on",
+      actorId: getUserId(session),
+      organizationId: orgId,
+      description: `Reset the public link for table "${existing.name}": the old link no longer opens`,
+      targetId: id,
+      targetType: "DataTable",
+      oldValue: { publicEpoch: existing.publicEpoch },
+      newValue: { publicEpoch: data.publicEpoch as number },
+    });
+  }
   if (publicChange !== null) {
     void logAuditEvent({
       type: publicChange ? "access.public_link.on" : "access.public_link.off",
@@ -157,7 +185,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       newValue: { isPublic: publicChange },
     });
   }
-  return jsonSuccess(updated);
+  return jsonSuccess({ ...updated, publicRef: updated.isPublic && roleAtLeast(gate.role, "FULL") ? tablePublicRef(updated) : null });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

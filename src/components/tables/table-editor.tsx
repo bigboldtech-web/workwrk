@@ -241,7 +241,9 @@ type ViewType = "grid" | "kanban" | "calendar" | "gallery";
 type SheetFreeze = { rows?: number; cols?: number };
 type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; filters?: SheetColumnFilter[]; freeze?: SheetFreeze } };
 type TableSettings = { namedRanges?: NamedRangeDef[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null;
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean;
+  /** The signed public address (pen test V-30), for the people who manage the link; null for everyone else. */
+  publicRef?: string | null; settings?: TableSettings | null; spaceId?: string | null;
   /** Creator or admin (GET /api/tables/[id], lib/object-manage): may delete the table or change its public link. */
   canManage?: boolean;
   /** Can edit or higher (GET /api/tables/[id]); false for a Can view role, which reads only (node-rules R7b). */
@@ -5923,6 +5925,9 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   // A public link only opens while the workspace allows public links; a
   // stale isPublic under an Off workspace offers no glyph and no embed code.
   const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false;
+  // The embed code needs the SIGNED address (pen test V-30), which only the
+  // people who manage the link are given; the Public globe shows to everyone.
+  const embedReady = linkIsLive && !!table.publicRef;
   const autosaveStatus = saveFailed ? "error" : savingCols ? "saving" : lastSavedAt ? "saved" : "idle";
   const moveOpen = sheetMoreOpen;
 
@@ -6005,7 +6010,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         <MorePortal anchorRef={sheetMoreRef} width={280} open placement="below" onClose={() => setSheetMoreOpen(false)}>
           <TableRowMenu
             key={sheetMenuMode}
-            table={{ id: table.id, name: table.name, spaceId: table.spaceId ?? null, spaceSlug: place?.spaceSlug ?? null, spaceName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null, isPublic: !!table.isPublic, canManage: !!table.canManage, publicLinksAllowed: table.publicLinksAllowed !== false }}
+            table={{ id: table.id, name: table.name, spaceId: table.spaceId ?? null, spaceSlug: place?.spaceSlug ?? null, spaceName: spaceBack && spaceBack.fallbackHref !== "/tables" ? spaceBack.label : null, isPublic: !!table.isPublic, canManage: !!table.canManage, publicLinksAllowed: table.publicLinksAllowed !== false, publicRef: table.publicRef ?? null }}
             context="sheet"
             initialMode={sheetMenuMode}
             onClose={() => setSheetMoreOpen(false)}
@@ -6095,7 +6100,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
           <button type="button" onClick={copySheetLink} className="inline-flex items-center gap-1.5 px-2.5 text-sm font-medium text-ink hover:bg-hover" title="Copy a link to this table" aria-label="Copy link">
             <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> <span className="@max-[870px]:hidden">Copy link</span>
           </button>
-          {linkIsLive ? (
+          {embedReady ? (
             <button ref={tbButton("link")} type="button" onClick={() => setToolbarMenu((m) => (m === "link" ? null : "link"))} className="inline-flex w-7 items-center justify-center border-s border-line-strong text-ink-2 hover:bg-hover" aria-label="More link options" aria-haspopup="menu" aria-expanded={toolbarMenu === "link"}>
               <ChevronDown className="h-3.5 w-3.5" />
             </button>
@@ -6143,7 +6148,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
             </MenuList>
           ) : toolbarMenu === "link" ? (
             <MenuList aria-label="Link options">
-              <MenuItem icon={Code2} label="Copy embed code" onClick={() => { copyText(embedSnippet("table", table.id, tableName), "Embed code copied"); setToolbarMenu(null); }} />
+              <MenuItem icon={Code2} label="Copy embed code" onClick={() => { copyText(embedSnippet("table", table.publicRef ?? table.id, tableName), "Embed code copied"); setToolbarMenu(null); }} />
             </MenuList>
           ) : (
             <MenuList aria-label="Display and About">
@@ -6647,7 +6652,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         onChanged={(panel) => {
           if (panel) {
             const isPublic = !!panel.general.publicLink?.on;
-            setTable((prev) => (prev ? { ...prev, isPublic } : prev));
+            // The link the panel now names (turned on or reset means a new one).
+            const url = panel.general.publicLink?.url ?? null;
+            const publicRef = isPublic && url?.startsWith("/embed/tables/") ? url.slice("/embed/tables/".length) : null;
+            setTable((prev) => (prev ? { ...prev, isPublic, publicRef } : prev));
           }
           notifyTablesChanged();
         }}

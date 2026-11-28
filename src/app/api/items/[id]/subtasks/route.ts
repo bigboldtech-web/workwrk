@@ -25,23 +25,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const url = new URL(req.url);
   const includeArchived = url.searchParams.get("includeArchived") === "1";
-  const rows = await prisma.item.findMany({
+  const all = await prisma.item.findMany({
     where: {
       parentItemId: id,
       organizationId: c.organizationId,
       ...(includeArchived ? {} : { archivedAt: null }),
-      // A subtask normally lives on the parent's List, and every caller so far
-      // creates it that way. "Normally" is not a gate: the parent's role says
-      // nothing about a child that has been moved to a List the viewer cannot
-      // read, and this route would have returned its title, status, assignees
-      // and dates. Scoping to the parent's board is the invariant the route
-      // was already relying on, written down where it is enforced.
-      boardId: gate.item.boardId,
     },
     // Position, then id: the order a subtask renumber keeps
     // (PUT /api/boards/[id]/order with parentId), so tied ones never swap.
     orderBy: [{ position: "asc" }, { id: "asc" }],
   });
+  // A subtask normally lives on the parent's List. One moved to ANOTHER List
+  // stays this task's subtask (pen test 2026-11-28, V-40: it vanished from
+  // here while still tied to the parent). The parent's role says nothing about
+  // that List, so such a child is listed only to a viewer whose own gate opens
+  // it (the gate that opens it anywhere else), never on the parent's word.
+  const rows: typeof all = [];
+  for (const row of all) {
+    if (row.boardId === gate.item.boardId) rows.push(row);
+    else if (!("error" in (await gateItem(row.id, c, "view")))) rows.push(row);
+  }
   // Phase 5b. A task's children are part of its share (a subtask belongs to
   // its parent), so a reader who can open a linked parent may list them. What
   // changes is the projection: in a List the parent is linked into, each child

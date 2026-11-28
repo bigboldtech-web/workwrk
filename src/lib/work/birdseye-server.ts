@@ -133,7 +133,7 @@ function bucketOf(declared: Prisma.Sql, first: string): Prisma.Sql {
   return Prisma.sql`(CASE WHEN ${declared} @> to_jsonb(i.status) THEN i.status ELSE ${first}::text END)`;
 }
 
-/** Live subtasks on the same List: GET /api/items/[id]/subtasks's own scope. */
+/** Live subtasks on the same List, the ones GET /api/items/[id]/subtasks lists to everyone who opens the task (it adds, per viewer, any moved to a List that viewer may open: pen test V-40). */
 function subtasksOf(alias: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`(SELECT COUNT(*)::int FROM "Item" s WHERE s."parentItemId" = ${alias}.id AND s."boardId" = ${alias}."boardId" AND s."archivedAt" IS NULL)`;
 }

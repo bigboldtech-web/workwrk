@@ -536,6 +536,12 @@ const SQL_MANIFEST = [
   // added NOT VALID, so no row is read, changed or deleted. On a database
   // that has them, nothing happens. Either order reads.
   "2026-11-28-time-entry-item.sql",
+  // DataTable."publicEpoch" (pen test 2026-11-28, V-30): the generation a
+  // table's public link is signed with, so turning the link off and on, or
+  // resetting it, ends the old one. Guarded; no row is written, so a table
+  // made public before keeps its current link. Apply before the code: the
+  // table's own GET and PATCH read the table whole.
+  "2026-11-28-table-public-epoch.sql",
 ];
 
 /**

@@ -114,12 +114,15 @@ describe("paging", () => {
 });
 
 describe("counts", () => {
-  it("counts subtasks exactly as GET /api/items/[id]/subtasks scopes them", () => {
+  it("counts the subtasks on the task's own List, the ones GET /api/items/[id]/subtasks lists to everyone who opens the task", () => {
     expect(fn("subtasksOf")).toMatch(/s\."parentItemId" = \$\{alias\}\.id AND s\."boardId" = \$\{alias\}\."boardId" AND s\."archivedAt" IS NULL/);
     const route = code(read("src/app/api/items/[id]/subtasks/route.ts"));
     expect(route).toMatch(/parentItemId: id/);
-    expect(route).toMatch(/boardId: gate\.item\.boardId/);
     expect(route).toMatch(/archivedAt: null/);
+    // A subtask moved to another List is listed there only to a viewer whose
+    // own gate opens it (pen test V-40), which a count in SQL cannot ask, so
+    // the count stays the same-List one.
+    expect(route).toMatch(/if \(row\.boardId === gate\.item\.boardId\) rows\.push\(row\);/);
   });
 
   it("decides closed statuses in JS with the one done rule and hands SQL the values", () => {

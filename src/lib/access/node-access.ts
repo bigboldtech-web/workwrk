@@ -23,6 +23,7 @@
 
 import { getServerSession } from "next-auth";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
+import { tablePublicRef } from "@/lib/tables/public-link";
 import { authOptions } from "../auth";
 import { prisma } from "../prisma";
 import { readDocLock } from "../doc-lock";
@@ -833,13 +834,15 @@ async function generalOf(rows: NodeRows, ref: NodeRef, canShare: boolean, viewer
     publicLink = { on, allowed: orgPublicLinksAllowed(org?.settings), url: on && canShare ? `/share/doc/${ref.id}.${entry?.publicSecret}` : null };
   }
   if (ref.kind === "table" || ref.kind === "form") {
-    const row = ref.kind === "table"
-      ? await prisma.dataTable.findFirst({ where: { id: ref.id, organizationId: rows.organizationId }, select: { isPublic: true } })
-      : await prisma.formDefinition.findFirst({ where: { id: ref.id, organizationId: rows.organizationId }, select: { isPublic: true } });
+    const table = ref.kind === "table"
+      ? await prisma.dataTable.findFirst({ where: { id: ref.id, organizationId: rows.organizationId }, select: { id: true, isPublic: true, publicEpoch: true } })
+      : null;
+    const row = table ?? (await prisma.formDefinition.findFirst({ where: { id: ref.id, organizationId: rows.organizationId }, select: { isPublic: true } }));
     const on = !!row?.isPublic;
-    // The public addresses object-share-dialog.tsx builds: the table's embed,
-    // the form's public responder.
-    publicLink = { on, allowed: true, url: on && canShare ? (ref.kind === "table" ? `/embed/tables/${ref.id}` : `/forms/${ref.id}/respond`) : null };
+    // The public addresses: the table's embed, signed (pen test V-30: the id
+    // alone was the link), and the form's public responder.
+    const tableRef = table && on ? tablePublicRef(table) : null;
+    publicLink = { on, allowed: true, url: on && canShare ? (ref.kind === "table" ? (tableRef ? `/embed/tables/${tableRef}` : null) : `/forms/${ref.id}/respond`) : null };
   }
   const { inheritsFrom, restrictedAbove } = inheritanceOf(rows, ref);
   const out: AccessGeneral = { visibility, restricted, publicLink, orgWideSpace, privateRule: rows.privateRule, inheritsFrom, restrictedAbove };

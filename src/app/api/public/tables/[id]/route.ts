@@ -32,6 +32,7 @@ import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { buildEmbedSnapshot, pageEmbedRows, type EmbedSnapshot, type EmbedSourceColumn } from "@/lib/sheet-embed";
 import { EmbedSnapshotCache } from "@/lib/sheet-embed-cache";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
+import { parseTablePublicRef, tablePublicRefValid } from "@/lib/tables/public-link";
 
 // A ceiling on what one public request evaluates. Far above any table the
 // product creates (1,000 seeded rows, a 5,000-row CSV import); a table past it
@@ -60,8 +61,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": String(limited.retryAfter), "Cache-Control": "no-store" } });
   }
 
+  // The link names the table and its signature (pen test V-30); a table made
+  // public before then answers its bare id until its link is turned off or reset.
+  const ref = parseTablePublicRef(id);
   const table = await prisma.dataTable.findFirst({
-    where: { id, isPublic: true },
+    where: { id: ref.id, isPublic: true },
     // `settings` is selected but NEVER returned whole. It is the table's
     // private blob (saved views, freeze positions, conditional formats and
     // whatever a later release puts there), and this route answers with no
@@ -69,24 +73,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // formula written as SUM(Revenue) resolves to #NAME? without the name.
     select: {
       id: true, name: true, description: true, columns: true, settings: true, updatedAt: true,
-      organizationId: true, organization: { select: { settings: true } },
+      organizationId: true, organization: { select: { settings: true } }, publicEpoch: true,
     },
   });
   if (!table) return NOT_FOUND();
+  if (!tablePublicRefValid(table, ref.signature)) return NOT_FOUND();
   if (!orgPublicLinksAllowed(table.organization?.settings)) return NOT_FOUND();
   if (!(await isModuleActive(table.organizationId, "workwrk-tables"))) return NOT_FOUND();
 
   // The data signature: any cell edit, insert, delete, column change or
   // settings change moves one of these, so the memo can never serve an old
   // evaluation of new data.
+  // table.id, never the route param: the param is the signed address (V-30),
+  // and filtering rows by it counted none, so a cell edit or a deleted row
+  // was served stale until the memo expired (the step 7 review).
   const agg = await prisma.dataTableRow.aggregate({
-    where: { tableId: id, deletedAt: null },
+    where: { tableId: table.id, deletedAt: null },
     _max: { updatedAt: true },
     _count: { _all: true },
   });
   const sig = `${table.updatedAt.getTime()}:${agg._max.updatedAt?.getTime() ?? 0}:${agg._count._all}`;
 
-  const { snapshot, truncated, updatedAt } = await snapshots.get(id, sig, () => evaluate(table));
+  const { snapshot, truncated, updatedAt } = await snapshots.get(table.id, sig, () => evaluate(table));
   const { page, nextCursor, start } = pageEmbedRows(snapshot.rows, sp.get("cursor"), sp.get("limit"));
 
   return NextResponse.json(

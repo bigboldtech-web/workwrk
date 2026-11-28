@@ -63,7 +63,7 @@ describe(FILE, () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    expect(files.slice(-3)).toEqual(["2026-11-03-workspace-lines.sql", FILE, "2026-11-28-time-entry-item.sql"]);
+    expect(files.slice(-4)).toEqual(["2026-11-03-workspace-lines.sql", FILE, "2026-11-28-time-entry-item.sql", "2026-11-28-table-public-epoch.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     const row = new RegExp(`^\\| \`${FILE.replace(/[.]/g, "\\.")}\` \\| A person's weekly check-in and timesheet in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");
