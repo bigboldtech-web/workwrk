@@ -342,6 +342,52 @@ async function captureDriveFolderSubtree(rootId: string): Promise<Row[]> {
 
 // Capture every descendant subtask of an item (BFS, level by level so the
 // returned array is already parent-before-child).
+/**
+ * A subtask moved to ANOTHER List stays its parent's child (pen test
+ * 2026-11-28, V-40), and Item.parentItem is onDelete Cascade: deleting the
+ * parent took it out of that List too, where people who could open only that
+ * List watched it vanish, and a List, Folder or Space delete took it without
+ * putting it in the snapshot at all, so Restore never brought it back. So
+ * before a delete, each such child (with whatever sits under it) is let go:
+ * it stays a task in its own List. The links are recorded, and a restore puts
+ * back every one whose task is still parentless (relinkDetached).
+ *
+ * `roots` are the tasks being deleted with the List each is in; the walk goes
+ * down their subtrees and lets go of every child in a different List from its
+ * parent. `deletedBoards`, for a List, Folder or Space delete, counts every
+ * List going away as the same List.
+ */
+async function detachCrossListChildren(db: TrashDb, roots: Array<{ id: string; boardId: string }>, deletedBoards?: ReadonlySet<string>): Promise<Row[]> {
+  const detached: Row[] = [];
+  const sameList = (a: string, b: string) => a === b || (!!deletedBoards && deletedBoards.has(a) && deletedBoards.has(b));
+  let frontier = roots;
+  while (frontier.length) {
+    const boardOf = new Map(frontier.map((f) => [f.id, f.boardId]));
+    const kids = await db.item.findMany({ where: { parentItemId: { in: frontier.map((f) => f.id) } }, select: { id: true, boardId: true, parentItemId: true } });
+    if (!kids.length) break;
+    const cross = kids.filter((k) => !sameList(k.boardId, boardOf.get(k.parentItemId as string) ?? ""));
+    if (cross.length) {
+      await db.item.updateMany({ where: { id: { in: cross.map((k) => k.id) } }, data: { parentItemId: null } });
+      detached.push(...cross.map((k) => ({ id: k.id, parentItemId: k.parentItemId }) as Row));
+    }
+    const crossIds = new Set(cross.map((k) => k.id));
+    frontier = kids.filter((k) => !crossIds.has(k.id)).map((k) => ({ id: k.id, boardId: k.boardId }));
+  }
+  return detached;
+}
+
+/** After a restore: each task let go by detachCrossListChildren goes back under its parent, if it is still parentless and both are here. */
+export async function relinkDetached(db: Pick<RestoreDb, "item">, detached: Row[] | undefined): Promise<void> {
+  for (const d of detached ?? []) {
+    const id = String(d.id ?? "");
+    const parentItemId = String(d.parentItemId ?? "");
+    if (!id || !parentItemId) continue;
+    const parent = await db.item.findUnique({ where: { id: parentItemId }, select: { id: true } });
+    if (!parent) continue;
+    await db.item.updateMany({ where: { id, parentItemId: null }, data: { parentItemId } });
+  }
+}
+
 async function captureItemSubtree(rootId: string, db: TrashDb = prisma): Promise<Row[]> {
   const out: Row[] = [];
   let frontier = [rootId];
@@ -356,7 +402,7 @@ async function captureItemSubtree(rootId: string, db: TrashDb = prisma): Promise
 
 // Capture the boards of a Space/Folder plus their items/views/members, the
 // shared child bundle for the "board" / "folder" / "space" registry entries.
-async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[]; completions?: Row[]; timeLinks?: Row[] }> {
+async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[]; completions?: Row[]; timeLinks?: Row[]; detached?: Row[] }> {
   if (!boardIds.length) return { items: [], views: [], members: [], listLinks: [] };
   const [items, views, members] = await Promise.all([
     db.item.findMany({ where: { boardId: { in: boardIds } } }),
@@ -372,6 +418,10 @@ async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Pro
   // the tasks, so the nightly repair would delete them while they sit here.
   const completions = await completionsOf(db, items.map((i) => i.id));
   const timeLinks = await timeLinksOf(db, items.map((i) => i.id));
+  // A subtask of one of these tasks sitting in a List that is NOT going away
+  // stays a task there instead of cascading out of the snapshot (V-40).
+  const gone = new Set(boardIds);
+  const detached = await detachCrossListChildren(db, items.map((i) => ({ id: i.id, boardId: i.boardId })), gone);
   return {
     items: items as unknown as Row[],
     views: views as unknown as Row[],
@@ -379,6 +429,7 @@ async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Pro
     listLinks: listLinks as unknown as Row[],
     ...(completions.length ? { completions: completions as Row[] } : {}),
     ...(timeLinks.length ? { timeLinks } : {}),
+    ...(detached.length ? { detached } : {}),
   };
 }
 
@@ -393,6 +444,7 @@ async function restoreBoardChildren(s: Snapshot, db: RestoreDb = prisma): Promis
   if (items.length) await createItemsParentsFirst(items, db);
   await restoreCompletions(db, s.children?.completions ?? [], () => null);
   await restoreTimeLinks(db, s.children?.timeLinks);
+  await relinkDetached(db, s.children?.detached);
 }
 
 const REGISTRY: Record<TrashType, Entry> = {
@@ -591,6 +643,8 @@ const REGISTRY: Record<TrashType, Entry> = {
     capture: async (id, db = prisma) => {
       const row = await db.item.findUnique({ where: { id } });
       if (!row) return null;
+      // Subtasks moved to another List stay there as tasks (V-40).
+      const detached = await detachCrossListChildren(db, [{ id, boardId: row.boardId }]);
       const subtasks = await captureItemSubtree(id, db);
       // Phase 5b: the Lists the task (and its subtree) appears in besides its
       // home, put back by reconcileListLinks on restore.
@@ -602,7 +656,7 @@ const REGISTRY: Record<TrashType, Entry> = {
       const timeLinks = await timeLinksOf(db, [id, ...subtasks.map((t) => t.id as string)]);
       return {
         label: row.title || "Untitled task",
-        snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[], ...(completions.length ? { completions: completions as Row[] } : {}), ...(timeLinks.length ? { timeLinks } : {}) } },
+        snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[], ...(completions.length ? { completions: completions as Row[] } : {}), ...(timeLinks.length ? { timeLinks } : {}), ...(detached.length ? { detached } : {}) } },
       };
     },
     restore: async (s, db = prisma) => {
@@ -612,6 +666,7 @@ const REGISTRY: Record<TrashType, Entry> = {
       const homeOf = new Map(tree.map((r) => [String(r.id), String(r.boardId)]));
       await restoreCompletions(db, s.children?.completions ?? [], (itemId) => homeOf.get(itemId) ?? null);
       await restoreTimeLinks(db, s.children?.timeLinks);
+      await relinkDetached(db, s.children?.detached);
     },
   },
 

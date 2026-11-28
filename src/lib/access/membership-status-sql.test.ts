@@ -185,7 +185,7 @@ describe(FILE, () => {
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
     // After it only a person's manager and dotted lines in each workspace (docs/plans/workspace-status-2.md),
     // then their week rows in each (its final review, security M1).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql"]);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql", "2026-11-28-table-public-epoch.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     const row = new RegExp(`^\\| \`${FILE}\` \\| A person's status in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");

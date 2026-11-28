@@ -280,10 +280,11 @@ describe(FILE, () => {
     const manifest = read("scripts/deploy-migrations.mjs");
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
-    // The final review (security M1) adds the week rows per workspace after it.
-    expect(files[files.length - 3]).toBe(FILE);
+    // The final review (security M1) adds the week rows per workspace after it;
+    // pen test 2026-11-28 the time-entry and table public-link files.
+    expect(files[files.length - 4]).toBe(FILE);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
-    expect(files.slice(-4)).toEqual(["2026-11-01-membership-status.sql", FILE, "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql"]);
+    expect(files.slice(-5)).toEqual(["2026-11-01-membership-status.sql", FILE, "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql", "2026-11-28-table-public-epoch.sql"]);
     const row = new RegExp(`^\\| \`${FILE}\` \\| A person's manager and dotted lines in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");
     expect(row).toContain(`a later \`COMMENT ON\` that column must keep the text \`${MARKER}\``);

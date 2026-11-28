@@ -28,7 +28,7 @@
 // exported and working; nothing mounts it any more.
 
 import { useState } from "react";
-import { Check, Copy, Globe, Link2, Lock } from "lucide-react";
+import { Check, Copy, Globe, Link2, Lock, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -262,6 +262,32 @@ export function PublicLinkSection({
   const noun = kind === "table" ? "table" : "form";
   const title = name || (kind === "table" ? "Untitled table" : "Untitled form");
   const on = !!publicLink?.on;
+  // A table's public address is its id AND a signature (pen test V-30): the
+  // panel names it to the people who manage the link; nothing here rebuilds it
+  // from the id, which no longer opens.
+  const tableRef = kind === "table" && publicLink?.url?.startsWith("/embed/tables/") ? publicLink.url.slice("/embed/tables/".length) : null;
+  const linkKnown = kind === "form" || !!tableRef;
+
+  /** A new public link for a table, every older one ended. */
+  async function resetLink() {
+    if (busy) return;
+    const ok = await confirm({
+      title: "Reset the public link?",
+      description: `The current link to "${title}" will stop working, for everyone who has it, and its embeds will go blank. You get a new link to share.`,
+      confirmLabel: "Reset link",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    const r = await apiFetch(`/api/tables/${id}`, { method: "PATCH", json: { resetPublicLink: true } });
+    setBusy(false);
+    if (!r.ok) {
+      toast(r.error || "Couldn't reset the link.", { tone: "danger" });
+      return;
+    }
+    toast("New public link made. The old one no longer opens.");
+    onChanged?.(true);
+  }
 
   async function setPublic(next: boolean, confirmed = false) {
     if (busy || next === on) return;
@@ -342,20 +368,27 @@ export function PublicLinkSection({
       {kind === "form" ? <p className="m-0 text-sm text-ink-2">Only people at {orgName} can send answers, after they sign in.</p> : null}
       {!canChange ? <p className="m-0 text-sm text-ink-2">Only people with Full access can change its public link.</p> : null}
       {failed ? <InlineRetry message={failed.message} onRetry={() => void setPublic(failed.next, true)} /> : null}
-      {on ? (
+      {on && linkKnown ? (
         <div className="flex min-w-0 flex-col gap-2 pt-1">
           <div className="flex flex-wrap gap-1">
             <button type="button" onClick={() => copy(publicLink.url ? absolute(publicLink.url) : objectLink(kind, id, true), "Public link copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line-strong bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover">
               <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy public link
             </button>
-            <button type="button" onClick={() => copy(embedSnippet(kind, id, title), "Embed code copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+            <button type="button" onClick={() => copy(embedSnippet(kind, tableRef ?? id, title), "Embed code copied")} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
               <Copy className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy embed code
             </button>
             <button type="button" onClick={() => copy(copyObjectLink(kind, id), "Internal link copied")} title={`Opens it for people signed in to ${orgName}`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
               <Link2 className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Copy internal link
             </button>
           </div>
-          <code className="block overflow-x-auto whitespace-pre rounded-md border border-line bg-subtle px-3 py-2 font-mono text-xs text-ink-2">{embedSnippet(kind, id, title)}</code>
+          {kind === "table" && canChange ? (
+            <div>
+              <button type="button" disabled={busy} onClick={() => void resetLink()} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-50">
+                <RotateCcw className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Reset link
+              </button>
+            </div>
+          ) : null}
+          <code className="block overflow-x-auto whitespace-pre rounded-md border border-line bg-subtle px-3 py-2 font-mono text-xs text-ink-2">{embedSnippet(kind, tableRef ?? id, title)}</code>
         </div>
       ) : null}
       {formLink ? <div className="flex flex-wrap gap-1">{formLink}</div> : null}

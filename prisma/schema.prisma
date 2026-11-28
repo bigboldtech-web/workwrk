@@ -375,6 +375,11 @@ model DataTable {
   // mirrors how Forms expose a public responder. Org members still see
   // the full editor; outside viewers get a read-only grid.
   isPublic       Boolean        @default(false)
+  // The public link's generation (pen test 2026-11-28, V-30): the link carries a
+  // signature of the table and this number, which goes up each time the link is
+  // turned on or reset. Empty on a table made public before: its bare-id link
+  // keeps working until the link is turned off or reset. Not a secret.
+  publicEpoch    Int?
   // 🆕 Phase 32 — Optional Space anchor so a table created from inside
   // a Space (via the SpaceCreatePopover Database row, or auto-tagged
   // from a board's drawer) shows under the right Space chip in /library.

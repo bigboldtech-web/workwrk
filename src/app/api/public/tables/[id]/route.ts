@@ -32,6 +32,7 @@ import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { buildEmbedSnapshot, pageEmbedRows, type EmbedSnapshot, type EmbedSourceColumn } from "@/lib/sheet-embed";
 import { EmbedSnapshotCache } from "@/lib/sheet-embed-cache";
 import { ipFromRequest, rateLimit } from "@/lib/rate-limit-memory";
+import { parseTablePublicRef, tablePublicRefValid } from "@/lib/tables/public-link";
 
 // A ceiling on what one public request evaluates. Far above any table the
 // product creates (1,000 seeded rows, a 5,000-row CSV import); a table past it
@@ -60,8 +61,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": String(limited.retryAfter), "Cache-Control": "no-store" } });
   }
 
+  // The link names the table and its signature (pen test V-30); a table made
+  // public before then answers its bare id until its link is turned off or reset.
+  const ref = parseTablePublicRef(id);
   const table = await prisma.dataTable.findFirst({
-    where: { id, isPublic: true },
+    where: { id: ref.id, isPublic: true },
     // `settings` is selected but NEVER returned whole. It is the table's
     // private blob (saved views, freeze positions, conditional formats and
     // whatever a later release puts there), and this route answers with no
@@ -69,10 +73,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // formula written as SUM(Revenue) resolves to #NAME? without the name.
     select: {
       id: true, name: true, description: true, columns: true, settings: true, updatedAt: true,
-      organizationId: true, organization: { select: { settings: true } },
+      organizationId: true, organization: { select: { settings: true } }, publicEpoch: true,
     },
   });
   if (!table) return NOT_FOUND();
+  if (!tablePublicRefValid(table, ref.signature)) return NOT_FOUND();
   if (!orgPublicLinksAllowed(table.organization?.settings)) return NOT_FOUND();
   if (!(await isModuleActive(table.organizationId, "workwrk-tables"))) return NOT_FOUND();
 

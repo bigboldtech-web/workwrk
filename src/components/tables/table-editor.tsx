@@ -241,7 +241,9 @@ type ViewType = "grid" | "kanban" | "calendar" | "gallery";
 type SheetFreeze = { rows?: number; cols?: number };
 type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; filters?: SheetColumnFilter[]; freeze?: SheetFreeze } };
 type TableSettings = { namedRanges?: NamedRangeDef[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null;
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean;
+  /** The signed public address (pen test V-30), for the people who manage the link; null for everyone else. */
+  publicRef?: string | null; settings?: TableSettings | null; spaceId?: string | null;
   /** Creator or admin (GET /api/tables/[id], lib/object-manage): may delete the table or change its public link. */
   canManage?: boolean;
   /** Can edit or higher (GET /api/tables/[id]); false for a Can view role, which reads only (node-rules R7b). */
@@ -5922,7 +5924,9 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
   const tbAnchorRef = (key: string) => ({ current: tbAnchor.current[key] ?? null });
   // A public link only opens while the workspace allows public links; a
   // stale isPublic under an Off workspace offers no glyph and no embed code.
-  const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false;
+  // The embed code needs the SIGNED address (pen test V-30), which only the
+  // people who manage the link are given.
+  const linkIsLive = !!table.isPublic && table.publicLinksAllowed !== false && !!table.publicRef;
   const autosaveStatus = saveFailed ? "error" : savingCols ? "saving" : lastSavedAt ? "saved" : "idle";
   const moveOpen = sheetMoreOpen;
 
@@ -6143,7 +6147,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
             </MenuList>
           ) : toolbarMenu === "link" ? (
             <MenuList aria-label="Link options">
-              <MenuItem icon={Code2} label="Copy embed code" onClick={() => { copyText(embedSnippet("table", table.id, tableName), "Embed code copied"); setToolbarMenu(null); }} />
+              <MenuItem icon={Code2} label="Copy embed code" onClick={() => { copyText(embedSnippet("table", table.publicRef ?? table.id, tableName), "Embed code copied"); setToolbarMenu(null); }} />
             </MenuList>
           ) : (
             <MenuList aria-label="Display and About">
@@ -6647,7 +6651,10 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
         onChanged={(panel) => {
           if (panel) {
             const isPublic = !!panel.general.publicLink?.on;
-            setTable((prev) => (prev ? { ...prev, isPublic } : prev));
+            // The link the panel now names (turned on or reset means a new one).
+            const url = panel.general.publicLink?.url ?? null;
+            const publicRef = isPublic && url?.startsWith("/embed/tables/") ? url.slice("/embed/tables/".length) : null;
+            setTable((prev) => (prev ? { ...prev, isPublic, publicRef } : prev));
           }
           notifyTablesChanged();
         }}

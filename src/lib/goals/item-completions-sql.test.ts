@@ -66,7 +66,7 @@ describe(`prisma/sql/${FILE}`, () => {
     // After it only a person's status in each workspace (docs/plans/workspace-status.md),
     // then their manager and dotted lines in each (docs/plans/workspace-status-2.md).
     // Then a person's week rows in each (the final review of workspace-status-2, security M1).
-    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql"]);
+    expect(files.slice(files.indexOf(FILE))).toEqual([FILE, "2026-11-01-membership-status.sql", "2026-11-03-workspace-lines.sql", "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql", "2026-11-28-table-public-epoch.sql"]);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
     expect(read("prisma/sql/README.md")).toMatch(new RegExp(`^\\| \`${FILE}\` \\| Item completions .* \\| \\*\\*pending\\*\\* \\|$`, "m"));
   });
