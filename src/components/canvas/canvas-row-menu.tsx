@@ -26,7 +26,7 @@
 
 import { useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, ExternalLink, FolderInput, Frame, LayoutTemplate, Link2, Pencil, Star, Trash2, UserPlus, Users } from "lucide-react";
+import { Archive, Copy, ExternalLink, FolderInput, Frame, LayoutTemplate, Link2, Pencil, Star, UserPlus, Users } from "lucide-react";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { ShareDialog } from "@/components/access/share-dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -165,11 +165,12 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
 
   async function trash() {
     onClose();
-    const ok = await confirm({ title: `Move "${name}" to Trash?`, description: "You can restore it from Trash.", destructive: true, confirmLabel: "Move to Trash" });
+    // Archived, not deleted (pen test V-66): it waits on Trash's Archived tab.
+    const ok = await confirm({ title: `Archive "${name}"?`, description: "It leaves the list and waits under Archived in Trash, where you can restore it.", destructive: true, confirmLabel: "Archive" });
     if (!ok) return;
     const r = await apiFetch(`/api/whiteboards/${canvas.id}`, { method: "DELETE" });
     if (r.ok) {
-      toast("Moved to Trash", { action: { label: "View Trash", onClick: () => router.push("/trash?type=canvas") } });
+      toast("Archived", { action: { label: "View archived", onClick: () => router.push("/trash?tab=archived&type=canvas") } });
       done("trashed");
       const open = currentOpenObject();
       if (open?.kind === "canvas" && open.id === canvas.id) router.push(open.closeHref); else router.refresh();
@@ -248,7 +249,7 @@ export function CanvasRowMenu({ canvas, context = "row", onClose, onChanged, onS
       {canManage ? (
         <>
           <MenuSeparator />
-          <MenuItem icon={Trash2} label="Move to Trash" destructive onClick={() => void trash()} />
+          <MenuItem icon={Archive} label="Archive" destructive onClick={() => void trash()} />
         </>
       ) : null}
     </MenuList>

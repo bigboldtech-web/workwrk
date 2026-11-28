@@ -311,7 +311,10 @@ export function AiSidebar() {
 
       {apps.length > 0 ? (
         <>
-          <SidebarSectionLabel collapsed={appsCollapsed} onToggle={() => toggleHeld(APPS_OPEN_KEY, appsHoldActive, !appsOpened)}>
+          {/* Collapsed by default (spec-ai-automation 1.2), its chevron shows on
+              hover only, so a closed section read as an empty "APPS" heading
+              (pen test 2026-11-28, V-65): closed, it says how many rows it holds. */}
+          <SidebarSectionLabel collapsed={appsCollapsed} count={appsCollapsed ? apps.length : null} onToggle={() => toggleHeld(APPS_OPEN_KEY, appsHoldActive, !appsOpened)}>
             Apps
           </SidebarSectionLabel>
           {!appsCollapsed ? <ul className="flex flex-col gap-0.5">{renderRows(apps)}</ul> : null}
