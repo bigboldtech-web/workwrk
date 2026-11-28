@@ -29,7 +29,7 @@ export async function levelInCompany(userId: string, organizationId: string): Pr
 
 export type WalledModel =
   | "kra" | "role" | "scope" | "kraCategory" | "idea"
-  | "planScenario" | "glAccount" | "costCenter" | "accountingPeriod";
+  | "planScenario" | "glAccount" | "costCenter" | "accountingPeriod" | "planDriver";
 
 async function idsIn(model: WalledModel, where: { id: { in: string[] }; organizationId: string }): Promise<{ id: string }[]> {
   const select = { id: true } as const;
@@ -43,6 +43,7 @@ async function idsIn(model: WalledModel, where: { id: { in: string[] }; organiza
     case "glAccount": return prisma.glAccount.findMany({ where, select });
     case "costCenter": return prisma.costCenter.findMany({ where, select });
     case "accountingPeriod": return prisma.accountingPeriod.findMany({ where, select });
+    case "planDriver": return prisma.planDriver.findMany({ where, select });
   }
 }
 

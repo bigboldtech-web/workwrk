@@ -42,7 +42,10 @@ export async function DELETE(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const { id } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  // A plain id only: {"id":{"not":""}} deleted every category of the
+  // workspace in one call (pen test 2026-11-28 review).
+  const id = typeof body?.id === "string" ? body.id : "";
 
   if (!id) return jsonError("Category ID is required");
 

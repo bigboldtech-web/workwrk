@@ -97,7 +97,9 @@ export async function POST(req: NextRequest) {
   } else if (input.source === "LIST") {
     if (!input.boardId) return jsonError("boardId is required", 400);
     const board = await getBoardForReader(input.boardId, userId, accessLevel);
-    if (!board) return jsonError("List not found", 404);
+    // Only a List of the workspace the template is saved into (the company
+    // wall, pen test 2026-11-28): a seat elsewhere never publishes its Lists here.
+    if (!board || board.organizationId !== orgId) return jsonError("List not found", 404);
     // Saving a template publishes a list's structure to everyone in the org,
     // so it takes the management gate, not the read gate (spec-spaces-lists
     // section 2: "Save as template needs Full access on the source object").
@@ -121,7 +123,7 @@ export async function POST(req: NextRequest) {
   } else {
     if (!input.spaceId) return jsonError("spaceId is required", 400);
     const space = await getSpaceForReader(input.spaceId, userId, accessLevel);
-    if (!space) return jsonError("Space not found", 404);
+    if (!space || space.organizationId !== orgId) return jsonError("Space not found", 404);
     if (!(await canEditSpace(input.spaceId, userId, accessLevel))) return jsonError("Forbidden", 403);
     kind = "SPACE";
     snap = await snapshotSpace(input.spaceId, { canSaveList: fullLists });

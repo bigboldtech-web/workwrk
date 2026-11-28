@@ -116,19 +116,20 @@ export async function listSpacesForUser(
  * the viewer can read. Used by Library endpoints to filter out items
  * pinned to Spaces the viewer isn't in.
  *
- * Org admins see all → returns the full input set.
- * Otherwise: ORG-visibility Spaces + Spaces the viewer is a member of.
+ * Only Spaces of a workspace the viewer holds a seat in: there, an admin
+ * (at the level held there) reads every Space, anyone else the ORG-visibility
+ * Spaces and the Spaces they are a member of.
  *
- * One query per category instead of N — safe for big result pages.
+ * One query per category instead of N, safe for big result pages.
  */
 export async function visibleSpaceIds(
   spaceIds: string[],
   userId: string,
-  accessLevel: string | null | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the callers; the level held in each Space's workspace decides
+  _accessLevel: string | null | undefined,
 ): Promise<Set<string>> {
   if (spaceIds.length === 0) return new Set();
   const unique = Array.from(new Set(spaceIds));
-  if (isOrgAdminAccessLevel(accessLevel)) return new Set(unique);
 
   // IMPORTANT: this set means "spaces the viewer can FULLY read" — every
   // caller (files, search, boards, tables, whiteboards, entity-links) treats
@@ -137,19 +138,29 @@ export async function visibleSpaceIds(
   // (board/task/whiteboard names, signed file URLs) beyond the granted folder.
   // Folder-grant containers are surfaced ONLY in the sidebar space list, via
   // listSpacesForUser({ includeFolderContainers: true }).
-  const [orgVis, memberOf] = await Promise.all([
+  // The company wall (pen test 2026-11-28 review): a Space counts only in a
+  // workspace the viewer holds a seat in, and "admin" is the level held THERE.
+  // The passed level and the bare ids used to decide, so an admin anywhere got
+  // back every id handed in, and anyone got another company's org-wide Spaces.
+  const [rows, memberOf] = await Promise.all([
     prisma.space.findMany({
-      where: { id: { in: unique }, visibility: "ORG" },
-      select: { id: true },
+      where: { id: { in: unique } },
+      select: { id: true, organizationId: true, visibility: true },
     }),
     prisma.spaceMember.findMany({
       where: { userId, spaceId: { in: unique } },
       select: { spaceId: true },
     }),
   ]);
+  const orgs = Array.from(new Set(rows.map((r) => r.organizationId)));
+  const levels = new Map(await Promise.all(orgs.map(async (o) => [o, await levelInCompany(userId, o)] as const)));
+  const member = new Set(memberOf.map((m) => m.spaceId));
   const out = new Set<string>();
-  for (const s of orgVis) out.add(s.id);
-  for (const m of memberOf) out.add(m.spaceId);
+  for (const r of rows) {
+    const level = levels.get(r.organizationId);
+    if (!level) continue;
+    if (isOrgAdminAccessLevel(level) || r.visibility === "ORG" || member.has(r.id)) out.add(r.id);
+  }
   return out;
 }
 
@@ -166,11 +177,11 @@ async function spaceRoleOf(spaceId: string, userId: string, _accessLevel: string
     where: { id: spaceId },
     include: { members: { where: { userId }, select: { role: true } } },
   });
-  if (!row) return { row: null, role: "none" as NodeRole };
+  if (!row) return { row: null, role: "none" as NodeRole, level: null };
   // The company wall (lib/access/company-wall.ts, pen test 2026-11-28): no
   // seat in the Space's workspace, no Space; the level held there decides.
   const level = await levelInCompany(userId, row.organizationId);
-  if (!level) return { row: null, role: "none" as NodeRole };
+  if (!level) return { row: null, role: "none" as NodeRole, level: null };
   const ctx = nodeCtxFromLevel(userId, row.organizationId, level);
   const rows = emptyRows(row.organizationId);
   rows.spaces.set(row.id, {
@@ -181,7 +192,7 @@ async function spaceRoleOf(spaceId: string, userId: string, _accessLevel: string
   const own = row.members[0]?.role as MemberRole | undefined;
   if (own) grants.space.set(row.id, own);
   const live = decide(rows, grants, { kind: "space", id: row.id }).role;
-  return { row, role: await delegatedNodeRole(userId, row.organizationId, level, { kind: "space", id: row.id }, live) };
+  return { row, role: await delegatedNodeRole(userId, row.organizationId, level, { kind: "space", id: row.id }, live), level };
 }
 
 /**
@@ -196,8 +207,12 @@ export async function getSpaceForReader(spaceId: string, userId: string, accessL
 
 /** Full access on the Space: an org admin, or a SpaceMember OWNER or ADMIN row. */
 export async function canEditSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  if (isOrgAdminAccessLevel(accessLevel)) return true;
-  const { role } = await spaceRoleOf(spaceId, userId, accessLevel);
+  // An admin manages every Space of THEIR workspace: the level held in the
+  // Space's workspace, never the one passed (an admin elsewhere is not one
+  // here; the company wall, pen test 2026-11-28 review).
+  const { row, role, level } = await spaceRoleOf(spaceId, userId, accessLevel);
+  if (!row) return false;
+  if (isOrgAdminAccessLevel(level ?? undefined)) return true;
   return roleAtLeast(role, "FULL");
 }
 
@@ -206,8 +221,9 @@ export async function canEditSpace(spaceId: string, userId: string, accessLevel?
  * a GUEST reads), as opposed to MANAGING it, which stays canEditSpace.
  */
 export async function canContributeSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  if (isOrgAdminAccessLevel(accessLevel)) return true;
-  const { role } = await spaceRoleOf(spaceId, userId, accessLevel);
+  const { row, role, level } = await spaceRoleOf(spaceId, userId, accessLevel);
+  if (!row) return false;
+  if (isOrgAdminAccessLevel(level ?? undefined)) return true;
   return roleAtLeast(role, "EDIT");
 }
 

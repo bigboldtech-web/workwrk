@@ -74,15 +74,17 @@ export async function POST(req: NextRequest) {
   const ids = (k: keyof LineInput) => lines.map((l) => (l && typeof l === "object" ? l[k] : undefined));
   const shape = lines.every((l) => l && typeof l === "object"
     && ["scenarioId", "accountId", "periodId"].every((k) => typeof (l as unknown as Record<string, unknown>)[k] === "string")
-    && (l.costCenterId == null || typeof l.costCenterId === "string"));
+    && (l.costCenterId == null || (typeof l.costCenterId === "string" && l.costCenterId.length > 0))
+    && (l.driverId == null || (typeof l.driverId === "string" && l.driverId.length > 0)));
   if (!shape) return jsonError("each line needs scenarioId, accountId and periodId");
-  const [scenariosOk, accountsOk, centersOk, periodsOk] = await Promise.all([
+  const [scenariosOk, accountsOk, centersOk, periodsOk, driversOk] = await Promise.all([
     allOwned("planScenario", ids("scenarioId"), orgId),
     allOwned("glAccount", ids("accountId"), orgId),
     allOwned("costCenter", ids("costCenterId"), orgId),
     allOwned("accountingPeriod", ids("periodId"), orgId),
+    allOwned("planDriver", ids("driverId"), orgId),
   ]);
-  if (!scenariosOk || !accountsOk || !centersOk || !periodsOk) return jsonError("A scenario, account, cost center or period was not found", 404);
+  if (!scenariosOk || !accountsOk || !centersOk || !periodsOk || !driversOk) return jsonError("A scenario, account, cost center, period or driver was not found", 404);
 
   // Manual upsert loop — Postgres treats NULL costCenterId as
   // non-equal to other NULLs, so the composite unique constraint
@@ -134,7 +136,9 @@ export async function POST(req: NextRequest) {
     });
     return jsonSuccess({ upserted });
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : "upsert failed";
+    // Only this route's own messages go back; a database error is never shown
+    // (the same leak as V-05, pen test 2026-11-28 review).
+    const message = e instanceof Error && e.message.startsWith("each line needs") ? e.message : "Couldn't save the plan lines";
     return jsonError(message, 400);
   }
 }

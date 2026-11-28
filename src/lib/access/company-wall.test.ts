@@ -32,6 +32,7 @@ vi.mock("@/lib/prisma", () => ({
     glAccount: { findMany: findManyFor("glAccount") },
     costCenter: { findMany: findManyFor("costCenter") },
     accountingPeriod: { findMany: findManyFor("accountingPeriod") },
+    planDriver: { findMany: findManyFor("planDriver") },
   },
 }));
 vi.mock("@/lib/access/seated-here", () => ({
@@ -122,7 +123,7 @@ describe("every gate and route uses the wall", () => {
     expect(board).toMatch(/nodeCtxFromLevel\(userId, board\.organizationId, level\)/);
     expect(board).toMatch(/delegatedNodeRole\(userId, board\.organizationId, level,/);
     const space = read("src/lib/space.ts");
-    expect(space).toMatch(/const level = await levelInCompany\(userId, row\.organizationId\);\s+if \(!level\) return \{ row: null, role: "none" as NodeRole \};/);
+    expect(space).toMatch(/const level = await levelInCompany\(userId, row\.organizationId\);\s+if \(!level\) return \{ row: null, role: "none" as NodeRole, level: null \};/);
     expect(space).toMatch(/delegatedNodeRole\(userId, row\.organizationId, level,/);
     const folder = read("src/lib/folder.ts");
     expect(folder).toMatch(/const level = await levelInCompany\(userId, space\.organizationId\);\s+if \(!level\) return \{ mode: "none" \};/);
@@ -161,5 +162,58 @@ describe("every gate and route uses the wall", () => {
     expect(role).toMatch(/sops: \{ where: \{ organizationId: orgId \}/);
     expect(role).toMatch(/thresholds: \{ where: \{ organizationId: orgId \}/);
     expect(read("src/app/api/kras/route.ts")).toMatch(/kpis: \{\s+where: \{ organizationId: orgId \}/);
+  });
+});
+
+describe("the review's fixes (a person seated in two workspaces, and the lows)", () => {
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  it("notetaker save acts in the session's workspace and never writes into another's List", () => {
+    const route = read("src/app/api/notetaker/save/route.ts");
+    expect(route).toMatch(/const acting = await actingWorkspace\(user, /);
+    expect(route).toMatch(/const orgId = acting\.organizationId;/);
+    expect(route).toMatch(/if \(!board \|\| board\.organizationId !== orgId\) return NextResponse\.json\(\{ error: "That list no longer exists" \}, \{ status: 404 \}\);/);
+    expect(route).not.toMatch(/organizationId: user\.organizationId/);
+  });
+
+  it("Save as template takes a List or a Space of the workspace it saves into only", () => {
+    const route = read("src/app/api/template-center/save-as/route.ts");
+    expect(route).toMatch(/if \(!board \|\| board\.organizationId !== orgId\) return jsonError\("List not found", 404\);/);
+    expect(route).toMatch(/if \(!space \|\| space\.organizationId !== orgId\) return jsonError\("Space not found", 404\);/);
+  });
+
+  it("the Space admin shortcut reads the level held in the Space's workspace, never the one passed", () => {
+    const space = read("src/lib/space.ts");
+    for (const fn of ["canEditSpace", "canContributeSpace"]) {
+      const at = space.indexOf(`export async function ${fn}(`);
+      const body = space.slice(at, space.indexOf("\n}\n", at));
+      expect(body, fn).toMatch(/const \{ row, role, level \} = await spaceRoleOf\(/);
+      expect(body, fn).toMatch(/if \(isOrgAdminAccessLevel\(level \?\? undefined\)\) return true;/);
+      expect(body, fn).not.toMatch(/isOrgAdminAccessLevel\(accessLevel\)/);
+    }
+  });
+
+  it("visibleSpaceIds keeps only Spaces of a workspace the viewer holds a seat in", () => {
+    const space = read("src/lib/space.ts");
+    const at = space.indexOf("export async function visibleSpaceIds(");
+    const body = space.slice(at, space.indexOf("\n}\n", at));
+    expect(body).toMatch(/levelInCompany\(userId, o\)/);
+    expect(body).toMatch(/if \(!level\) continue;/);
+    expect(body).not.toMatch(/isOrgAdminAccessLevel\(accessLevel\)/);
+  });
+
+  it("plan lines check the driver too, and never hand back a database error", () => {
+    const route = read("src/app/api/plan-lines/route.ts");
+    expect(route).toMatch(/allOwned\("planDriver", ids\("driverId"\), orgId\)/);
+    expect(route).toMatch(/e\.message\.startsWith\("each line needs"\) \? e\.message : "Couldn't save the plan lines"/);
+  });
+
+  it("a KRA category delete takes a plain id only", () => {
+    expect(read("src/app/api/kra-categories/route.ts")).toMatch(/const id = typeof body\?\.id === "string" \? body\.id : "";\s+if \(!id\) return jsonError\("Category ID is required"\);\s+await prisma\.kraCategory\.deleteMany/);
+  });
+
+  it("another workspace's plan driver is refused", async () => {
+    rowsByModel.planDriver = [{ id: "drv", organizationId: "org-mech" }];
+    await expect(allOwned("planDriver", ["drv"], "org-acme")).resolves.toBe(false);
   });
 });
