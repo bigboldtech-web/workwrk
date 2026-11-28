@@ -427,10 +427,11 @@ function TemplateCenterBody({
       // A kit makes three things and has no page of its own, so the toast
       // names what it made and links each one to the page it lives on. The
       // links are canonical here and mapped where they are followed.
+      // A workspace with Tables off gets no Table (pen test V-58), so none is named.
       const created: Array<{ label: string; href: string }> = [
         made.doc ? { label: made.doc.title || kit.summary.doc, href: `/docs/${made.doc.id}` } : { label: kit.summary.doc, href: "/docs" },
         made.form ? { label: made.form.name || kit.summary.form, href: `/forms/${made.form.id}` } : { label: kit.summary.form, href: "/forms" },
-        made.table ? { label: made.table.name || kit.summary.table, href: `/tables/${made.table.id}` } : { label: kit.summary.table, href: "/tables" },
+        ...(made.table ? [{ label: made.table.name || kit.summary.table, href: `/tables/${made.table.id}` }] : []),
       ];
       finish({ kind: "KIT", created });
     },

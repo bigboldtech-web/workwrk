@@ -26,7 +26,8 @@ interface ApiState {
 }
 
 interface Props {
-  entityType: "BOARD_ITEM" | "TASK" | "KRA" | "KPI" | "SOP";
+  /** Time is tracked on tasks only (pen test V-59): the API refuses anything else. */
+  entityType: "BOARD_ITEM";
   entityId: string;
   canEdit: boolean;
 }

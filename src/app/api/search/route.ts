@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { escapeLike } from "@/lib/like-escape";
 import { prisma } from "@/lib/prisma";
 import { guestConversationPartnerIds, peopleHereByName } from "@/lib/access/seated-here";
 import { placementHereOf } from "@/lib/access/profile-here";
@@ -63,7 +64,9 @@ export async function GET(req: NextRequest) {
   const orgId = getOrgId(session);
   // Defensive cap — bring back nothing if someone pastes a novel.
   const needle = query.trim().slice(0, 80);
-  const ci = { contains: needle, mode: "insensitive" as const };
+  // `%` and `_` are letters here, never LIKE wildcards: "%%" matched every
+  // row a person could see (pen test 2026-11-28, V-53).
+  const ci = { contains: escapeLike(needle), mode: "insensitive" as const };
   const take = 5;
 
   const session2 = session as { user: { id: string; accessLevel: string } };

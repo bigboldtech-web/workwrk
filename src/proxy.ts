@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isRetiredApi } from "@/lib/security/retired-apis";
 import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import { isSignedOutAppPath } from "@/lib/nav/public-app-paths";
 import { staffWriteOriginRefused, STAFF_WRITE_ORIGIN_REFUSAL } from "@/lib/admin/staff-write-origin";
@@ -168,6 +169,12 @@ export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const customDomainsEnabled = process.env.CUSTOM_DOMAINS_ENABLED === "true";
   const hardSplit = process.env.HARD_HOST_SPLIT === "true";
+
+  // 00) The finance APIs that left the product answer as if absent (pen test
+  //     2026-11-28, V-61; see retired-apis.ts), before anything reads them.
+  if (isRetiredApi(path)) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
 
   // 0) Staff console writes must come from the console itself (CSRF guard;
   //    see staff-write-origin.ts). Applies with or without the host split.

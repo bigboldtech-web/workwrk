@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getTemplate } from "@/lib/workspace-templates";
 import { logActivity } from "@/lib/activity";
+import { isModuleActive } from "@/lib/entitlements";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -22,6 +23,14 @@ export async function POST(req: NextRequest) {
 
   const t = getTemplate(templateId);
   if (!t) return jsonError("unknown template", 404);
+
+  // Pen test 2026-11-28, V-58: a kit took its form's public flag from the
+  // template ("sales" and "hr" were public), so any member published a form
+  // to the internet with no confirm and no audit row, and it made a Table in
+  // a workspace that has Tables switched off. A kit's form starts private
+  // (its public link is turned on in the form's Share dialog, behind the
+  // confirm, as for any form), and the Table is made only where Tables is on.
+  const tablesOn = await isModuleActive(orgId, "workwrk-tables");
 
   const [doc, form, table] = await Promise.all([
     prisma.doc.create({
@@ -46,22 +55,24 @@ export async function POST(req: NextRequest) {
         organizationId: orgId,
         name: t.form.name,
         description: t.form.description,
-        isPublic: t.form.isPublic,
+        isPublic: false,
         fields: t.form.fields as unknown as Prisma.InputJsonValue,
         createdById: userId,
       },
       select: { id: true, name: true },
     }),
-    prisma.dataTable.create({
-      data: {
-        organizationId: orgId,
-        name: t.table.name,
-        description: t.table.description,
-        columns: t.table.columns as unknown as Prisma.InputJsonValue,
-        createdById: userId,
-      },
-      select: { id: true, name: true },
-    }),
+    tablesOn
+      ? prisma.dataTable.create({
+          data: {
+            organizationId: orgId,
+            name: t.table.name,
+            description: t.table.description,
+            columns: t.table.columns as unknown as Prisma.InputJsonValue,
+            createdById: userId,
+          },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve(null),
   ]);
 
   void logActivity({
@@ -70,12 +81,12 @@ export async function POST(req: NextRequest) {
     organizationId: orgId,
     // No em dash: naming-canon H.10 forbids one in any string a person
     // reads, and this string is read on /activity.
-    description: `Applied "${t.name}" template: seeded a doc, form, and table`,
+    description: `Applied "${t.name}" template: seeded ${table ? "a doc, a form and a table" : "a doc and a form"}`,
     metadata: {
       template: t.id,
       docId: doc.id,
       formId: form.id,
-      tableId: table.id,
+      tableId: table?.id ?? null,
     },
   });
 
