@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { kpiWriteStatus, parseKpiNumber } from "@/lib/kpi-record-status";
@@ -133,6 +134,8 @@ export async function POST(req: NextRequest) {
 
   // Recalculate performance score once
   triggerRecalculation(userId, orgId);
+  // The stored progress of every goal these KPIs feed (V-32).
+  refreshGoalsFedBy(orgId, rows.map((r) => r.kpiId));
   if (!isSelf) void notifyKpiRecordedForYou({ userId, actorId, period, count: newlyApproved });
 
   return jsonSuccess({ saved: results.length, period });

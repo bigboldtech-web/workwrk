@@ -13,6 +13,7 @@
 // solid or dotted, the People team, Admin), never your own number.
 
 import { NextResponse } from "next/server";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -39,7 +40,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const row = await prisma.kPIRecord.findUnique({
     where: { id },
-    select: { id: true, userId: true, status: true, reviewedById: true, kpi: { select: { organizationId: true } } },
+    select: { id: true, userId: true, status: true, reviewedById: true, kpiId: true, kpi: { select: { organizationId: true } } },
   });
   if (!row || row.kpi.organizationId !== u.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -71,5 +72,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   const result = await actOnKpiRecord(id, { action, notes: parsed.data.notes, actorId: u.id });
+  // An approval or a send-back changes which number a KPI-fed goal reads (V-32).
+  refreshGoalsFedBy(u.organizationId, [row.kpiId]);
   return NextResponse.json({ ok: true, status: result.status });
 }

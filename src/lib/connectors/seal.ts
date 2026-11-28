@@ -35,4 +35,8 @@ export const SEALED_COLUMNS: ReadonlyArray<{ model: string; column: string; null
   // A webhook subscription's signing secret (src/app/api/webhooks/route.ts);
   // null on one made before the secret was kept (docs-found fixes batch 3).
   { model: "webhookSubscription", column: "secretSealed", nullable: true },
+  // A tool's saved login (src/lib/tools/tool-credentials.ts, pen test
+  // 2026-11-28, V-27); null on a tool with none, and a login saved before
+  // the seal reads as "opens with neither" until it is first opened.
+  { model: "tool", column: "credentials", nullable: true },
 ];

@@ -227,7 +227,7 @@ type Snapshot = { row: Row; children?: Record<string, Row[]> };
 type TrashDb = Pick<
   typeof prisma,
   "dataTable" | "dataTableRow" | "formDefinition" | "formSubmission" | "item" | "board" | "view" | "boardMember" | "folder" | "space" | "itemListLink"
-  | "whiteboard" | "fileEntry" | "folderMember" | "spaceMember" | "itemCompletion" | "$queryRaw"
+  | "whiteboard" | "fileEntry" | "folderMember" | "spaceMember" | "itemCompletion" | "timeEntry" | "$queryRaw"
 >;
 
 // Snapshots are dynamic JSON; Prisma create inputs require statically-known
@@ -236,7 +236,35 @@ type TrashDb = Pick<
 const asData = (r: unknown): any => r;
 
 /** The client a hierarchy restore writes through: its transaction. */
-type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow" | "itemCompletion">;
+type RestoreDb = Pick<Prisma.TransactionClient, "item" | "board" | "view" | "boardMember" | "folder" | "space" | "whiteboard" | "fileEntry" | "fileFolder" | "folderMember" | "spaceMember" | "dataTable" | "dataTableRow" | "itemCompletion" | "timeEntry">;
+
+/**
+ * Which time entries pointed at these tasks (pen test 2026-11-28, V-38).
+ * TimeEntry.itemId is ON DELETE SET NULL, so trashing a task cut every entry
+ * off it, and a restore brought the task back under the same id without
+ * them: per-task time reports undercounted for good. The links ride in the
+ * snapshot and are put back on restore, only on entries still unlinked.
+ */
+async function timeLinksOf(db: Partial<Pick<TrashDb, "timeEntry">>, itemIds: string[]): Promise<Row[]> {
+  if (!itemIds.length || !db.timeEntry) return [];
+  const rows = await db.timeEntry.findMany({ where: { itemId: { in: itemIds } }, select: { id: true, itemId: true } });
+  return rows as unknown as Row[];
+}
+
+async function restoreTimeLinks(db: Partial<Pick<RestoreDb, "timeEntry">>, links: Row[] | undefined): Promise<void> {
+  if (!links?.length || !db.timeEntry) return;
+  const byItem = new Map<string, string[]>();
+  for (const l of links) {
+    const itemId = String(l.itemId ?? "");
+    if (!itemId) continue;
+    const list = byItem.get(itemId) ?? [];
+    list.push(String(l.id));
+    byItem.set(itemId, list);
+  }
+  for (const [itemId, ids] of byItem) {
+    await db.timeEntry.updateMany({ where: { id: { in: ids }, itemId: null }, data: { itemId } });
+  }
+}
 
 type Entry = {
   /** `db` is the client to read through: the transaction, for the types
@@ -317,7 +345,7 @@ async function captureItemSubtree(rootId: string, db: TrashDb = prisma): Promise
 
 // Capture the boards of a Space/Folder plus their items/views/members, the
 // shared child bundle for the "board" / "folder" / "space" registry entries.
-async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[]; completions?: Row[] }> {
+async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Promise<{ items: Row[]; views: Row[]; members: Row[]; listLinks: Row[]; completions?: Row[]; timeLinks?: Row[] }> {
   if (!boardIds.length) return { items: [], views: [], members: [], listLinks: [] };
   const [items, views, members] = await Promise.all([
     db.item.findMany({ where: { boardId: { in: boardIds } } }),
@@ -332,12 +360,14 @@ async function captureBoardBundle(boardIds: string[], db: TrashDb = prisma): Pro
   // Their tasks' completions (recurring-goals.md C4): no key holds them to
   // the tasks, so the nightly repair would delete them while they sit here.
   const completions = await completionsOf(db, items.map((i) => i.id));
+  const timeLinks = await timeLinksOf(db, items.map((i) => i.id));
   return {
     items: items as unknown as Row[],
     views: views as unknown as Row[],
     members: members as unknown as Row[],
     listLinks: listLinks as unknown as Row[],
     ...(completions.length ? { completions: completions as Row[] } : {}),
+    ...(timeLinks.length ? { timeLinks } : {}),
   };
 }
 
@@ -351,6 +381,7 @@ async function restoreBoardChildren(s: Snapshot, db: RestoreDb = prisma): Promis
   if (members.length) await db.boardMember.createMany({ data: asData(members), skipDuplicates: true });
   if (items.length) await createItemsParentsFirst(items, db);
   await restoreCompletions(db, s.children?.completions ?? [], () => null);
+  await restoreTimeLinks(db, s.children?.timeLinks);
 }
 
 const REGISTRY: Record<TrashType, Entry> = {
@@ -557,9 +588,10 @@ const REGISTRY: Record<TrashType, Entry> = {
         : [];
       // Its completions (recurring-goals.md C4), which no key holds to it.
       const completions = await completionsOf(db, [id, ...subtasks.map((t) => t.id as string)]);
+      const timeLinks = await timeLinksOf(db, [id, ...subtasks.map((t) => t.id as string)]);
       return {
         label: row.title || "Untitled task",
-        snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[], ...(completions.length ? { completions: completions as Row[] } : {}) } },
+        snapshot: { row, children: { subtasks, listLinks: listLinks as unknown as Row[], ...(completions.length ? { completions: completions as Row[] } : {}), ...(timeLinks.length ? { timeLinks } : {}) } },
       };
     },
     restore: async (s, db = prisma) => {
@@ -568,6 +600,7 @@ const REGISTRY: Record<TrashType, Entry> = {
       // Back on the home each task comes back to ("Restore to..." moves it).
       const homeOf = new Map(tree.map((r) => [String(r.id), String(r.boardId)]));
       await restoreCompletions(db, s.children?.completions ?? [], (itemId) => homeOf.get(itemId) ?? null);
+      await restoreTimeLinks(db, s.children?.timeLinks);
     },
   },
 

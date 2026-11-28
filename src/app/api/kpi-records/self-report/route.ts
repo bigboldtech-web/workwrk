@@ -10,6 +10,7 @@
 // We never substitute 0 for a missing line.
 
 import { NextRequest } from "next/server";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { notifyKpiSubmitted } from "@/lib/kpi-review.server";
@@ -137,6 +138,8 @@ export async function POST(req: NextRequest) {
   // assignments (a job title change mid-month): those take no number, and
   // the recorder says so instead of "already saved".
   const skipped = rows.filter((r) => !allowedKpiIds.has(r.kpiId)).length;
+  // The stored progress of every goal these KPIs feed (V-32).
+  refreshGoalsFedBy(getOrgId(session), rows.map((r) => r.kpiId));
   return jsonSuccess({ saved: results.length, skipped, period, status: "SUBMITTED" });
 }
 

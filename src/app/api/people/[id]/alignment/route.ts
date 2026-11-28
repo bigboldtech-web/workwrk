@@ -5,6 +5,7 @@
 // line, the People team and org-wide levels. Peers get a 404, not a peek.
 
 import { NextRequest } from "next/server";
+import { personSeatIn } from "@/lib/access/acting-workspace";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { peopleCtx, relationTo } from "@/lib/people/person-access.server";
@@ -25,28 +26,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return jsonError("Not found", 404);
   }
 
-  const person = await prisma.user.findFirst({
-    where: { id, organizationId: orgId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      avatar: true,
-      // The JD, Role.description is the mission the career home renders
-      // under "My role"; level + department frame it.
-      role: {
-        select: {
-          id: true,
-          title: true,
-          description: true,
-          level: true,
-          department: { select: { id: true, name: true } },
-        },
-      },
-      manager: { select: { id: true, firstName: true, lastName: true } },
-    },
+  // The person by the seat they hold HERE (pen test 2026-11-28, V-43): the
+  // account's workspace alone missed everyone here through a membership, so
+  // a manager got "User not found" for a report who had opened another
+  // workspace. Their job title and manager are their seat's here.
+  const seat = await personSeatIn(orgId, id);
+  if (!seat || seat.removedAt) return jsonError("User not found", 404);
+  const account = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, firstName: true, lastName: true, avatar: true, roleId: true },
   });
-  if (!person) return jsonError("User not found", 404);
+  if (!account) return jsonError("User not found", 404);
+  const roleId = seat.kind === "anchor" ? account.roleId : seat.placement?.roleId ?? null;
+  const [role, manager] = await Promise.all([
+    // The JD, Role.description is the mission the career home renders under
+    // "My role"; level + department frame it.
+    roleId
+      ? prisma.role.findFirst({
+          where: { id: roleId, organizationId: orgId },
+          select: { id: true, title: true, description: true, level: true, department: { select: { id: true, name: true } } },
+        })
+      : null,
+    seat.managerId ? prisma.user.findUnique({ where: { id: seat.managerId }, select: { id: true, firstName: true, lastName: true } }) : null,
+  ]);
+  const person = { id: account.id, firstName: account.firstName, lastName: account.lastName, avatar: account.avatar, role, manager };
 
   const quarter = new URL(req.url).searchParams.get("quarter");
   const alignment = await buildPersonAlignment(orgId, id, { quarter });

@@ -18,6 +18,7 @@
 // person who can see the tool but not manage it (a Can view holder).
 
 import { NextRequest } from "next/server";
+import { isSealedLogin, openLogin, sealLogin } from "@/lib/tools/tool-credentials";
 import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logAuditEvent } from "@/lib/activity";
@@ -67,9 +68,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const u = byId.get(r.userId);
     return { ...r, ...(rolesOn ? { role: toolShareRole({ role }, true) } : {}), name: u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || "Someone" : "Former member", avatar: u?.avatar ?? null };
   });
+  // The login as typed, for the people the tool is shared with; a login saved
+  // before it was kept sealed is sealed now (V-27).
+  const login = openLogin(tool.credentials);
+  if (login && tool.credentials && !isSealedLogin(tool.credentials)) {
+    const sealed = sealLogin(login);
+    if (isSealedLogin(sealed)) {
+      await prisma.tool.updateMany({ where: { id: tool.id, credentials: { equals: tool.credentials as object } }, data: { credentials: sealed } }).catch(() => undefined);
+    }
+  }
   return jsonSuccess({ tool: {
     ...tool,
-    hasLogin: hasLogin(tool.credentials),
+    credentials: login,
+    hasLogin: hasLogin(login),
     // canManage: share and delete it (Full access). With the roles on (the
     // flag), canEdit (the fields and the login) and the viewer's role too.
     canManage: manage,
@@ -100,7 +111,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.url !== undefined) data.url = str(body.url, 500);
   if (body.icon !== undefined) data.icon = str(body.icon, 16);
   if (body.category !== undefined) data.category = str(body.category, 60);
-  if (body.credentials !== undefined) data.credentials = body.credentials && typeof body.credentials === "object" ? body.credentials : null;
+  // Kept sealed (pen test 2026-11-28, V-27).
+  if (body.credentials !== undefined) data.credentials = body.credentials && typeof body.credentials === "object" && !Array.isArray(body.credentials) ? sealLogin(body.credentials) : null;
 
   const updated = await prisma.tool.update({ where: { id }, data, select: { id: true, name: true, description: true, url: true, icon: true, category: true, updatedAt: true } });
   if (body.credentials !== undefined) {

@@ -43,6 +43,18 @@ async function ctxAndApp(slug: string) {
 type RowsResult = { ok: true; rows: Record<string, unknown>[]; body: Record<string, unknown> } | { ok: false; status: number; error: string };
 
 /**
+ * How big an app's rows may be (pen test 2026-11-28, V-47): every row lives
+ * in one JSON column that each write rewrites under a row lock and each read
+ * returns whole, and the only cap was 500 rows, so one 8 MB row was accepted
+ * and every reader downloaded it. A row is at most ROW_MAX_CHARS of JSON and
+ * all of them together at most ROWS_MAX_CHARS.
+ */
+const ROW_MAX_CHARS = 16_000;
+const ROWS_MAX_CHARS = 2_000_000;
+const rowFits = (r: Record<string, unknown>) => JSON.stringify(r).length <= ROW_MAX_CHARS;
+const TOO_BIG_ROW = `A row can hold at most ${ROW_MAX_CHARS / 1000} KB. Shorten it, or promote this app to a real board.`;
+
+/**
  * Lock the app row, re-read its ui, apply `change` to the fresh rows and
  * write them back, all inside one transaction.
  */
@@ -56,6 +68,9 @@ async function mutateRows(
     if (!fresh || fresh.status === "ARCHIVED") return { ok: false as const, status: 404, error: "app not found" };
     const result = change(rowsFromUi(fresh.ui));
     if (!result.ok) return result;
+    if (JSON.stringify(result.rows).length > ROWS_MAX_CHARS) {
+      return { ok: false as const, status: 413, error: "This app's rows are full (2 MB). Promote it to a real board to keep adding." };
+    }
     await tx.app.update({
       where: { id: appId },
       data: { ui: { ...((fresh.ui as object) ?? {}), rows: result.rows } as object },
@@ -91,7 +106,7 @@ function locate(rows: Record<string, unknown>[], ref: { id?: string; index?: num
 }
 
 const appendSchema = z.object({
-  row: z.record(z.string(), z.unknown()),
+  row: z.record(z.string(), z.unknown()).refine(rowFits, TOO_BIG_ROW),
 });
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -100,7 +115,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if ("error" in c) return c.error;
   const body = await req.json().catch(() => null);
   const parsed = appendSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message === TOO_BIG_ROW ? TOO_BIG_ROW : "invalid body" }, { status: 400 });
 
   return mutateRows(c.app.id, (rows) => {
     // Soft cap: refuse to store > 500 rows in the JSON blob. Past that
@@ -118,7 +133,7 @@ const updateSchema = z.object({
   id: z.string().min(1).optional(),
   index: z.number().int().min(0).optional(),
   ids: z.array(z.string().min(1)).min(1).max(500).optional(),
-  row: z.record(z.string(), z.unknown()),
+  row: z.record(z.string(), z.unknown()).refine(rowFits, TOO_BIG_ROW),
 }).refine((b) => b.id !== undefined || b.index !== undefined || b.ids !== undefined, { message: "name a row" });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -127,7 +142,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
   if ("error" in c) return c.error;
   const body = await req.json().catch(() => null);
   const parsed = updateSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message === TOO_BIG_ROW ? TOO_BIG_ROW : "invalid body" }, { status: 400 });
   const { row, ids } = parsed.data;
   // The system fields are the server's.
   delete row.__id; delete row.__createdAt; delete row.__createdById;
@@ -159,7 +174,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ slug:
   if ("error" in c) return c.error;
   const body = await req.json().catch(() => null);
   const parsed = deleteSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message === TOO_BIG_ROW ? TOO_BIG_ROW : "invalid body" }, { status: 400 });
   const { ids } = parsed.data;
 
   return mutateRows(c.app.id, (rows) => {

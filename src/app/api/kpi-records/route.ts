@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { personHere } from "@/lib/access/seated-here";
+import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-scope";
@@ -121,10 +123,10 @@ export async function POST(req: NextRequest) {
   });
   if (!kpi) return jsonError("KPI not found", 404);
 
-  const subject = await prisma.user.findFirst({
-    where: { id: userId, organizationId: orgId },
-    select: { id: true },
-  });
+  // A person by the seat they hold here, a membership one too (pen test
+  // 2026-11-28, V-43: someone who had opened another workspace was "User not
+  // found" to their manager here).
+  const subject = await personHere(orgId, String(userId), "kept");
   if (!subject) return jsonError("User not found", 404);
 
   // Target comes from the KPI definition, falling back to a manual one.
@@ -193,6 +195,8 @@ export async function POST(req: NextRequest) {
 
   // Auto-recalculate performance score
   triggerRecalculation(userId, orgId);
+  // And the stored progress of every goal this KPI feeds (V-32).
+  refreshGoalsFedBy(orgId, [kpiId]);
 
   return jsonSuccess(record, 201);
 }
