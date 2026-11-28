@@ -15,6 +15,7 @@ import type { BnDocJSON } from "@/components/docs/blocknote-canvas";
 import type { Block as LegacyBlock } from "@/components/docs/block-types";
 import { useLayer } from "./shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
+import { fetchWithRetry } from "@/lib/fetch-retry";
 
 // BlockNoteCanvas statically imports heavy editor CSS — load its chunk only
 // when a note is actually opened (this panel is mounted on every page).
@@ -80,6 +81,10 @@ export function NotepadPanel() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [seed, setSeed] = useState<NoteSeed | "loading" | "error">("loading");
   const [saving, setSaving] = useState(false);
+  // A save that failed every retry: said on screen, kept for the next retry
+  // (pen test 2026-11-28, V-19: a note over 64 KB was refused by the browser
+  // as a keepalive request, the error was swallowed, and the note was lost).
+  const [saveFailed, setSaveFailed] = useState(false);
   // Guards a slow note fetch racing a note switch: a stale response must
   // never seed (and then silently save into) the newer note's editor.
   const loadTokenRef = useRef(0);
@@ -96,11 +101,15 @@ export function NotepadPanel() {
   const flushPending = useCallback(() => {
     const p = pendingRef.current;
     if (!p) return;
-    void fetch(`/api/docs/${p.id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body: p.body,
+    // fetchWithRetry: keepalive only while the body fits the browser's 64 KB
+    // keepalive limit (a bigger note goes out as a plain request), and a
+    // network failure or a 5xx is retried.
+    void fetchWithRetry(`/api/docs/${p.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: p.body,
     }).then((r) => {
-      if (r.ok && pendingRef.current?.body === p.body) pendingRef.current = null;
-    }).catch(() => {});
+      if (r.ok && pendingRef.current?.body === p.body) { pendingRef.current = null; setSaveFailed(false); }
+      else if (!r.ok) setSaveFailed(true);
+    }).catch(() => setSaveFailed(true));
   }, []);
 
   const loadList = useCallback(() => {
@@ -170,14 +179,23 @@ export function NotepadPanel() {
     });
     pendingRef.current = { id, body };
     setSaving(true);
-    void fetch(`/api/docs/${id}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, keepalive: true, body,
+    void fetchWithRetry(`/api/docs/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body,
     }).then((r) => {
-      // Only clear our own payload — a newer edit may have replaced it.
-      if (r.ok && pendingRef.current?.body === body) pendingRef.current = null;
-    }).catch(() => {}) // kept in pendingRef → flushPending retries
+      // Only clear our own payload: a newer edit may have replaced it.
+      if (r.ok && pendingRef.current?.body === body) { pendingRef.current = null; setSaveFailed(false); }
+      else if (!r.ok) setSaveFailed(true);
+    }).catch(() => setSaveFailed(true)) // kept in pendingRef: flushPending retries
       .finally(() => { setSaving(false); loadList(); });
   }, [loadList]);
+
+  // A save that failed every retry is tried again every 10 s until it lands,
+  // so "Retrying…" is true and the note is never left unsaved in silence.
+  useEffect(() => {
+    if (!saveFailed) return;
+    const t = window.setInterval(flushPending, 10_000);
+    return () => window.clearInterval(t);
+  }, [saveFailed, flushPending]);
 
   // Retry an unconfirmed save when the tab is hidden/closing. The canvas
   // flushes its own not-yet-emitted edit through onChange on pagehide, which
@@ -217,7 +235,9 @@ export function NotepadPanel() {
             </button>
           ) : null}
           <div className="text-base font-semibold text-ink flex-1">Notepad</div>
-          {saving ? <span className="text-xs text-ink-2">Saving…</span> : null}
+          {saving ? <span className="text-xs text-ink-2">Saving…</span> : saveFailed ? (
+            <span role="alert" className="text-xs text-danger-text">Not saved. Retrying…</span>
+          ) : null}
           <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-hover flex items-center justify-center text-ink-2" aria-label="Close">
             <X className="w-4 h-4" />
           </button>

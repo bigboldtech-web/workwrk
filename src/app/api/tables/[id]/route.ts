@@ -18,6 +18,7 @@ import {
 import { TABLE_EDIT_REFUSAL, readableTableWithRole, tableCtx } from "@/lib/table-gate";
 import { MANAGE_REFUSAL } from "@/lib/object-manage";
 import { logAuditEvent } from "@/lib/activity";
+import type { Prisma } from "@/generated/prisma";
 import { orgPublicLinksAllowed } from "@/lib/public-links";
 import { checkMove, resolvePlacement } from "@/lib/access/node-placement";
 import { roleAtLeast } from "@/lib/access/node-rules";
@@ -111,7 +112,39 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     data.settings = body.settings;
   }
 
-  const updated = await prisma.dataTable.update({ where: { id }, data });
+  // THE STRUCTURE GUARD (pen test 2026-11-28, V-18). Columns, views and
+  // settings are written whole, and the sheet has no live sync: a tab loaded
+  // earlier wrote back its old list on any column action, and the columns,
+  // views and named ranges other people had added since were deleted, with
+  // 200 for both writers. The editor now sends `expect`, the value of each
+  // key as it last saw it from the server; the write lands only while the
+  // stored value still equals it (jsonb equality, so key order never
+  // matters), in the same statement, so of two saves at once one gets the
+  // 409 with the table as it is now, which the editor shows and adopts. A
+  // client that sends no `expect` writes as before.
+  const expect = body.expect && typeof body.expect === "object" && !Array.isArray(body.expect) ? (body.expect as Record<string, unknown>) : null;
+  const guard: Prisma.DataTableWhereInput = {};
+  if (expect) {
+    if (data.columns !== undefined && Array.isArray(expect.columns)) guard.columns = { equals: expect.columns as Prisma.InputJsonValue };
+    if (data.views !== undefined && Array.isArray(expect.views)) guard.views = { equals: expect.views as Prisma.InputJsonValue };
+    if (data.settings !== undefined && expect.settings && typeof expect.settings === "object" && !Array.isArray(expect.settings)) {
+      guard.settings = { equals: expect.settings as Prisma.InputJsonValue };
+    }
+  }
+  let updated;
+  if (Object.keys(guard).length > 0) {
+    const { count } = await prisma.dataTable.updateMany({ where: { id, organizationId: orgId, ...guard }, data });
+    if (count === 0) {
+      const live = await prisma.dataTable.findUnique({ where: { id }, select: { columns: true, views: true, settings: true, updatedAt: true } });
+      return Response.json(
+        { error: "conflict", message: "Someone else changed this table's columns, views or settings. It now shows their changes; make your change again.", table: live },
+        { status: 409 },
+      );
+    }
+    updated = await prisma.dataTable.findUniqueOrThrow({ where: { id } });
+  } else {
+    updated = await prisma.dataTable.update({ where: { id }, data });
+  }
   if (publicChange !== null) {
     void logAuditEvent({
       type: publicChange ? "access.public_link.on" : "access.public_link.off",

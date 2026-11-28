@@ -4,8 +4,14 @@
 // real preview (spec-docs-knowledge section 2, /canvas/[id] Data). A separate
 // route from the scene PATCH on purpose: a thumbnail is presentation, and it
 // must never ride the save path or touch `updatedAt`'s meaning for the 409
-// precondition. Same read gate as the scene; a bad payload is a 400, never a
-// silent skip.
+// precondition. A bad payload is a 400, never a silent skip.
+//
+// Pen test 2026-11-28 (V-17): prisma's @updatedAt bumped Whiteboard.updatedAt
+// on this write, so the editor's next save carried a stale expectedUpdatedAt
+// and got a 409, and every save after it too: every first-party canvas
+// stopped saving seconds after its first edit. The thumbnail is written with
+// a single-column UPDATE that leaves updatedAt alone, and it takes Can edit,
+// as the scene does (a Can view holder replaced the gallery picture).
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
@@ -13,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { whiteboardReadable } from "@/lib/whiteboard-gate";
 import { nodeCtxFromLevel } from "@/lib/access/node-access";
+import { roleAtLeast } from "@/lib/access/node-rules";
 
 const MAX_BYTES = 2_000_000;
 
@@ -36,14 +43,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     select: { id: true, spaceId: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (!(await whiteboardReadable(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), existing))) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
+  const role = await whiteboardReadable(nodeCtxFromLevel(ctx.userId, ctx.orgId, ctx.accessLevel), existing);
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!roleAtLeast(role, "EDIT")) return NextResponse.json({ error: "read-only" }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
 
-  await prisma.whiteboard.update({ where: { id }, data: { thumbnail: parsed.data.dataUrl } });
+  // Never prisma.whiteboard.update here: its @updatedAt is the save's precondition.
+  await prisma.$executeRaw`UPDATE "Whiteboard" SET "thumbnail" = ${parsed.data.dataUrl} WHERE "id" = ${id}`;
   return NextResponse.json({ ok: true });
 }

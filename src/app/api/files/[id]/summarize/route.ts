@@ -17,8 +17,15 @@ import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
 import { canReadFile } from "@/lib/file-access";
 import { aiOffResponse } from "@/lib/ai/ai-off-gate";
+import { readUpload } from "@/lib/local-uploads";
+import { fetchPublic, readCapped } from "@/lib/net/public-fetch";
 
 const MAX_INPUT_CHARS = 200_000;
+/** The most of a file read for a summary (a PDF of a few hundred pages). */
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/** A refusal the person can act on; never a network detail. */
+class Unreadable extends Error {}
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -40,10 +47,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   let text: string;
   try {
     const freshFile = await withFreshFileUrl(file);
-    text = await extractText(freshFile.url, freshFile.mimeType);
+    // The type first: an unsupported file is never downloaded.
+    if (!summarizable(freshFile.url, freshFile.mimeType)) throw new Unreadable("Only PDF and text files can be summarized for now.");
+    const bytes = await fileBytes(freshFile);
+    text = await extractText(bytes, freshFile.url, freshFile.mimeType);
   } catch (err) {
     console.error(`summarize: extract failed for ${file.id}`, err);
-    return jsonError(err instanceof Error ? err.message : "extraction failed", 415);
+    // Only this route's own words go back (pen test 2026-11-28, V-09: the
+    // fetch error text told a closed port from an open one).
+    return jsonError(err instanceof Unreadable ? err.message : "Couldn't read this file.", 415);
   }
 
   const trimmed = text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text;
@@ -83,34 +95,58 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   return jsonSuccess({ summary });
 }
 
-async function extractText(url: string, mimeType: string): Promise<string> {
-  const fetchUrl = url.startsWith("http") ? url : new URL(url, getOrigin()).toString();
-  const res = await fetch(fetchUrl);
-  if (!res.ok) throw new Error(`couldn't fetch file (${res.status})`);
+/**
+ * The file's bytes, from where WE stored it, or for a file added by link,
+ * from a public address only (pen test 2026-11-28, V-09): a bare fetch of the
+ * stored address reached this server's own API, internal services and the
+ * cloud metadata address, redirects followed.
+ */
+async function fileBytes(file: { url: string; s3Key?: string | null }): Promise<Uint8Array> {
+  // Our S3 object: the address was signed here from the stored key.
+  if (file.s3Key) {
+    const res = await fetch(file.url, { redirect: "error" });
+    if (!res.ok) throw new Unreadable("Couldn't read this file.");
+    const { bytes, truncated } = await readCapped(res.body, MAX_FILE_BYTES);
+    if (truncated) throw new Unreadable("This file is too large to summarize.");
+    return bytes;
+  }
+  // Our local disk: read it there, never over HTTP to ourselves.
+  const local = /^\/api\/uploads\/([^/?#]+)$/.exec(file.url);
+  if (local) {
+    const buf = await readUpload(decodeURIComponent(local[1]));
+    if (!buf) throw new Unreadable("Couldn't read this file.");
+    if (buf.length > MAX_FILE_BYTES) throw new Unreadable("This file is too large to summarize.");
+    return new Uint8Array(buf);
+  }
+  // A file added by link: a public address, or nothing.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetchPublic(file.url, { signal: controller.signal, maxRedirects: 3 });
+    if (!res.ok || res.status < 200 || res.status >= 300) throw new Unreadable("Couldn't read this file from its link.");
+    const { bytes, truncated } = await readCapped(res.body, MAX_FILE_BYTES);
+    if (truncated) throw new Unreadable("This file is too large to summarize.");
+    return bytes;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-  if (mimeType === "application/pdf" || url.toLowerCase().endsWith(".pdf")) {
-    const buf = new Uint8Array(await res.arrayBuffer());
+const isPdf = (url: string, mimeType: string) => mimeType === "application/pdf" || url.toLowerCase().split("?")[0].endsWith(".pdf");
+const isText = (mimeType: string) =>
+  mimeType.startsWith("text/") || mimeType === "application/json" || mimeType === "application/xml" || mimeType === "application/x-yaml";
+function summarizable(url: string, mimeType: string): boolean {
+  return isPdf(url, mimeType) || isText(mimeType);
+}
+
+async function extractText(bytes: Uint8Array, url: string, mimeType: string): Promise<string> {
+  if (isPdf(url, mimeType)) {
     const { extractText: pdfExtract } = await import("unpdf");
-    const { text } = await pdfExtract(buf, { mergePages: true });
+    const { text } = await pdfExtract(bytes, { mergePages: true });
     return Array.isArray(text) ? text.join("\n") : text;
   }
 
-  if (
-    mimeType.startsWith("text/") ||
-    mimeType === "application/json" ||
-    mimeType === "application/xml" ||
-    mimeType === "application/x-yaml"
-  ) {
-    return res.text();
-  }
+  if (isText(mimeType)) return new TextDecoder().decode(bytes);
 
-  throw new Error(`unsupported mime type: ${mimeType} (PDF and text only for now)`);
-}
-
-function getOrigin(): string {
-  return (
-    process.env.NEXTAUTH_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    "http://localhost:3000"
-  );
+  throw new Unreadable(`Only PDF and text files can be summarized for now.`);
 }

@@ -1538,6 +1538,11 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
       // saved on a bigger sheet must not freeze everything that's left.
       setFreeze(clampFreeze(savedViews[0]?.config?.freeze, (rowsRef.current ?? []).length, t.columns.length));
       savedColumnsRef.current = t.columns;
+      serverStructRef.current = {
+        columns: t.columns,
+        ...(t.views !== undefined ? { views: t.views } : {}),
+        ...(t.settings !== undefined && t.settings !== null ? { settings: t.settings } : {}),
+      };
     } catch (e) {
       // A stale stream that failed (or was deliberately aborted by the
       // generation check) must not touch the newer load's UI.
@@ -1592,6 +1597,14 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
    *  controlled and mutates column state per keystroke, so by blur time the
    *  pre-edit label only survives here. */
   const savedColumnsRef = useRef<Column[] | null>(null);
+  /** The columns, views and settings as the SERVER last confirmed them, sent
+   *  as `expect` with every structure save (pen test 2026-11-28, V-18): a tab
+   *  loaded earlier wrote back its old lists, and the columns, views and
+   *  named ranges other people had added since were deleted. */
+  const serverStructRef = useRef<{ columns?: unknown; views?: unknown; settings?: unknown }>({});
+  /** Structure saves go one at a time, each sending what the one before it
+   *  left on the server, so two quick changes here are never a conflict. */
+  const structQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   /** Push value writes into the persistent host as ONE setCells pass (one
    *  clock snapshot, one recalc, a 500-cell batch is one pass, not 500),
@@ -1885,10 +1898,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => prev ? { ...prev, columns: cols } : prev);
     if (!opts?.hostAlreadyCurrent) rebuildEngine(cols, rowsRef.current ?? []);
-    const res = await fetchWithRetry(`/api/tables/${tableId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ columns: cols }),
-    });
+    const res = await sendTablePatch({ columns: cols });
     if (!res.ok) throw new Error(`columns PATCH HTTP ${res.status}`);
     savedColumnsRef.current = cols;
   }
@@ -2020,6 +2030,53 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     }).catch(() => {});
   }, [configColId, allTables.length]);
 
+  /** The table as the server has it now, after a save it refused: shown,
+   *  and the base of the next save (V-18). */
+  function adoptServerStructure(live: { columns?: unknown; views?: unknown; settings?: unknown }, message?: string) {
+    serverStructRef.current = { columns: live.columns, views: live.views, settings: live.settings };
+    const cols = Array.isArray(live.columns) ? (live.columns as Column[]) : null;
+    const views = Array.isArray(live.views) ? (live.views as SavedView[]) : null;
+    const settings = live.settings && typeof live.settings === "object" ? (live.settings as TableSettings) : null;
+    if (tableRef.current) {
+      tableRef.current = { ...tableRef.current, ...(cols ? { columns: cols } : {}), ...(views ? { views } : {}), ...(settings ? { settings } : {}) };
+    }
+    setTable((prev) => (prev ? { ...prev, ...(cols ? { columns: cols } : {}), ...(views ? { views } : {}), ...(settings ? { settings } : {}) } : prev));
+    if (views) viewsRef.current = views.length ? views : [{ id: "default", name: "Grid", type: "grid" }];
+    if (cols) {
+      savedColumnsRef.current = cols;
+      rebuildEngine(cols, rowsRef.current ?? []);
+    }
+    toast(message ?? "Someone else changed this table. It now shows their changes; make your change again.", { tone: "danger", key: "table-structure-conflict" });
+  }
+
+  /** One table PATCH. A change to the columns, views or settings carries the
+   *  server's last value of each as `expect` and waits its turn (see
+   *  structQueueRef); the server refuses it with 409 when someone else
+   *  changed that key meanwhile, and the table adopts their version. */
+  function sendTablePatch(patch: Record<string, unknown>): Promise<Response> {
+    const keys = (["columns", "views", "settings"] as const).filter((k) => k in patch);
+    const send = (body: Record<string, unknown>) => fetchWithRetry(`/api/tables/${tableId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (keys.length === 0) return send(patch);
+    const run = structQueueRef.current.catch(() => undefined).then(async () => {
+      const expect: Record<string, unknown> = {};
+      for (const k of keys) if (serverStructRef.current[k] !== undefined) expect[k] = serverStructRef.current[k];
+      const res = await send(Object.keys(expect).length ? { ...patch, expect } : patch);
+      if (res.ok) {
+        for (const k of keys) serverStructRef.current[k] = patch[k];
+      } else if (res.status === 409) {
+        const d = await res.clone().json().catch(() => null);
+        const live = d?.table ?? d?.data?.table;
+        if (live) adoptServerStructure(live, typeof d?.message === "string" ? d.message : undefined);
+      }
+      return res;
+    });
+    structQueueRef.current = run;
+    return run;
+  }
+
   /** True when the server accepted the patch, the undo push sites need to
    *  know an action actually landed before recording how to reverse it. */
   async function patchTable(patch: Partial<ApiTable>): Promise<boolean> {
@@ -2027,10 +2084,7 @@ export function TableEditor({ tableId: routeTableId }: { tableId: string }) {
     try {
       // A table PATCH sets fields, so a repeat is harmless: retried on a
       // network failure or a 5xx, with keepalive, before it reports false.
-      const res = await fetchWithRetry(`/api/tables/${tableId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
+      const res = await sendTablePatch(patch as Record<string, unknown>);
       // The title row's AutosaveIndicator and the status bar's last-saved
       // time read these; a failure stays visible until a save lands.
       if (res.ok) { setLastSavedAt(new Date()); noteWriteSettled(TABLE_LEDGER_KEY, Object.keys(patch)); }

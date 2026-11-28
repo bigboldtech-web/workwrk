@@ -122,18 +122,34 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!moved.ok) return NextResponse.json({ error: moved.error }, { status: moved.status });
   }
 
-  const whiteboard = await prisma.whiteboard.update({
-    where: { id },
-    data: {
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-      ...(parsed.data.scene !== undefined ? { scene: parsed.data.scene as object } : {}),
-      ...(parsed.data.thumbnail !== undefined ? { thumbnail: parsed.data.thumbnail } : {}),
-      lastEditedById: ctx.userId,
-      lastEditedAt: new Date(),
-    },
-    select: { id: true, name: true, updatedAt: true, lastEditedAt: true },
-  });
+  const data = {
+    ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+    ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+    ...(parsed.data.scene !== undefined ? { scene: parsed.data.scene as object } : {}),
+    ...(parsed.data.thumbnail !== undefined ? { thumbnail: parsed.data.thumbnail } : {}),
+    lastEditedById: ctx.userId,
+    lastEditedAt: new Date(),
+  };
+  const select = { id: true, name: true, updatedAt: true, lastEditedAt: true } as const;
+  let whiteboard;
+  if (parsed.data.expectedUpdatedAt && parsed.data.scene !== undefined) {
+    // The precondition and the write are one step (pen test 2026-11-28,
+    // V-34): two saves read the same updatedAt, both passed the check above
+    // and both wrote, and one scene was lost with no conflict and no history.
+    // Only the save that still finds the updatedAt it checked writes; the
+    // other gets the same 409 a stale tab gets.
+    const { count } = await prisma.whiteboard.updateMany({ where: { id, updatedAt: existing.updatedAt }, data });
+    if (count === 0) {
+      const live = await prisma.whiteboard.findUnique({ where: { id }, select: { updatedAt: true } });
+      return NextResponse.json(
+        { error: "conflict", message: "This canvas was edited elsewhere. Reload to see the latest version before saving again.", liveUpdatedAt: live?.updatedAt ?? null },
+        { status: 409 },
+      );
+    }
+    whiteboard = await prisma.whiteboard.findUniqueOrThrow({ where: { id }, select });
+  } else {
+    whiteboard = await prisma.whiteboard.update({ where: { id }, data, select });
+  }
 
   // Version history — snapshot the scene after a successful save (best-effort,
   // throttled, never affects the save above).
