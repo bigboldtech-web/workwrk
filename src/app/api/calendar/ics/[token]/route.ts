@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { renderICalendar, type ICalEvent } from "@/services/icalExport";
 import { NOT_SYSTEM_ITEMS } from "@/lib/system-items";
+import { ENDED_STATUS, liveSeatWhere, workspaceIsOpen } from "@/lib/access/workspace-seat";
 
 /**
  * Public iCal feed. Auth is the per-user token in the URL — no session
@@ -32,8 +33,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
 
   const user = await prisma.user.findUnique({
     where: { id: sub.userId },
-    select: { firstName: true, lastName: true, organization: { select: { name: true } } },
+    select: { firstName: true, lastName: true, organizationId: true, status: true, deletedAt: true, organization: { select: { name: true } } },
   });
+  // A feed serves only a person who still works here, and only the
+  // workspaces they still hold a live seat in (pen test 2026-11-28, V-25: a
+  // deactivated or offboarded person's calendar kept pulling meeting and task
+  // titles, and nothing turned the subscription off).
+  if (!user || user.deletedAt) return new Response("Unknown or revoked feed token", { status: 404 });
+  const seats = await prisma.organizationMembership.findMany({
+    where: { userId: sub.userId, ...liveSeatWhere() },
+    select: { organizationId: true },
+  });
+  // Their own workspace while their account there is live, and every
+  // workspace they hold a live seat in; a suspended or closed workspace never.
+  const seatOrgIds = [...new Set([...(user.status === ENDED_STATUS ? [] : [user.organizationId]), ...seats.map((s) => s.organizationId)])];
+  const open = await prisma.organization.findMany({ where: { id: { in: seatOrgIds } }, select: { id: true, status: true } });
+  const liveOrgIds = open.filter((o) => workspaceIsOpen(o.status)).map((o) => o.id);
+  if (liveOrgIds.length === 0) return new Response("Unknown or revoked feed token", { status: 404 });
 
   const now = new Date();
   const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -56,6 +72,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
       where: {
         archivedAt: null,
         ...NOT_SYSTEM_ITEMS,
+        organizationId: { in: liveOrgIds },
         OR: [{ ownerId: sub.userId }, { assigneeIds: { has: sub.userId } }],
         AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
       },
@@ -71,6 +88,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     prisma.meeting.findMany({
       where: {
         scheduledAt: { gte: from, lte: to },
+        organizationId: { in: liveOrgIds },
         attendees: { some: { userId: sub.userId } },
       },
       select: {

@@ -11,6 +11,8 @@
 //
 // Pure: no prisma, no React. Every rule below is unit-tested.
 
+import { csvFormulaSafe } from "./csv";
+
 /** Everything the one Trash can hold. */
 export type TrashTypeKey =
   | "space" | "folder" | "list" | "task"
@@ -312,7 +314,9 @@ export function trashCsv(rows: readonly TrashCsvRow[], tab: TrashTab, opts: { ex
     const cells = tab === "archived"
       ? [r.name, r.type, r.location, r.deletedByName, r.deletedAt]
       : [r.name, r.type, r.location, r.deletedByName, r.deletedAt, ...(timed ? [r.timeLeft] : [])];
-    lines.push(cells.map(csvCell).join(","));
+    // Names and places people typed never run as a spreadsheet formula
+    // (pen test 2026-11-28, V-29).
+    lines.push(cells.map((c) => csvCell(csvFormulaSafe(c))).join(","));
   }
   return `${lines.join("\r\n")}\r\n`;
 }

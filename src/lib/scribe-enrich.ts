@@ -1,4 +1,5 @@
 import { isS3Configured, presignGetUrl } from "@/lib/s3";
+import { keyInWorkspace } from "@/lib/storage-key";
 
 /**
  * Enrich a recorded-SOP payload so the frontend can render screenshots
@@ -28,7 +29,7 @@ interface LooseSop {
   [k: string]: unknown;
 }
 
-export async function enrichScribeScreenshots<T extends LooseSop>(sop: T): Promise<T> {
+export async function enrichScribeScreenshots<T extends LooseSop>(sop: T, organizationId: string): Promise<T> {
   const steps = sop?.content?.steps;
   if (!Array.isArray(steps) || steps.length === 0) return sop;
   if (!isS3Configured()) return sop;
@@ -38,6 +39,9 @@ export async function enrichScribeScreenshots<T extends LooseSop>(sop: T): Promi
   const enrichedSteps = await Promise.all(
     steps.map(async (step) => {
       if (!step?.screenshotKey || step?.screenshot) return step;
+      // Only a key of the SOP's own workspace is signed (pen test 2026-11-28,
+      // V-21, the step 4 review): a recording stored any key the client sent.
+      if (!keyInWorkspace(step.screenshotKey, organizationId)) return step;
       try {
         const url = await presignGetUrl(step.screenshotKey, SCREENSHOT_TTL_SECONDS);
         return { ...step, screenshot: url };
@@ -54,7 +58,7 @@ export async function enrichScribeScreenshots<T extends LooseSop>(sop: T): Promi
 }
 
 /** Batch helper for list endpoints. */
-export async function enrichScribeScreenshotsMany<T extends LooseSop>(sops: T[]): Promise<T[]> {
+export async function enrichScribeScreenshotsMany<T extends LooseSop>(sops: T[], organizationId: string): Promise<T[]> {
   if (!isS3Configured()) return sops;
-  return Promise.all(sops.map((s) => enrichScribeScreenshots(s)));
+  return Promise.all(sops.map((s) => enrichScribeScreenshots(s, organizationId)));
 }

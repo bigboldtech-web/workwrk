@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isOwnerOrAdmin, requireApp } from "@/lib/app-gate";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
+import { webhookConfigRefusal } from "@/lib/webhooks";
 
 /**
  * Owner or Admin only, as POST /api/integrations: a connection's config holds
@@ -34,6 +35,16 @@ export async function PATCH(
 
   if (!integration) {
     return jsonError("Integration not found", 404);
+  }
+  // A webhook address only to a public https receiver (pen test 2026-11-28,
+  // V-26); a save that resends the stored address unchanged is not refused.
+  if (body.config) {
+    const stored = (integration.config as { webhookUrl?: unknown } | null)?.webhookUrl;
+    const sent = (body.config as { webhookUrl?: unknown }).webhookUrl;
+    if (sent !== stored) {
+      const badUrl = await webhookConfigRefusal(body.config);
+      if (badUrl) return jsonError(badUrl, 400);
+    }
   }
 
   const updated = await prisma.integration.update({

@@ -78,10 +78,10 @@ export async function GET(
   ]);
   const role = await resolveSopViewerRole(session, sop, !!myAssignment);
 
-  const enriched = await enrichScribeScreenshots(sop as Parameters<typeof enrichScribeScreenshots>[0]);
+  const enriched = await enrichScribeScreenshots(sop as Parameters<typeof enrichScribeScreenshots>[0], orgId);
   // For blocks-format WRITTEN SOPs, also refresh image / file URLs.
   const final = enriched && enriched.content
-    ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content) }
+    ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content, orgId) }
     : enriched;
   return jsonSuccess({
     ...final,
@@ -330,7 +330,7 @@ export async function PATCH(
     });
   }
 
-  const enriched = await enrichScribeScreenshots(updated as Parameters<typeof enrichScribeScreenshots>[0]);
+  const enriched = await enrichScribeScreenshots(updated as Parameters<typeof enrichScribeScreenshots>[0], orgId);
   return jsonSuccess({ ...enriched, kind: getSopKind(updated.sopType, updated.content), layout: getSopLayout(updated.content) });
 }
 

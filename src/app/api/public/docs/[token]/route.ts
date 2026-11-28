@@ -56,7 +56,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
 
   // Re-sign S3-backed image/file blocks so they render publicly, exactly
   // like the authed GET /api/docs/[id] does.
-  const content = await presignBlocksImagesAndFiles(doc.content);
+  const content = await presignBlocksImagesAndFiles(doc.content, doc.organizationId);
 
   // The org name and logo for the page header; never members, emails or the
   // sharing entry.

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { keyInWorkspace } from "@/lib/storage-key";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission, hasPermission } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
@@ -80,7 +81,9 @@ export async function POST(req: NextRequest) {
       description: step.description,
       url: step.url,
       screenshot: step.screenshot ?? null,
-      screenshotKey: step.screenshotKey ?? null,
+      // A key only of this workspace (pen test 2026-11-28, V-21): another's is
+      // dropped, never stored to be signed later; the step itself is kept.
+      screenshotKey: keyInWorkspace(step.screenshotKey, orgId) ? step.screenshotKey : null,
       elementText: step.elementText,
       elementTag: step.elementTag,
     })),

@@ -148,6 +148,7 @@ describe("a skill's words and its table", () => {
       "2026-11-01-membership-status.sql",
       "2026-11-03-workspace-lines.sql",
       "2026-11-04-week-rows-per-workspace.sql",
+      "2026-11-28-time-entry-item.sql",
     ]);
     expect(new Set(files).size).toBe(files.length);
   });

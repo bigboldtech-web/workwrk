@@ -281,9 +281,9 @@ describe(FILE, () => {
     const block = (/const SQL_MANIFEST = \[([\s\S]*?)\]/.exec(manifest)?.[1] ?? "").replace(/\/\/[^\n]*/g, "");
     const files = [...block.matchAll(/"([^"]+\.sql)"/g)].map((m) => m[1]);
     // The final review (security M1) adds the week rows per workspace after it.
-    expect(files[files.length - 2]).toBe(FILE);
+    expect(files[files.length - 3]).toBe(FILE);
     expect(files.filter((f) => f === FILE)).toHaveLength(1);
-    expect(files.slice(-3)).toEqual(["2026-11-01-membership-status.sql", FILE, "2026-11-04-week-rows-per-workspace.sql"]);
+    expect(files.slice(-4)).toEqual(["2026-11-01-membership-status.sql", FILE, "2026-11-04-week-rows-per-workspace.sql", "2026-11-28-time-entry-item.sql"]);
     const row = new RegExp(`^\\| \`${FILE}\` \\| A person's manager and dotted lines in each workspace .* \\| \\*\\*pending\\*\\* \\|$`, "m").exec(read("prisma/sql/README.md"))?.[0] ?? "";
     expect(row).not.toBe("");
     expect(row).toContain(`a later \`COMMENT ON\` that column must keep the text \`${MARKER}\``);

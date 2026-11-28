@@ -1,5 +1,21 @@
 import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
+import { checkWebhookTarget, sendPinned } from "@/lib/webhook-target";
+
+/** Said for an address that is not a public https one: never more, so the
+ *  Test button is no probe of anyone's network. */
+const NOT_PUBLIC = "This address is not allowed: use a public https address.";
+
+/**
+ * A connection's webhook address, checked when it is saved (the send checks
+ * again, and pins): null when allowed or absent, else the sentence to show.
+ */
+export async function webhookConfigRefusal(config: unknown): Promise<string | null> {
+  const url = config && typeof config === "object" ? (config as { webhookUrl?: unknown }).webhookUrl : undefined;
+  if (url === undefined || url === null || url === "") return null;
+  const target = await checkWebhookTarget(url, { signal: AbortSignal.timeout(5000) }).catch(() => ({ ok: false as const }));
+  return target.ok ? null : NOT_PUBLIC;
+}
 
 // Send an outgoing webhook to a configured integration
 export async function sendWebhook(params: {
@@ -39,12 +55,29 @@ export async function sendWebhook(params: {
       headers["X-WorkwrK-Signature"] = `sha256=${signature}`;
     }
 
-    const res = await fetch(webhookUrl, {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(10000),
-    });
+    // The webhook rule (src/lib/webhook-target.ts), as /api/webhooks sends:
+    // https, a public address for every name the host resolves to, the
+    // connection pinned to those addresses, no redirect followed (pen test
+    // 2026-11-28, V-26: this bare fetch posted workspace events to internal
+    // addresses, and the Test button reported each one's status).
+    const signal = AbortSignal.timeout(10000);
+    const target = await checkWebhookTarget(webhookUrl, { signal });
+    if (!target.ok) {
+      await prisma.webhookLog.create({
+        data: {
+          integrationId,
+          direction: "outgoing",
+          event,
+          payload: { url: String(webhookUrl), body: payload },
+          status: "failed",
+          error: NOT_PUBLIC,
+        },
+      });
+      return;
+    }
+    const res = await sendPinned(target, { headers, body, signal });
+    await res.body?.cancel().catch(() => {});
+    const ok = res.status >= 200 && res.status < 300;
 
     await prisma.webhookLog.create({
       data: {
@@ -52,9 +85,9 @@ export async function sendWebhook(params: {
         direction: "outgoing",
         event,
         payload: { url: webhookUrl, body: payload },
-        status: res.ok ? "sent" : "failed",
+        status: ok ? "sent" : "failed",
         responseCode: res.status,
-        error: res.ok ? null : `HTTP ${res.status}`,
+        error: ok ? null : `HTTP ${res.status}`,
       },
     });
   } catch (err: any) {

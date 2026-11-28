@@ -243,7 +243,10 @@ export async function GET(
     severity: rows.length > 1000 ? "warning" : "info",
   });
 
-  const body = toCsv(rows, columns);
+  // People's own words (a meeting title, a vendor name) never run as a
+  // spreadsheet formula when an admin opens the file (pen test 2026-11-28,
+  // V-29: "=HYPERLINK(...)" in a meeting title ran in Excel and Sheets).
+  const body = toCsv(rows, columns, { formulaSafe: true });
   return new Response(body, {
     status: 200,
     headers: {

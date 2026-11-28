@@ -54,10 +54,10 @@ export default async function PublicSopPage({ params }: { params: Promise<{ toke
   // render for an anonymous viewer, exactly like the authed page.
   let content: unknown = sop.content;
   try {
-    const enriched = await enrichScribeScreenshots({ content } as Parameters<typeof enrichScribeScreenshots>[0]);
+    const enriched = await enrichScribeScreenshots({ content } as Parameters<typeof enrichScribeScreenshots>[0], sop.organizationId);
     content = enriched.content ?? content;
   } catch { /* fall back to raw content */ }
-  try { content = await presignBlocksImagesAndFiles(content); } catch { /* fall back to prior content */ }
+  try { content = await presignBlocksImagesAndFiles(content, sop.organizationId); } catch { /* fall back to prior content */ }
   // Only what the page shows reaches the browser: SopReadView is a client
   // component, so its whole content prop is serialized into the page. The
   // steps' job titles, "Creates a task" and the run's List id are internal
