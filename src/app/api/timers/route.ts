@@ -32,6 +32,9 @@ export async function GET(req: Request) {
   if (!entityType || !entityId) {
     return NextResponse.json({ error: "entityType + entityId required" }, { status: 400 });
   }
+  // A timer runs on a task only (pen test V-59, the step 8 review): any other
+  // target listed everyone's sessions on it with no gate.
+  if (entityType !== "BOARD_ITEM") return NextResponse.json({ error: "A timer runs on a task." }, { status: 400 });
   // Whose time is on a task is the task's: only for someone who can open it.
   const refusedRead = await taskTimerRefusal(entityType, entityId);
   if (refusedRead) return refusedRead;
@@ -80,6 +83,9 @@ export async function POST(req: Request) {
 
   const parsed = manualSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  // Logged time goes on a task only, as a timer does (V-59, the step 8
+  // review): any other target was stored and never reached the timesheet.
+  if (parsed.data.entityType !== "BOARD_ITEM") return NextResponse.json({ error: "Time is logged on a task." }, { status: 400 });
   const refused = await taskTimerRefusal(parsed.data.entityType, parsed.data.entityId);
   if (refused) return refused;
 

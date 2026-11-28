@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     organizationId: orgId,
     // No em dash: naming-canon H.10 forbids one in any string a person
     // reads, and this string is read on /activity.
-    description: `Applied "${t.name}" template: seeded a doc, form${table ? ", and table" : ""}`,
+    description: `Applied "${t.name}" template: seeded ${table ? "a doc, a form and a table" : "a doc and a form"}`,
     metadata: {
       template: t.id,
       docId: doc.id,

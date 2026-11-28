@@ -32,10 +32,16 @@ export function videoEmbedSrc(raw: string): string | null {
   const candidate = (iframeSrc ?? raw).trim();
   let u: URL;
   try { u = new URL(candidate); } catch { return null; }
-  // https only: a framed page never comes over plain http (pen test
-  // 2026-11-28, V-51).
-  if (u.protocol !== "https:") return null;
   const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  // A known provider's link is rewritten to its own https player below, so an
+  // old http link still plays (the step 8 review). Everything passed through
+  // as given must be https (pen test 2026-11-28, V-51), and never this app's
+  // own pages, which a sandbox with scripts and same-origin cannot contain.
+  const rewritten = ["youtube.com", "m.youtube.com", "youtube-nocookie.com", "youtu.be", "vimeo.com", "loom.com", "drive.google.com"].includes(host);
+  if (!rewritten && u.protocol !== "https:") return null;
+  if (typeof window !== "undefined" && u.origin === window.location.origin) return null;
+  /** The URL exactly as given: only ever https. */
+  const passThrough = (): string | null => (u.protocol === "https:" ? candidate : null);
 
   // YouTube (watch, short link, shorts, embed)
   if (host === "youtube.com" || host === "m.youtube.com" || host === "youtube-nocookie.com") {
@@ -53,7 +59,7 @@ export function videoEmbedSrc(raw: string): string | null {
     const id = u.pathname.split("/").filter(Boolean)[0];
     if (id && /^\d+$/.test(id)) return `https://player.vimeo.com/video/${id}`;
   }
-  if (host === "player.vimeo.com") return candidate;
+  if (host === "player.vimeo.com") return passThrough();
   // Loom
   if (host === "loom.com") {
     const m = u.pathname.match(/\/(?:share|embed)\/([\w-]+)/);
@@ -65,11 +71,11 @@ export function videoEmbedSrc(raw: string): string | null {
     if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
   }
   // Dadan (screen recordings) — its links are already embed URLs.
-  if (host === "dadan.io" || host.endsWith(".dadan.io")) return candidate;
+  if (host === "dadan.io" || host.endsWith(".dadan.io")) return passThrough();
   // Any explicit embed/player URL (embed.html, /embed/, player.*, wistia…).
-  if (/embed/i.test(u.pathname) || host.startsWith("player.") || host.startsWith("fast.")) return candidate;
+  if (/embed/i.test(u.pathname) || host.startsWith("player.") || host.startsWith("fast.")) return passThrough();
   // Came straight from an <iframe> the user pasted → trust it.
-  if (iframeSrc) return candidate;
+  if (iframeSrc) return passThrough();
   return null;
 }
 
