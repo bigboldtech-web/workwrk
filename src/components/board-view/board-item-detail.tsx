@@ -454,7 +454,11 @@ export function BoardItemDetail({
       {/* 4, the description (c) */}
       <section>
         <h3 className="mb-1.5 text-sm font-medium text-ink">Description</h3>
+        {/* One field, and one save queue, per task (the final review): a host
+            that switches task without remounting (the Inbox) kept the queue,
+            and a save waiting for task A went to task B. */}
         <DescriptionField
+          key={item.id}
           item={item}
           canEdit={canEdit}
           draft={descriptionDraft}

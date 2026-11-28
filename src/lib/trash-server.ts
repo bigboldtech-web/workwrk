@@ -1260,7 +1260,7 @@ export async function purgeTrashRow(viewer: Viewer, rowId: string): Promise<Tras
     if (type === "task" || type === "list") {
       const roots = type === "task"
         ? await prisma.item.findMany({ where: { id, organizationId: orgId }, select: { id: true, boardId: true } })
-        : await prisma.item.findMany({ where: { boardId: id }, select: { id: true, boardId: true } });
+        : await prisma.item.findMany({ where: { boardId: id, organizationId: orgId }, select: { id: true, boardId: true } });
       if (roots.length) await detachCrossListChildren(prisma, roots, type === "list" ? new Set([id]) : undefined);
     }
     switch (type) {

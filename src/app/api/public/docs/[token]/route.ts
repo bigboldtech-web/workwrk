@@ -9,6 +9,7 @@
 // GET only — no other method exports, so writes 405. The payload NEVER
 // includes members, emails, org settings, or the sharing entry.
 
+import { signContentUploadLinks, signUploadUrl } from "@/lib/upload-link";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getDocSharingMap, publicSecretMatches } from "@/lib/doc-sharing";
@@ -56,7 +57,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
 
   // Re-sign S3-backed image/file blocks so they render publicly, exactly
   // like the authed GET /api/docs/[id] does.
-  const content = await presignBlocksImagesAndFiles(doc.content, doc.organizationId);
+  // And a local attachment link signed for this anonymous reader (the final
+  // review: attachments need a seat in their company now, V-23).
+  const content = signContentUploadLinks(await presignBlocksImagesAndFiles(doc.content, doc.organizationId), doc.organizationId);
 
   // The org name and logo for the page header; never members, emails or the
   // sharing entry.
