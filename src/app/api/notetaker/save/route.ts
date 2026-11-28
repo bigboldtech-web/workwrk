@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { peopleHereByName, personHere, personHereByEmail, type Reach } from "@/lib/access/seated-here";
+import { actingWorkspace } from "@/lib/access/acting-workspace";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
@@ -65,8 +66,12 @@ export async function POST(req: Request) {
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = (session.user as { id?: string }).id;
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, organizationId: true, accessLevel: true } });
   if (!user?.organizationId) return NextResponse.json({ error: "no organization" }, { status: 400 });
+  // The workspace this session acts in, at the level held there, like every
+  // other route: the anchored one wrote a meeting and its tasks into one
+  // workspace while the person worked in another (pen test 2026-11-28 review).
+  const acting = await actingWorkspace(user, (session.user as { organizationId?: string }).organizationId);
 
   const body = await req.json().catch(() => null);
   const parsed = inputSchema.safeParse(body);
@@ -80,7 +85,7 @@ export async function POST(req: Request) {
   // removed, either kind, exactly as a task's assignee check reads it
   // (assignable.ts unknownUserIds), so the task it makes on a List never
   // refuses the next assignee edit; nobody matched falls back to the saver.
-  const orgId = user.organizationId;
+  const orgId = acting.organizationId;
   const ATTENDEE: Reach = { anchored: "any", membership: "kept" };
   const OWNER: Reach = "kept";
   async function personInOrg(by: { id?: string | null; email?: string | null; name?: string | null }, reach: Reach): Promise<string | null> {
@@ -147,9 +152,11 @@ export async function POST(req: Request) {
   // create_child, list)"; canContributeBoard is that check's delegate today).
   let listBoard: { id: string; statuses?: unknown } | null = null;
   if (parsed.data.spawnTasks && parsed.data.listId) {
-    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const accessLevel = acting.accessLevel;
     const board = await getBoardForReader(parsed.data.listId, user.id, accessLevel);
-    if (!board) return NextResponse.json({ error: "That list no longer exists" }, { status: 404 });
+    // A List of another workspace is never a destination (the company wall,
+    // pen test 2026-11-28 V-01): tasks written there carried this workspace.
+    if (!board || board.organizationId !== orgId) return NextResponse.json({ error: "That list no longer exists" }, { status: 404 });
     if (!(await canContributeBoard(parsed.data.listId, user.id, accessLevel))) {
       return NextResponse.json({ error: "You need Can edit on that list. Ask its owner." }, { status: 403 });
     }
@@ -159,7 +166,7 @@ export async function POST(req: Request) {
   // 3. Persist meeting
   const meeting = await prisma.meeting.create({
     data: {
-      organizationId: user.organizationId,
+      organizationId: orgId,
       title: parsed.data.title,
       type: parsed.data.type ?? "ADHOC",
       scheduledAt: parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : new Date(),
@@ -207,7 +214,7 @@ export async function POST(req: Request) {
       const statuses = getBoardStatuses(listBoard);
       const opening = statuses.length > 0 ? (statuses.find((st) => st.group === "ACTIVE") ?? statuses[0]).value : undefined;
       const spawned = await createBoardItem({
-        organizationId: user.organizationId,
+        organizationId: orgId,
         boardId: listBoard.id,
         title: ai.title.slice(0, 280),
         status: opening,
@@ -226,7 +233,7 @@ export async function POST(req: Request) {
       // reads. A failure here must not lose the action items already written
       // above, so it is caught and reflected in the count the caller is shown.
       const spawned = await createPersonalTask({
-        organizationId: user.organizationId,
+        organizationId: orgId,
         assigneeId,
         title: ai.title,
         description: `From meeting: ${meeting.title}`,

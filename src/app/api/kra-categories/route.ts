@@ -30,9 +30,9 @@ export async function POST(req: NextRequest) {
       data: { name: name.trim(), organizationId: orgId },
     });
     return jsonSuccess(category, 201);
-  } catch (err: any) {
-    if (err.code === "P2002") return jsonError("Category already exists");
-    return jsonError(err.message || "Failed to create category", 500);
+  } catch (err: unknown) {
+    if ((err as { code?: string })?.code === "P2002") return jsonError("Category already exists");
+    return jsonError("Couldn't create the category", 500);
   }
 }
 
@@ -42,7 +42,10 @@ export async function DELETE(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const { id } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  // A plain id only: {"id":{"not":""}} deleted every category of the
+  // workspace in one call (pen test 2026-11-28 review).
+  const id = typeof body?.id === "string" ? body.id : "";
 
   if (!id) return jsonError("Category ID is required");
 
@@ -56,18 +59,26 @@ export async function PATCH(req: NextRequest) {
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const orgId = getOrgId(session);
-  const { id, name } = await req.json();
+  const body = await req.json().catch(() => ({}));
+  const id = typeof body?.id === "string" ? body.id : "";
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
 
-  if (!id || !name?.trim()) return jsonError("ID and name are required");
+  if (!id || !name) return jsonError("ID and name are required");
+
+  // The company wall (pen test 2026-11-28, V-05): the rename ran by id alone,
+  // so one workspace renamed another's categories, and a failure handed back
+  // the raw database message.
+  const own = await prisma.kraCategory.findFirst({ where: { id, organizationId: orgId }, select: { id: true } });
+  if (!own) return jsonError("Category not found", 404);
 
   try {
     const updated = await prisma.kraCategory.update({
       where: { id },
-      data: { name: name.trim() },
+      data: { name },
     });
     return jsonSuccess(updated);
-  } catch (err: any) {
-    if (err.code === "P2002") return jsonError("Category name already exists");
-    return jsonError(err.message || "Failed to update category", 500);
+  } catch (err: unknown) {
+    if ((err as { code?: string })?.code === "P2002") return jsonError("Category name already exists");
+    return jsonError("Couldn't update the category", 500);
   }
 }

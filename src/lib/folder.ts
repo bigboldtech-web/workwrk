@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { delegatedNodeRole } from "@/lib/access/delegate";
+import { levelInCompany } from "@/lib/access/company-wall";
 import { legacyAllows, type LegacyInputs, type VisibilityValue } from "@/lib/access/parity";
 import { withArchivedBy } from "@/lib/archived-by";
 import { loadPathEvidence } from "@/lib/access/node-world";
@@ -75,7 +76,8 @@ export type FolderAccessMode =
 export async function folderAccessForSpace(
   spaceId: string,
   userId: string,
-  accessLevel: string | null | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the callers; the level held in the row's workspace decides
+  _accessLevel: string | null | undefined,
 ): Promise<FolderAccessMode> {
   // Derived from the one resolver: "full" when the viewer holds a role on the
   // Space, "scoped" when the Space is a path container for them (the ids are
@@ -83,7 +85,11 @@ export async function folderAccessForSpace(
   // given), "none" otherwise.
   const space = await prisma.space.findUnique({ where: { id: spaceId }, select: { organizationId: true } });
   if (!space) return { mode: "none" };
-  const ctx = nodeCtxFromLevel(userId, space.organizationId, accessLevel);
+  // The company wall: an admin of another workspace used to get "full" here.
+  // The level held in the Space's workspace decides, never the one passed.
+  const level = await levelInCompany(userId, space.organizationId);
+  if (!level) return { mode: "none" };
+  const ctx = nodeCtxFromLevel(userId, space.organizationId, level);
   const d = await nodeRole(ctx, { kind: "space", id: spaceId });
   if (roleAtLeast(d.role, "VIEW")) return { mode: "full" };
   if (ctx.orgAdmin) return { mode: "full" };
@@ -199,18 +205,21 @@ export async function removeFolderMember(folderId: string, userId: string) {
 /**
  * Can view or higher on one Folder, from the one resolver: its own grant,
  * its owner, an ancestor Folder's grant or its Space, with the PRIVATE cut
- * and the legacy floor. The caller is responsible for the org scope, as
- * before: the Folder row's own org is the world's.
+ * and the legacy floor. A Folder in another workspace is never readable
+ * (the company wall, lib/access/company-wall.ts).
  */
 export async function folderReadable(
   folderId: string,
   userId: string,
-  accessLevel: string | null | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the callers; the level held in the row's workspace decides
+  _accessLevel: string | null | undefined,
 ): Promise<boolean> {
   const folder = await prisma.folder.findUnique({ where: { id: folderId }, select: { organizationId: true } });
   if (!folder) return false;
-  const d = await nodeRole(nodeCtxFromLevel(userId, folder.organizationId, accessLevel), { kind: "folder", id: folderId });
-  return roleAtLeast(await delegatedNodeRole(userId, folder.organizationId, accessLevel, { kind: "folder", id: folderId }, d.role), "VIEW");
+  const level = await levelInCompany(userId, folder.organizationId);
+  if (!level) return false;
+  const d = await nodeRole(nodeCtxFromLevel(userId, folder.organizationId, level), { kind: "folder", id: folderId });
+  return roleAtLeast(await delegatedNodeRole(userId, folder.organizationId, level, { kind: "folder", id: folderId }, d.role), "VIEW");
 }
 
 export interface FolderSummary {

@@ -4,6 +4,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requireP
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { categoryChainFor } from "@/lib/sop-taxonomy";
+import { allOwned } from "@/lib/access/company-wall";
 import { parsePaginationParams } from "@/lib/pagination";
 import { sopVisibilityWhere, canWriteToFolder, descendantFolderIds } from "@/lib/sop-access";
 import { defaultContentForKind, getSopKind, isSopKind, kindWhere, sopTypeForKind, type SopKind } from "@/lib/sop-kind";
@@ -255,6 +256,11 @@ export async function POST(req: NextRequest) {
   const chain = resolvedFolderId
     ? await categoryChainFor(orgId, resolvedFolderId)
     : { category: category ?? null, subcategory: subcategory || null };
+
+  // The company wall (pen test 2026-11-28, V-03): the edit checked the KRA,
+  // the create did not, and an SOP filed under another company's KRA showed
+  // on that company's job title page.
+  if (kraId && (typeof kraId !== "string" || !(await allOwned("kra", [kraId], orgId)))) return jsonError("KRA not found", 404);
 
   const sop = await prisma.sOP.create({
     data: {

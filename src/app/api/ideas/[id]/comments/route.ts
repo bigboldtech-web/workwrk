@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { allOwned } from "@/lib/access/company-wall";
 
 export async function POST(
   req: NextRequest,
@@ -11,9 +12,13 @@ export async function POST(
 
   const { id: ideaId } = await params;
   const userId = getUserId(session);
-  const { content } = await req.json();
+  // The company wall (pen test 2026-11-28, V-06): a comment on another
+  // company's idea was written, under the commenter's name.
+  if (!(await allOwned("idea", [ideaId], getOrgId(session)))) return jsonError("Idea not found", 404);
+  const body = await req.json().catch(() => ({}));
+  const content = typeof body?.content === "string" ? body.content : "";
 
-  if (!content?.trim()) return jsonError("Comment content is required");
+  if (!content.trim()) return jsonError("Comment content is required");
 
   const comment = await prisma.ideaComment.create({
     data: { ideaId, userId, content: content.trim() },

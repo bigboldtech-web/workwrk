@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { KPI_ORDER } from "@/lib/alignment";
+import { allOwned } from "@/lib/access/company-wall";
 import type { Prisma } from "@/generated/prisma";
 
 // Direction of "good" + north-star flag. `direction` (when set) wins over
@@ -127,6 +128,12 @@ export async function PATCH(req: NextRequest) {
     where: { id, organizationId: getOrgId(session) },
   });
   if (!existing) return jsonError("KPI not found", 404);
+  // The company wall (pen test 2026-11-28, V-03): the create checked the KRA,
+  // the edit did not, and a KPI moved under another company's KRA showed on
+  // that company's job title page, where they could not remove it.
+  if (kraId !== undefined && kraId !== null && kraId !== "") {
+    if (typeof kraId !== "string" || !(await allOwned("kra", [kraId], getOrgId(session)))) return jsonError("KRA not found", 404);
+  }
 
   const kpi = await prisma.kPI.update({
     where: { id },
