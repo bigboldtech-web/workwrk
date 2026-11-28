@@ -236,11 +236,18 @@ export function useTask(itemId: string | null | undefined, opts: { poll?: boolea
       // `metadata` for the optimistic render and never pasted onto the row.
       setData((prev) => {
         if (!prev) return prev;
-        const { metadataPatch, ...rest } = body as typeof body & { metadataPatch?: Record<string, unknown> };
+        const { metadataPatch, descriptionBase, checklistOp: _op, ...rest } = body as typeof body & { metadataPatch?: Record<string, unknown> };
+        void _op;
         let metadata = prev.item.metadata;
         if (metadataPatch) {
           const next = { ...((metadata as Record<string, unknown> | null) ?? {}) };
           for (const [k, v] of Object.entries(metadataPatch)) {
+            // A description the server merges (descriptionBase, pen test V-33)
+            // is confirmed only by the server's answer. Shown here, it read as
+            // saved before the server had it: the field went clean, its merge
+            // base became text nobody stored, and a retry after a failed save
+            // could merge a line the person typed right back out.
+            if (k === "description" && descriptionBase !== undefined) continue;
             if (v === null) delete next[k];
             else next[k] = v;
           }

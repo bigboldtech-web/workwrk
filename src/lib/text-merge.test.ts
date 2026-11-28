@@ -58,3 +58,33 @@ describe("mergeText", () => {
     expect(merged[2900]).toBe("theirs at 2900");
   });
 });
+
+describe("mergeText on a text too big for one table (the step 5 review)", () => {
+  it("edits at both ends on one side and in the middle on the other never write the middle twice", () => {
+    const base = Array.from({ length: 4500 }, (_, i) => `line ${i}`);
+    const mine = [...base];
+    mine[0] = "mine at the start";
+    mine[4499] = "mine at the end";
+    const theirs = [...base];
+    theirs[2250] = "theirs in the middle";
+    const merged = mergeText(base.join("\n"), mine.join("\n"), theirs.join("\n")).split("\n");
+    expect(merged).toHaveLength(4500);
+    expect(merged[0]).toBe("mine at the start");
+    expect(merged[2250]).toBe("theirs in the middle");
+    expect(merged[4499]).toBe("mine at the end");
+  });
+
+  it("keeps lines that repeat (blank lines) between the anchors", () => {
+    const base = Array.from({ length: 4500 }, (_, i) => (i % 3 === 0 ? "" : `p ${i}`));
+    const mine = [...base];
+    mine[1] = "mine";
+    mine[4499] = "mine end";
+    const theirs = [...base];
+    theirs.splice(2000, 0, "theirs added");
+    const merged = mergeText(base.join("\n"), mine.join("\n"), theirs.join("\n")).split("\n");
+    expect(merged).toHaveLength(4501);
+    expect(merged.filter((l) => l === "theirs added")).toHaveLength(1);
+    expect(merged[1]).toBe("mine");
+    expect(merged[4500]).toBe("mine end");
+  });
+});

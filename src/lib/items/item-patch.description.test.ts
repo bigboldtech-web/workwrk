@@ -183,3 +183,18 @@ describe("two people editing a task's description or checklist at once", () => {
     expect(h.writes).toEqual([]);
   });
 });
+
+describe("the step 5 review", () => {
+  it("refuses a checklist change sent with the whole-blob save, which would drop one of them", async () => {
+    const r = await send({ metadata: { description: "x" }, checklistOp: { kind: "add", text: "b1" } });
+    expect(r.status).toBe(400);
+    expect(r.body).toMatchObject({ error: "checklist_op_with_metadata" });
+    expect(h.writes).toEqual([]);
+  });
+
+  it("finds an older item whose text a new item could not have (empty)", async () => {
+    h.stored = { checklist: [{ text: "", done: false }] };
+    expect((await send({ checklistOp: { kind: "toggle", index: 0, text: "", done: true } })).status).toBe(200);
+    expect(h.stored.checklist).toEqual([{ text: "", done: true }]);
+  });
+});

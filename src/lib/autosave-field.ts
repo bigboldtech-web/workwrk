@@ -89,7 +89,11 @@ export function onServerValue(state: AutosaveState, stored: string): AutosaveSta
 export function onSaved(state: AutosaveState, sent: string, saved: string): AutosaveState {
   if (state.sent !== sent) return state;
   if (state.local === sent) return { local: saved, synced: saved, dirty: false, sent: null, attempt: 0 };
-  return { local: mergeText(sent, state.local, saved), synced: saved, dirty: true, sent: null, attempt: 0 };
+  const carried = mergeText(sent, state.local, saved);
+  // Nothing typed since is missing from the saved text: clean, or the field
+  // would sit dirty with nothing to send and stop following the server.
+  if (carried === saved) return { local: saved, synced: saved, dirty: false, sent: null, attempt: 0 };
+  return { local: carried, synced: saved, dirty: true, sent: null, attempt: 0 };
 }
 
 /** The description a task write's answer says is stored, or null when the answer carries none. */

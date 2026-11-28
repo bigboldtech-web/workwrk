@@ -68,16 +68,15 @@ export async function notifyDocComment(args: {
     ]);
 
     const mentioned = [...new Set(claimed)].filter((id) => id !== args.actorId);
-    const followers = [...new Set([doc.createdById, ...earlier.map((e) => e.authorId)])].filter(
-      (id): id is string => !!id && id !== args.actorId && !mentioned.includes(id),
-    );
-    if (mentioned.length === 0 && followers.length === 0) return none;
+    const people = [...new Set([doc.createdById, ...earlier.map((e) => e.authorId)])].filter((id): id is string => !!id && id !== args.actorId);
+    if (mentioned.length === 0 && people.length === 0) return none;
 
-    const readers = await usersWhoCanRead(args.organizationId, { kind: "doc", id: doc.id }, { among: [...mentioned, ...followers] });
-    const [toMention, toFollow] = await Promise.all([
-      filterNotifyUsers(mentioned.filter((id) => readers.has(id)), "mentions"),
-      filterNotifyUsers(followers.filter((id) => readers.has(id)), "comments"),
-    ]);
+    const readers = await usersWhoCanRead(args.organizationId, { kind: "doc", id: doc.id }, { among: [...mentioned, ...people] });
+    const toMention = await filterNotifyUsers(mentioned.filter((id) => readers.has(id)), "mentions");
+    // Someone told of the mention is not told again of the comment; someone
+    // whose Mentions switch is off still hears of it as the doc's owner or a
+    // commenter in the thread (the step 5 review).
+    const toFollow = await filterNotifyUsers(people.filter((id) => readers.has(id) && !toMention.has(id)), "comments");
 
     const who = `${author?.firstName ?? ""} ${author?.lastName ?? ""}`.trim() || "Someone";
     const snippet = args.body.replace(/\s+/g, " ").trim().slice(0, 140);

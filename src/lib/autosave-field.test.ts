@@ -128,3 +128,12 @@ describe("onSaved: the text the server saved", () => {
     expect(savedDescriptionOf(undefined)).toBeNull();
   });
 });
+
+describe("onSaved: nothing left to send (the step 5 review)", () => {
+  it("is clean when what was typed since is already in the saved text", () => {
+    let s = onSent(onTyped(initAutosave("a"), "a\nb"), "a\nb");
+    s = onTyped(s, "a\nb\nc");
+    s = onSaved(s, "a\nb", "a\nb\nc");
+    expect(s).toEqual({ local: "a\nb\nc", synced: "a\nb\nc", dirty: false, sent: null, attempt: 0 });
+  });
+});

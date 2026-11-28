@@ -12,7 +12,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Plus, X, CheckSquare, Square, GripVertical } from "lucide-react";
 import type { BoardItemRow } from "@/lib/board-items-shared";
-import type { ChecklistOp } from "@/lib/items/checklist-op";
+import { CHECKLIST_TEXT_MAX, type ChecklistOp } from "@/lib/items/checklist-op";
 
 type ChecklistItem = { text: string; done: boolean };
 
@@ -132,6 +132,7 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
               onKeyDown={(e) => { if (e.key === "Enter") add(); }}
               onBlur={add}
               placeholder="Add a checklist item…"
+              maxLength={CHECKLIST_TEXT_MAX}
               className="flex-1 text-xs bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>

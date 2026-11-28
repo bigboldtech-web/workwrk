@@ -13,15 +13,21 @@
 
 import { z } from "zod";
 
-const text = z.string().min(1).max(2000);
+/** What a new item may say. */
+export const CHECKLIST_TEXT_MAX = 2000;
+const newText = z.string().min(1).max(CHECKLIST_TEXT_MAX);
+// An item already stored is found by whatever text it holds: the older
+// whole-list save took any string, empty or long, and those items must stay
+// tickable, removable and movable (the step 5 review).
+const heldText = z.string().max(100_000);
 const index = z.number().int().min(0).max(10_000);
 
 export const checklistOpSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("add"), text }),
-  z.object({ kind: z.literal("toggle"), index, text, done: z.boolean() }),
-  z.object({ kind: z.literal("remove"), index, text }),
+  z.object({ kind: z.literal("add"), text: newText }),
+  z.object({ kind: z.literal("toggle"), index, text: heldText, done: z.boolean() }),
+  z.object({ kind: z.literal("remove"), index, text: heldText }),
   // `to` is the place in the list without the moved item, as the editor counts it.
-  z.object({ kind: z.literal("move"), index, text, to: index }),
+  z.object({ kind: z.literal("move"), index, text: heldText, to: index }),
 ]);
 
 export type ChecklistOp = z.infer<typeof checklistOpSchema>;

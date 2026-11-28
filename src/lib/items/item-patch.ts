@@ -258,7 +258,10 @@ function metadataWriter(args: {
       const now = typeof stored.description === "string" ? stored.description : stored.description === undefined || stored.description === null ? "" : null;
       if (now === null || now !== args.expectDescription) throw new Refusal(409, { error: "description_changed" });
     }
-    const metadataPatch = mergedOnStored(stored, args.metadataPatch, args.descriptionBase, args.checklistOp);
+    // In a List the task is only shown in, a key that List defines lives in
+    // its namespace (routeMetadataPatch), so that is where "theirs" is read.
+    const placeOf = (key: string): Json => (args.linkedListId && keys.stored.has(key) ? readNamespace(stored, args.linkedListId) : stored);
+    const metadataPatch = mergedOnStored(placeOf, args.metadataPatch, args.descriptionBase, args.checklistOp);
     let next: Json = stored;
     if (args.linkedListId) {
       if (metadataPatch) {
@@ -313,17 +316,18 @@ function metadataWriter(args: {
  * and a checklist change decides `checklist` from the stored list. Without
  * either, the patch as sent.
  */
-function mergedOnStored(stored: Json, patch: Json | undefined, descriptionBase: string | undefined, op: ChecklistOp | undefined): Json | undefined {
+function mergedOnStored(placeOf: (key: string) => Json, patch: Json | undefined, descriptionBase: string | undefined, op: ChecklistOp | undefined): Json | undefined {
   let next = patch;
   if (descriptionBase !== undefined && next && "description" in next) {
     const mine = typeof next.description === "string" ? next.description : next.description === null ? "" : null;
-    const theirs = typeof stored.description === "string" ? stored.description : stored.description === undefined || stored.description === null ? "" : null;
+    const held = placeOf("description").description;
+    const theirs = typeof held === "string" ? held : held === undefined || held === null ? "" : null;
     if (mine !== null && theirs !== null && theirs !== descriptionBase) {
       const merged = mergeText(descriptionBase, mine, theirs);
       next = { ...next, description: merged === "" ? null : merged };
     }
   }
-  if (op) next = { ...(next ?? {}), checklist: applyChecklistOp(stored.checklist, op) };
+  if (op) next = { ...(next ?? {}), checklist: applyChecklistOp(placeOf("checklist").checklist, op) };
   return next;
 }
 
@@ -359,6 +363,12 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
     parsed.data.watcherIds = wants ? [...others, c.userId] : others;
   }
 
+  // A checklist change is applied over the stored list; the whole-blob save
+  // replaces the list instead, so the two together would drop one silently.
+  if (parsed.data.checklistOp && parsed.data.metadata !== undefined) {
+    return NextResponse.json({ error: "checklist_op_with_metadata", code: "checklist_op_with_metadata", message: "Send a checklist change with metadataPatch, not metadata." }, { status: 400 });
+  }
+
   // Reserved keys are never written by a client, in either shape.
   for (const blob of [parsed.data.metadata, parsed.data.metadataPatch]) {
     const k = blob ? Object.keys(blob).find(isReservedMetadataKey) : undefined;
@@ -387,9 +397,11 @@ export async function patchItemAs(c: ItemCtx, id: string, body: unknown): Promis
     // takes contribute on B, as every other link-side write does (reorder,
     // move, add): a read-only guest of B edits none of B's columns, whatever
     // they may do to the task at home.
-    if (parsed.data.metadataPatch) {
+    // A checklist change writes `checklist` as surely as a patch does (the step 5 review).
+    const bWrite = { ...(parsed.data.metadataPatch ?? {}), ...(parsed.data.checklistOp ? { checklist: null } : {}) };
+    if (Object.keys(bWrite).length > 0) {
       const bKeys = fieldKeySets(parseBoardSchema(linkedCtx.list.schema).fields);
-      const routed = routeMetadataPatch(parsed.data.metadataPatch, { definedKeys: bKeys.stored, mirrorKeys: bKeys.mirror });
+      const routed = routeMetadataPatch(bWrite, { definedKeys: bKeys.stored, mirrorKeys: bKeys.mirror });
       if (routed.ok && Object.keys(routed.ns).length > 0 && !(await canContributeBoard(linkedCtx.list.id, c.userId, c.accessLevel))) {
         return NextResponse.json({ error: "no_access", reason: "list_read_only", requestAccess: true }, { status: 403 });
       }
