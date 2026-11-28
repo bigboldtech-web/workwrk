@@ -169,6 +169,15 @@ export function docSaveRefusal(status: number): DocSaveRefusal | null {
   return null;
 }
 
+/** What one doc save carries at most; past it the server receives it cut short (V-63). */
+export const DOC_SAVE_MAX_BYTES = 9_500_000;
+export function docTooLargeToSave(wire: string): boolean {
+  // Characters are at least one byte each: only a body near the limit pays for the exact count.
+  if (wire.length * 3 < DOC_SAVE_MAX_BYTES) return false;
+  return new TextEncoder().encode(wire).length > DOC_SAVE_MAX_BYTES;
+}
+export const DOC_TOO_LARGE_COPY = "This doc is too large to save (over 9 MB). Remove large pasted images or move some sections into a sub-page. Your changes are kept in this tab.";
+
 export const DOC_SAVE_REFUSAL_COPY: Record<DocSaveRefusal, string> = {
   "no-access": "You no longer have access to this doc. Your changes are kept in this tab: copy them or ask the owner to share it again.",
   archived: "This doc was moved to Trash, so your changes were not saved. They are kept in this tab: copy them before you leave.",
@@ -628,6 +637,8 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // newer args overwrite a single "pending" slot; the in-flight
   // completion fires the latest pending with the now-fresh ref.
   const saveInFlightRef = useRef(false);
+  // Said once while the doc stays too large to save (the step 9 review: every edit said it again).
+  const tooLargeToldRef = useRef(false);
   const pendingPersistRef = useRef<
     null | { bnDoc: PartialBlock[] | null; blocks: Block[] | null; meta: DocMeta; excerpt?: string }
   >(null);
@@ -718,6 +729,22 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         };
         return { content, excerpt: text || null };
       })();
+      const wire = JSON.stringify({
+        title: titleRef.current.trim() || "Untitled doc",
+        ...body,
+        knownUpdatedAt: lastUpdatedAtRef.current,
+      });
+      // A doc past what one save carries (pen test 2026-11-28, V-63): the
+      // server got it cut short, answered "invalid body", and this editor
+      // said "check your connection" and retried what can never fit. It is
+      // said plainly and not sent; the words stay in this tab's draft.
+      if (docTooLargeToSave(wire)) {
+        setSaveStatus("error");
+        setSaveStuck(() => () => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0); });
+        if (!tooLargeToldRef.current) toast(DOC_TOO_LARGE_COPY, { tone: "danger" });
+        tooLargeToldRef.current = true;
+        return;
+      }
       const res = await fetch(`/api/docs/${docId}`, {
         method: "PUT",
         // keepalive (first attempt only) lets a save-on-nav complete across the
@@ -726,12 +753,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         // notes still save.
         keepalive: attempt === 0,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: titleRef.current.trim() || "Untitled doc",
-          ...body,
-          knownUpdatedAt: lastUpdatedAtRef.current,
-        }),
+        body: wire,
       });
+      if (res.status === 413) {
+        setSaveStatus("error");
+        setSaveStuck(() => () => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0); });
+        toast(DOC_TOO_LARGE_COPY, { tone: "danger" });
+        return;
+      }
       if (res.status === 409) {
         // Somebody else committed a version while this one was being typed.
         // Every save of ours updates lastUpdatedAtRef and only one is ever in
@@ -785,6 +814,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       setSaveStatus("saved");
       setLastSavedAt(new Date());
       setSaveStuck(null);
+      tooLargeToldRef.current = false;
       draftRef.current.clear();
       const savedTitle = titleRef.current.trim() || "Untitled doc";
       if (savedTitle !== lastSyncedTitleRef.current) {

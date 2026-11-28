@@ -83,3 +83,16 @@ describe("the editor wires them in", () => {
     expect(copy).not.toMatch(/\u2014|-{2}/);
   });
 });
+
+// Pen test 2026-11-28, V-63.
+describe("a doc too large to save", () => {
+  it("is measured in bytes, cheaply when far from the limit", async () => {
+    const { docTooLargeToSave, DOC_SAVE_MAX_BYTES, DOC_TOO_LARGE_COPY } = await import("./block-doc-editor");
+    expect(docTooLargeToSave("small")).toBe(false);
+    expect(docTooLargeToSave("x".repeat(DOC_SAVE_MAX_BYTES + 1))).toBe(true);
+    // Multi-byte text counts its bytes, not its characters.
+    expect(docTooLargeToSave("é".repeat(Math.ceil(DOC_SAVE_MAX_BYTES / 2) + 10))).toBe(true);
+    expect(DOC_TOO_LARGE_COPY).not.toMatch(/connection/i);
+    expect(DOC_TOO_LARGE_COPY).not.toMatch(/—|-{2}/);
+  });
+});

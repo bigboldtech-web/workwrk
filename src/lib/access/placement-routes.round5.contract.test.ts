@@ -91,7 +91,8 @@ describe("break 3: the Trash page offers Restore exactly where the route restore
 
   it("the listing computes each row's landing over one world and blocks what P1 refuses, with the restore's own sentence", () => {
     const server = read("src/lib/trash-server.ts");
-    expect(server).toMatch(/const \[missingParents, landingBlocked\] = await Promise\.all\(\[missingParentIds\(page\), landingRefusals\(viewer, page\)\]\);/);
+    // Pen test 2026-11-28 V-55 adds a third read: subtasks whose parent task is in Trash.
+    expect(server).toMatch(/const \[missingParents, landingBlocked, parentsInTrash\] = await Promise\.all\(\[missingParentIds\(page\), landingRefusals\(viewer, page\), subtasksWithParentInTrash\(viewer\.organizationId, page\)\]\);/);
     expect(server).toMatch(/restorable: !parentGone && !blocked,/);
     // Round seven: a List in Trash blocks a task's restore like a gone one (its own sentence).
     expect(server).toMatch(/blockedReason: listState === "gone" \? "Its list is gone" : listState === "archived" \? LIST_IN_TRASH_FOR_TASK : blocked,/);

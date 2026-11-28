@@ -455,6 +455,17 @@ async function restoreBoardChildren(s: Snapshot, db: RestoreDb = prisma): Promis
   const items = s.children?.items ?? [];
   if (views.length) await db.view.createMany({ data: asData(views), skipDuplicates: true });
   if (members.length) await db.boardMember.createMany({ data: asData(members), skipDuplicates: true });
+  // A task whose parent is outside this snapshot and no longer exists comes
+  // back on its own (the step 9 review): the whole List failed on that one
+  // missing parent, and its tasks were lost once the parent was purged.
+  if (items.length) {
+    const inSet = new Set(items.map((i) => String(i.id)));
+    const outside = [...new Set(items.map((i) => (typeof i.parentItemId === "string" ? i.parentItemId : null)).filter((p): p is string => !!p && !inSet.has(p)))];
+    if (outside.length) {
+      const live = new Set((await db.item.findMany({ where: { id: { in: outside } }, select: { id: true } })).map((r) => r.id));
+      for (const i of items) if (typeof i.parentItemId === "string" && !inSet.has(i.parentItemId) && !live.has(i.parentItemId)) i.parentItemId = null;
+    }
+  }
   if (items.length) await createItemsParentsFirst(items, db);
   await restoreCompletions(db, s.children?.completions ?? [], () => null);
   await restoreTimeLinks(db, s.children?.timeLinks);
@@ -677,7 +688,16 @@ const REGISTRY: Record<TrashType, Entry> = {
       };
     },
     restore: async (s, db = prisma) => {
-      const tree = [s.row, ...(s.children?.subtasks ?? [])];
+      // A subtask's parent (pen test 2026-11-28, V-55): restored first while
+      // it sits in Trash (the refusal names it), and gone for good, the task
+      // comes back on its own in its List instead of failing on the missing
+      // parent forever.
+      // (restoreFromTrash decided, before its transaction, that a parent in
+      // Trash refuses; here a parent still missing is gone for good.)
+      const root = { ...(s.row as Record<string, unknown>) };
+      const parentId = typeof root.parentItemId === "string" ? root.parentItemId : null;
+      if (parentId && !(await db.item.findUnique({ where: { id: parentId }, select: { id: true } }))) root.parentItemId = null;
+      const tree = [root as Row, ...(s.children?.subtasks ?? [])];
       await createItemsParentsFirst(tree, db);
       // Back on the home each task comes back to ("Restore to..." moves it).
       const homeOf = new Map(tree.map((r) => [String(r.id), String(r.boardId)]));
@@ -1229,6 +1249,17 @@ export async function restoreFromTrash(
     const linksOn = await listLinksAvailable();
     const target = type === "item" ? opts.targetBoardId ?? null : null;
     const fromKeys = target ? await oldHomeKeys(item.snapshot) : null;
+    // A subtask whose parent task is in Trash (its own row or inside another's
+    // snapshot) waits for it (pen test V-55, the step 9 review); read here,
+    // on the global pool, never from inside the transaction below.
+    if (type === "item") {
+      const row = (item.snapshot as Snapshot | null)?.row as Record<string, unknown> | undefined;
+      const parentId = typeof row?.parentItemId === "string" ? row.parentItemId : null;
+      const orgId = typeof row?.organizationId === "string" ? row.organizationId : null;
+      if (parentId && orgId && !(await prisma.item.findUnique({ where: { id: parentId }, select: { id: true } }))) {
+        if ((await tasksHeldInTrash(orgId, [parentId])).has(parentId)) throw new Error(PARENT_TASK_IN_TRASH);
+      }
+    }
     await prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ organizationId: string; snapshot: unknown }>>`
         SELECT "organizationId", snapshot FROM "TrashItem" WHERE id = ${item.id} FOR UPDATE`;
@@ -1264,6 +1295,32 @@ export async function restoreFromTrash(
 
 /** What a restore throws when the row was taken first (a purge, or another person's restore). */
 export const NO_LONGER_IN_TRASH = "This item is no longer in Trash.";
+/** A subtask whose parent task is itself in Trash (pen test V-55). */
+export const PARENT_TASK_IN_TRASH = "Its parent task is in Trash, on its own or with what was deleted with it. Restore that first.";
+
+/**
+ * Which of these tasks sit in Trash: as their own row, or inside another
+ * row's snapshot (a parent task's subtasks, a List, Folder or Space's tasks).
+ * The step 9 review: only a task's own row was looked for, so a subtask whose
+ * parent went to Trash inside its grandparent read as "parent gone for good"
+ * and came back detached for ever.
+ */
+export async function tasksHeldInTrash(organizationId: string, taskIds: readonly string[]): Promise<Set<string>> {
+  const ids = [...new Set(taskIds)];
+  if (!ids.length) return new Set();
+  const rows = await prisma.$queryRaw<Array<{ pid: string }>>`
+    SELECT p.pid FROM unnest(${ids}::text[]) AS p(pid)
+    WHERE EXISTS (
+      SELECT 1 FROM "TrashItem" t
+      WHERE t."organizationId" = ${organizationId}
+        AND (
+          (t."entityType" = 'item' AND t."entityId" = p.pid)
+          OR t.snapshot->'children'->'subtasks' @> jsonb_build_array(jsonb_build_object('id', p.pid))
+          OR t.snapshot->'children'->'items' @> jsonb_build_array(jsonb_build_object('id', p.pid))
+        )
+    )`;
+  return new Set(rows.map((r) => r.pid));
+}
 
 // Permanently delete trash older than 60 days for an org, freeing file blobs.
 export async function purgeExpiredTrash(organizationId: string): Promise<void> {

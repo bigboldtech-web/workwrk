@@ -32,7 +32,7 @@ import { NodeEvaluator, createDecision, refKey, roleAtLeast, type NodeRef, type 
 import { loadWorld } from "./access/node-world";
 import { canvasesHaveFolders, checkCreate, checkFormDestination, docPlaceLive, folderPlacementFact } from "./access/node-placement";
 import { canCreateDocAt } from "./access/node-access";
-import { freeTrashStorage, NO_LONGER_IN_TRASH, restoreFromTrash } from "./trash";
+import { freeTrashStorage, NO_LONGER_IN_TRASH, PARENT_TASK_IN_TRASH, restoreFromTrash, tasksHeldInTrash } from "./trash";
 import {
   DEFAULT_TRASH_DAYS,
   TRASH_TYPE_BY_KEY,
@@ -432,13 +432,13 @@ export async function readTrash(viewer: Viewer, query: TrashQuery): Promise<Tras
   // viewer may not restore where it now lands (the placement rule P1, the
   // same check the restore runs) says so too, instead of offering a Restore
   // the route refuses (round four, break 3).
-  const [missingParents, landingBlocked] = await Promise.all([missingParentIds(page), landingRefusals(viewer, page)]);
+  const [missingParents, landingBlocked, parentsInTrash] = await Promise.all([missingParentIds(page), landingRefusals(viewer, page), subtasksWithParentInTrash(viewer.organizationId, page)]);
 
   const rows: TrashRow[] = page.map((r) => {
     const actor = r.deletedById ? actorById.get(r.deletedById) : null;
     const listState = missingParents.get(r.id) ?? null;
     const parentGone = listState !== null;
-    const blocked = landingBlocked.get(r.id) ?? null;
+    const blocked = landingBlocked.get(r.id) ?? (parentsInTrash.has(r.id) ? PARENT_TASK_IN_TRASH : null);
     return {
       id: r.id,
       type: r.type,
@@ -633,6 +633,29 @@ function docLandingOf(d: { entityType: string | null; entityId: string | null; p
  * 2: the page offered Restore for a sub-folder whose parent Folder was
  * itself in Trash, and the restore answered 409.
  */
+/**
+ * The task rows on this page that are subtasks of a task which is itself in
+ * Trash (pen test V-55): the row says to restore the parent first, instead of
+ * a Restore that failed blaming the List. A subtask whose parent is gone for
+ * good is restorable: it comes back on its own.
+ */
+async function subtasksWithParentInTrash(organizationId: string, page: readonly RawRow[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  const ids = page.filter((r) => r.type === "task" && parseRowId(r.id).snapshotId).map((r) => r.id);
+  if (!ids.length) return out;
+  const rows = await prisma.$queryRaw<Array<{ id: string; pid: string | null }>>`SELECT id, snapshot->'row'->>'parentItemId' AS pid FROM "TrashItem" WHERE id = ANY(${ids}::text[]) AND "organizationId" = ${organizationId}`;
+  const pids = [...new Set(rows.map((r) => r.pid).filter((p): p is string => !!p))];
+  if (!pids.length) return out;
+  const [live, parkedIds] = await Promise.all([
+    prisma.item.findMany({ where: { id: { in: pids } }, select: { id: true } }),
+    // Its own Trash row or inside another's snapshot (the step 9 review).
+    tasksHeldInTrash(organizationId, pids),
+  ]);
+  const liveIds = new Set(live.map((i) => i.id));
+  for (const r of rows) if (r.pid && !liveIds.has(r.pid) && parkedIds.has(r.pid)) out.add(r.id);
+  return out;
+}
+
 async function landingRefusals(viewer: Viewer, page: readonly RawRow[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const landed = page.filter((r): r is RawRow & { landing: TrashLanding } => r.landing !== null);
@@ -1038,6 +1061,7 @@ export async function restoreTrashRow(
     return { ok: true };
   } catch (e) {
     if (e instanceof Error && e.message === NO_LONGER_IN_TRASH) return { ok: false, status: 409, message: NO_LONGER_IN_TRASH };
+    if (e instanceof Error && e.message === PARENT_TASK_IN_TRASH) return { ok: false, status: 409, message: PARENT_TASK_IN_TRASH };
     // The usual cause is a parent that is itself gone; the page prints the
     // same sentence on the row so this is the stale-tab path, not the norm.
     return { ok: false, status: 409, message: "Couldn't restore. The list or folder it lived in may be gone." };

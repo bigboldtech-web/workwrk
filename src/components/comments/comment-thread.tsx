@@ -133,6 +133,9 @@ export function CommentThread({
   const [anchorMissing, setAnchorMissing] = useState(false);
   const [can, setCan] = useState<{ comment: boolean; moderate: boolean }>({ comment: canComment, moderate: false });
   const [postError, setPostError] = useState<string | null>(null);
+  // People a comment @mentioned who cannot open the task, so were not told (pen test V-57).
+  const [unreachableNote, setUnreachableNote] = useState<string | null>(null);
+  useEffect(() => { setUnreachableNote(null); }, [entityId]);
   const [posting, setPosting] = useState(false);
 
   // The draft: controlled by the host when it wants to flush it on expiry,
@@ -293,6 +296,12 @@ export function CommentThread({
       setStaged([]);
       setMentions([]);
       typeahead.reset();
+      const missed = Array.isArray(data.unreachable) ? (data.unreachable as Array<{ name: string }>).map((p) => p.name) : [];
+      setUnreachableNote(
+        missed.length
+          ? `${missed.join(", ")} can't open this task, so they weren't told. Share the task with them to bring them in.`
+          : null,
+      );
       if (data.update) setUpdates((prev) => appendOnce(prev, data.update as ThreadUpdate));
       void loadActivity();
     } catch {
@@ -429,6 +438,9 @@ export function CommentThread({
         ) : null}
       </div>
 
+      {unreachableNote ? (
+        <p className="mb-2 text-sm text-ink-2" role="status">{unreachableNote}</p>
+      ) : null}
       {postError ? (
         <p className="mb-2 text-sm text-danger-text" role="alert">{postError}</p>
       ) : null}

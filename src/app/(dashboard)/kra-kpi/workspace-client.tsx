@@ -461,10 +461,16 @@ function OrphanActions({ orphan: o, roles, onDone }: { orphan: OrphanKra; roles:
   };
   const remove = async () => {
     setMenuOpen(false);
+    // A KRA with KPIs is not deleted (pen test V-60): its KPIs would be left on
+    // no screen. Attach it to a job title, where they show, and move them first.
+    if (o.kpis.length) {
+      toast(`${o.name} has ${o.kpis.length} ${o.kpis.length === 1 ? "KPI" : "KPIs"}. Attach it to a job title, then move or delete ${o.kpis.length === 1 ? "it" : "them"} before deleting the KRA.`, { tone: "danger" });
+      return;
+    }
     const names = o.activeAssignees.map((a) => `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim()).filter(Boolean);
     const ok = await confirm({
       title: `Delete ${o.name}?`,
-      description: `${o.kpis.length ? `Its ${o.kpis.length} ${o.kpis.length === 1 ? "KPI goes" : "KPIs go"} with it. ` : ""}${names.length ? `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} will lose it. ` : ""}This can't be undone.`,
+      description: `${names.length ? `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""} will lose it. ` : ""}This can't be undone.`,
       destructive: true,
       confirmLabel: "Not a KRA",
     });

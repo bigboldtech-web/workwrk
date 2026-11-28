@@ -169,3 +169,26 @@ export async function announceAddedMentions(args: {
     // Swallow: the words are saved, and a missed notice never undoes that.
   }
 }
+
+/**
+ * The people a comment @mentions who were NOT told because they cannot open
+ * the task (pen test 2026-11-28, V-57): the comment posted with no hint and
+ * the author believed they had pulled them in. People here only, by name, so
+ * the author can share the task with them. Never throws.
+ */
+export async function mentionedWhoCannotOpen(organizationId: string, itemId: string, mentionedUserIds: string[]): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const ids = [...new Set(mentionedUserIds)];
+    if (ids.length === 0) return [];
+    const here = [...(await seatedHereAmong(organizationId, ids, { anchored: "any", membership: "live" }))];
+    if (here.length === 0) return [];
+    const readers = await taskReaders(organizationId, itemId, here);
+    const out = here.filter((id) => !readers.has(id));
+    if (out.length === 0) return [];
+    const people = await prisma.user.findMany({ where: { id: { in: out } }, select: { id: true, firstName: true, lastName: true } });
+    return people.map((p) => ({ id: p.id, name: `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || "Someone" }));
+  } catch {
+    return [];
+  }
+}
+

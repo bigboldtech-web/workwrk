@@ -22,7 +22,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createUpdate, logActivity } from "@/lib/item-thread";
 import { notifyItemCommented } from "@/lib/notify-item";
-import { notifyMentions, resolveMentions } from "@/lib/items/item-mentions";
+import { mentionedWhoCannotOpen, notifyMentions, resolveMentions } from "@/lib/items/item-mentions";
 import { publishItemChanged } from "@/lib/notify-realtime";
 import { autoWatch, readWatchers, writeWatchers } from "@/lib/item-watchers";
 import { gateItem, type ItemCtx } from "@/lib/item-gate";
@@ -121,6 +121,8 @@ export async function postItemCommentAs(c: ItemCtx, id: string, body: unknown): 
       .catch(() => {});
 
     let mentioned: string[] = [];
+    // Who the mention could not reach (V-57): told back to the author.
+    const unreachable = mentionedUserIds.length ? await mentionedWhoCannotOpen(c.organizationId, id, mentionedUserIds) : [];
     if (mentionedUserIds.length) {
       mentioned = await notifyMentions({
         organizationId: c.organizationId,
@@ -153,7 +155,7 @@ export async function postItemCommentAs(c: ItemCtx, id: string, body: unknown): 
       actorId: c.userId,
     });
 
-    return NextResponse.json({ update }, { status: 201 });
+    return NextResponse.json({ update, ...(unreachable.length ? { unreachable } : {}) }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to post comment" },
