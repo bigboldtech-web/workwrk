@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
@@ -32,7 +33,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => BAD_JSON);
+
+    if (body === BAD_JSON) return badJson();
     const { organizationName: rawOrgName, firstName: rawFirst, lastName: rawLast, email: rawEmail, password, timezone, template } = body;
     const email = typeof rawEmail === "string" ? rawEmail.trim() : rawEmail;
 

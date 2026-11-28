@@ -2,6 +2,7 @@
 // payload is validated structurally; per-step rules (approver
 // resolution, SLA timers) are interpreted at run time.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -73,7 +74,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return jsonError("name required");
   if (name.length > 80) return jsonError("name too long");

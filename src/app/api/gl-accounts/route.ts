@@ -1,5 +1,6 @@
 // GL accounts (chart of accounts) — list + create. Org-admin only.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -44,7 +45,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const code = typeof body.code === "string" ? body.code.trim() : "";
   if (!code) return jsonError("code is required");
   if (code.length > 32) return jsonError("code too long");

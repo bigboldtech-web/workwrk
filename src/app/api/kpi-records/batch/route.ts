@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { personHere } from "@/lib/access/seated-here";
 import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
@@ -15,7 +16,8 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { userId, period, records } = body;
 
   if (!userId || !period || !Array.isArray(records) || records.length === 0) {

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { keyInWorkspace } from "@/lib/storage-key";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission, hasPermission } from "@/lib/api-helpers";
@@ -32,7 +33,9 @@ export async function POST(req: NextRequest) {
   const planCheck = await checkPlanLimit(orgId, "sops");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { title, description, category, subcategory, steps, clientSessionId } = body as {
     title: string;
     description?: string;

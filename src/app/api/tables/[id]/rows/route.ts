@@ -4,6 +4,7 @@
 //                                      expect makes the merge conditional (409 on drift)
 // DELETE /api/tables/[id]/rows         delete by id
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
@@ -125,7 +126,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!table) return jsonError("not found", 404);
   if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const values = typeof body.values === "object" && body.values !== null ? body.values : {};
 
   const max = await prisma.dataTableRow.findFirst({
@@ -157,7 +160,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!table) return jsonError("not found", 404);
   if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const rowId = typeof body.id === "string" ? body.id : null;
   if (!rowId) return jsonError("row id required");
 
@@ -231,7 +236,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!table) return jsonError("not found", 404);
   if (!table.canEdit) return jsonError(TABLE_EDIT_REFUSAL, 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const rowId = typeof body.id === "string" ? body.id : null;
   if (!rowId) return jsonError("row id required");
 

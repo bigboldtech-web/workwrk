@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { managersWithSeatHere, ownHere, placementsHere } from "@/lib/access/profile-here";
 import { mergeOrdered } from "@/lib/access/seated-here";
 import { joinedHere } from "@/lib/access/joined-here";
@@ -364,7 +365,9 @@ export async function POST(req: NextRequest) {
   if (!fresh.ok) return freshActorRefusal(fresh);
   if (!legacyIsManagerLevel(fresh.level)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { firstName, lastName, email, password, departmentId, roleId, accessLevel, managerId } = body;
 
   if (!firstName || !lastName || !email) {

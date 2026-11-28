@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { triggerRecalculation } from "@/services/performanceScoreService";
@@ -30,7 +31,9 @@ export async function PATCH(
     return jsonError("Progress is only tracked for checklist SOPs", 400);
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { stepIndex, completed, quizScore } = body;
 
   // Get current progress
@@ -134,7 +137,9 @@ export async function POST(
 
   if (!assignment) return jsonError("Assignment not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { answers } = body; // [{questionIndex, answer}]
 
   if (!answers || !Array.isArray(answers)) {

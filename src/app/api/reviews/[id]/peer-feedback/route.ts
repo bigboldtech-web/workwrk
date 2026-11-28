@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { cycleSubjectReach } from "@/lib/people/review-cycle-access";
@@ -80,7 +81,8 @@ export async function POST(
   if (error) return error;
 
   const { id: cycleId } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { reviewId, peerIds, anonymous } = body;
 
   if (!reviewId || !peerIds || !Array.isArray(peerIds) || peerIds.length === 0) {
@@ -163,7 +165,8 @@ export async function PATCH(
 
   const { id: cycleId } = await params;
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { feedbackId, strengths, improvements, collaborationRating, comments } = body;
 
   if (!feedbackId) return jsonError("feedbackId is required");

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetTemplate } from "@/lib/email-templates";
@@ -8,7 +9,9 @@ import crypto from "crypto";
 
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
+    const rawBody = await req.json().catch(() => BAD_JSON);
+    if (rawBody === BAD_JSON) return badJson();
+    const { email } = rawBody;
 
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });

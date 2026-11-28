@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -21,7 +22,9 @@ export async function POST(req: NextRequest) {
   const aiOffAnswer = await aiOffResponse(orgId);
   if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
-  const { jobTitle, jobDescription } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const { jobTitle, jobDescription } = rawBody;
 
   if (!jobTitle?.trim()) {
     return jsonError("Job title is required");

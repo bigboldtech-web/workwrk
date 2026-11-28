@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { personHere } from "@/lib/access/seated-here";
 import { moveToTrash } from "@/lib/trash";
@@ -56,7 +57,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   // If body has assignedToId, this is an assign action, otherwise edit
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const action = body.assignedToId !== undefined ? "assign" : "edit";
   const denied = await requirePermission(session, "assets", action);
   if (denied) return denied;

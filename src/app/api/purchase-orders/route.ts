@@ -6,6 +6,7 @@
 //   "approve" → SUBMITTED, assigned to me as approver (or open queue)
 //   "all"     → manager+ org-wide
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -94,7 +95,9 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const vendorId = typeof body.vendorId === "string" ? body.vendorId : "";
   const description = typeof body.description === "string" ? body.description.trim() : "";
   const amountNum = Number(body.amount);

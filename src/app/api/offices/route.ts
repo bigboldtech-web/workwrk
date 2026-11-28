@@ -7,6 +7,7 @@
 // refused in words on create and on rename, the way task types are. There is
 // no unique index behind it: offices stored twice before the rule are still
 // read, and either can still be edited under the name it has.
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
@@ -161,7 +162,9 @@ export async function DELETE(req: NextRequest) {
   if (!writeGate.ok) return writeGate.response;
 
   const orgId = getOrgId(session);
-  const { id } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const { id } = rawBody;
 
   if (!id) return jsonError("Office ID required");
 

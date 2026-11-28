@@ -1,4 +1,5 @@
 import { inviteDomainsOf, usersSettingsOf } from "@/lib/settings/org-policy";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -100,7 +101,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: levelField, role: roleField, isAgent, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+    const rawBody = await req.json().catch(() => BAD_JSON);
+
+    if (rawBody === BAD_JSON) return badJson();
+
+    const { email, accessLevel: levelField, role: roleField, isAgent, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = rawBody;
 
     // The setup wizard asks in the four-role words ({ role, isAgent }); the
     // Members page and API callers still send a level. Either way the level
@@ -153,7 +158,11 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { id } = await req.json();
+    const rawBody = await req.json().catch(() => BAD_JSON);
+
+    if (rawBody === BAD_JSON) return badJson();
+
+    const { id } = rawBody;
 
     if (!id) {
       return NextResponse.json({ error: "Invitation ID is required" }, { status: 400 });

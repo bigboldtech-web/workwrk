@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { staleTabRefusal } from "@/lib/access/tab-workspace-check";
@@ -47,7 +48,9 @@ export async function PATCH(req: NextRequest) {
   if (stale) return stale;
   const orgId = getOrgId(session);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const from = typeof body?.from === "string" ? body.from.trim() : "";
   const to = typeof body?.to === "string" ? body.to.trim() : "";
   if (!from || !to) return jsonError("Both `from` and `to` are required");

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { callOrGiveBack, claimAiAction } from "@/lib/ai-allowance";
@@ -14,7 +15,11 @@ export async function POST(req: NextRequest) {
   if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
 
-  const { title, context } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+
+  if (rawBody === BAD_JSON) return badJson();
+
+  const { title, context } = rawBody;
 
   if (!title && !context) {
     return jsonError("Provide a title or context for the process");

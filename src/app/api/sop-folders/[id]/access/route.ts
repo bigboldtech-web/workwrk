@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { seatedHereAmong } from "@/lib/access/seated-here";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
@@ -58,7 +59,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   });
   if (!folder) return jsonError("Folder not found", 404);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   // Accept either the role-aware shape { grants: [{userId, role}] } or the
   // legacy { userIds: [...] } (which defaults everyone to EDITOR).
   const ROLES = new Set(["VIEWER", "EDITOR", "OWNER"]);

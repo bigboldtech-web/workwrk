@@ -3,6 +3,7 @@
 // Seeds a Doc + Form + DataTable into the current org based on the
 // template definition in src/lib/workspace-templates.ts.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
@@ -17,7 +18,9 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const templateId = typeof body.templateId === "string" ? body.templateId : null;
   if (!templateId) return jsonError("templateId required");
 

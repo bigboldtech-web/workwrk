@@ -7,6 +7,7 @@
 // happens in a separate PATCH (DRAFT → POSTED) once the org's
 // approval rules have been satisfied.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -63,7 +64,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const periodId = typeof body.periodId === "string" ? body.periodId : "";
   const description = typeof body.description === "string" ? body.description.trim() : "";
   const postedAtRaw = typeof body.postedAt === "string" ? body.postedAt : null;

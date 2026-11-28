@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server";
+import { enumRefusal, KPI_FREQUENCIES, KPI_TYPES } from "@/lib/alignment-enums";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { goalsFedBy, refreshGoals, refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -58,8 +60,12 @@ export async function POST(req: NextRequest) {
   const denied = await requirePermission(session, "kras", "create");
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { name, description, type, unit, frequency, kraId, targetValue, targetLabel, lowerIsBetter, ownership, formula, baselineValue, baselineLabel } = body;
+  const badEnumCreate = enumRefusal("type", type, KPI_TYPES) ?? enumRefusal("frequency", frequency, KPI_FREQUENCIES);
+  if (badEnumCreate) return jsonError(badEnumCreate, 400);
 
   if (!name) return jsonError("KPI name is required");
 
@@ -114,8 +120,12 @@ export async function PATCH(req: NextRequest) {
   const denied = await requirePermission(session, "kras", "edit");
   if (denied) return denied;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const { id, name, description, type, unit, frequency, kraId, targetValue, targetLabel, lowerIsBetter, ownership, formula, baselineValue, baselineLabel } = body;
+  const badEnumEdit = enumRefusal("type", type, KPI_TYPES) ?? enumRefusal("frequency", frequency, KPI_FREQUENCIES);
+  if (badEnumEdit) return jsonError(badEnumEdit, 400);
 
   if (!id) return jsonError("KPI id is required");
 
@@ -141,9 +151,9 @@ export async function PATCH(req: NextRequest) {
     data: {
       ...(name !== undefined && { name }),
       ...(description !== undefined && { description }),
-      ...(type !== undefined && { type }),
+      ...(type !== undefined && type !== null && type !== "" && { type }),
       ...(unit !== undefined && { unit }),
-      ...(frequency !== undefined && { frequency }),
+      ...(frequency !== undefined && frequency !== null && frequency !== "" && { frequency }),
       ...(kraId !== undefined && { kraId: kraId || null }),
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
       ...(targetLabel !== undefined && { targetLabel: targetLabel || null }),

@@ -1,4 +1,5 @@
 import { viewerFromSession } from "@/lib/access/viewer";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { byName, peopleHereAmong, personHere } from "@/lib/access/seated-here";
@@ -450,7 +451,8 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   // Employees can create INDIVIDUAL OKRs for themselves; managers can create any
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults, checkInCadence, assignees } = body;
 
   if (!isManager(session) && level !== "INDIVIDUAL") {
@@ -682,7 +684,8 @@ export async function PATCH(req: NextRequest) {
   if (error) return error;
 
   const orgId = getOrgId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { id, ...rawUpdates } = body;
 
   if (!id) return jsonError("OKR ID required");

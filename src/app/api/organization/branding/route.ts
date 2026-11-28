@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, LOOKUP_CACHE_HEADERS } from "@/lib/api-helpers";
 import { hasFeature } from "@/lib/enterprise-features";
@@ -59,7 +60,9 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const data: { logo?: string | null } = {};
   let branding: Record<string, unknown> | null = null;
 

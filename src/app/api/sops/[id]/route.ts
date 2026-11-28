@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, getUserId, hasPermission, isOrgAdmin, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
@@ -119,7 +120,9 @@ export async function PATCH(
     return jsonError("You can only edit SOPs you authored or have edit access to.", 403);
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   // `version` is deliberately not read — the server owns version
   // numbers (bumped below when a snapshot is taken). A client-sent
   // version let two SOPVersion rows share a number. `sopType` is also

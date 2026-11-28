@@ -2,6 +2,7 @@
 // ONCE — it's hashed at rest and never shown again. UI displays the
 // prefix for disambiguation, full token only on the create response.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -44,7 +45,8 @@ export async function POST(req: NextRequest) {
   if (!writeGate.ok) return writeGate.response;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return jsonError("name is required");

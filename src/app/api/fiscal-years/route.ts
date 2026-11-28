@@ -4,6 +4,7 @@
 // across the date range. Apr-Mar (India), Jul-Jun (Australia), and
 // Jan-Dec (US default) are all supported via the start month.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -40,7 +41,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const label = typeof body.label === "string" ? body.label.trim() : "";
   if (!label) return jsonError("label required (e.g. 'FY2026')");
   if (label.length > 32) return jsonError("label too long");

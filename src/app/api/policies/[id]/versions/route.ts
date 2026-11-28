@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
@@ -36,7 +37,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const orgId = getOrgId(session);
-  const { versionId } = await req.json();
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const { versionId } = rawBody;
   if (!versionId) return jsonError("versionId is required");
 
   const policy = await prisma.policy.findFirst({ where: { id, organizationId: orgId } });

@@ -4,6 +4,7 @@
 // `{ name, description, fields }` in the same shape as POST /api/forms
 // expects, caller can pipe straight through to create the form.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -29,7 +30,9 @@ export async function POST(req: NextRequest) {
   if (error) return error;
   const orgId = getOrgId(session);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) return jsonError("prompt required");
   if (prompt.length > 1000) return jsonError("prompt too long (max 1000 chars)");

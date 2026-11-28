@@ -5,6 +5,7 @@
 // close too early), but flips a flag on the activity log so audits
 // can spot the unusual pattern.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -26,7 +27,8 @@ export async function PATCH(
   if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const action = typeof body.action === "string" ? body.action : "";
 
   const orgId = getOrgId(session);

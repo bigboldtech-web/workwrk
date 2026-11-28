@@ -9,6 +9,7 @@
 // the actual is stored with score null (health derives as "no_target").
 // We never substitute 0 for a missing line.
 
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { NextRequest } from "next/server";
 import { refreshGoalsFedBy } from "@/lib/goals/kpi-goal-refresh";
 import { prisma } from "@/lib/prisma";
@@ -23,7 +24,8 @@ export async function POST(req: NextRequest) {
   if (error) return error;
 
   const userId = getUserId(session);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { period, records } = body;
 
   if (!period || !Array.isArray(records) || records.length === 0) {

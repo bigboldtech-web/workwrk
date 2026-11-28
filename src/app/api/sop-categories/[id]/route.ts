@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
@@ -31,7 +32,9 @@ export async function PATCH(
 
   const orgId = getOrgId(session);
   const { id } = await params;
-  const body = (await req.json()) as { name?: string; type?: Kind };
+  const rawBody = await req.json().catch(() => BAD_JSON);
+  if (rawBody === BAD_JSON) return badJson();
+  const body = rawBody as { name?: string; type?: Kind };
   const name = body.name?.trim();
   if (!name) return jsonError("Name is required");
   if (!isKind(body.type)) return jsonError("type must be 'category' or 'subcategory'");

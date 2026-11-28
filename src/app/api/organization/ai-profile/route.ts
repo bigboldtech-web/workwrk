@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -18,7 +19,8 @@ export async function POST(req: NextRequest) {
   const aiOffAnswer = await aiOffResponse(orgId);
   if (aiOffAnswer) return aiOffAnswer;
   const ai = await getAnthropicForOrg(orgId);
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+  if (body === BAD_JSON) return badJson();
   const { companyName, website, industry, currentAbout, currentMission, currentVision, currentValues } = body;
 
   // Get additional context from org data

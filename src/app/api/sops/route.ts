@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { BAD_JSON, badJson } from "@/lib/http/json-body";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
@@ -170,7 +171,9 @@ export async function POST(req: NextRequest) {
   const planCheck = await checkPlanLimit(getOrgId(session), "sops");
   if (!planCheck.allowed) return jsonError(planCheck.message, 403);
 
-  const body = await req.json();
+  const body = await req.json().catch(() => BAD_JSON);
+
+  if (body === BAD_JSON) return badJson();
   const orgId = getOrgId(session);
 
   if (typeof body?.duplicateOf === "string" && body.duplicateOf) {
