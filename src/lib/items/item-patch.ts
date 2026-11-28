@@ -269,8 +269,11 @@ function metadataWriter(args: {
     const placeOf = (key: string): Json => (args.linkedListId && keys.stored.has(key) ? readNamespace(stored, args.linkedListId) : stored);
     const metadataPatch = mergedOnStored(placeOf, args.metadataPatch, args.descriptionBase, args.checklistOp);
     // Each List field's value fits its type (pen test V-54).
-    const badValue = metadataPatch ? fieldValuesRefusal(args.fields, metadataPatch) : null;
-    const badBlob = !badValue && args.metadata ? fieldValuesRefusal(args.fields, args.metadata) : null;
+    // Judged against what the task holds now: an unchanged or already-held
+    // value is never refused (the step 10 review).
+    const storedOf = (key: string) => placeOf(key)[key];
+    const badValue = metadataPatch ? fieldValuesRefusal(args.fields, metadataPatch, storedOf) : null;
+    const badBlob = !badValue && args.metadata ? fieldValuesRefusal(args.fields, args.metadata, storedOf) : null;
     const bad = badValue ?? badBlob;
     if (bad) throw new Refusal(400, { error: bad.message, code: "invalid_field_value", key: bad.key, message: bad.message });
     let next: Json = stored;

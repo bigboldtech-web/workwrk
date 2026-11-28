@@ -151,9 +151,9 @@ export async function PATCH(req: NextRequest) {
     data: {
       ...(name !== undefined && { name }),
       ...(description !== undefined && { description }),
-      ...(type !== undefined && { type }),
+      ...(type !== undefined && type !== null && type !== "" && { type }),
       ...(unit !== undefined && { unit }),
-      ...(frequency !== undefined && { frequency }),
+      ...(frequency !== undefined && frequency !== null && frequency !== "" && { frequency }),
       ...(kraId !== undefined && { kraId: kraId || null }),
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
       ...(targetLabel !== undefined && { targetLabel: targetLabel || null }),

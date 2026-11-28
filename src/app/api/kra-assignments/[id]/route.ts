@@ -78,7 +78,7 @@ export async function PUT(
     data: {
       ...(weightage != null && { weightage }),
       ...(period != null && { period }),
-      ...(status != null && { status }),
+      ...(status != null && status !== "" && { status }),
     },
     include: {
       kra: { select: { id: true, name: true, category: true } },
